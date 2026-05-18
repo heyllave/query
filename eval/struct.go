@@ -6,7 +6,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/trazo-lat/query/validate"
+	"github.com/heyllave/query/validate"
 )
 
 // FieldsFromStruct extracts [validate.FieldConfig] from a struct type using

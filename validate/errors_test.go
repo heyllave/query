@@ -4,7 +4,7 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/trazo-lat/query/token"
+	"github.com/heyllave/query/token"
 )
 
 func TestError_Error(t *testing.T) {

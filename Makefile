@@ -24,7 +24,7 @@ lint:
 
 fmt:
 	gofmt -w .
-	goimports -w -local github.com/trazo-lat/query .
+	goimports -w -local github.com/heyllave/query .
 
 vet:
 	$(GO) vet ./...

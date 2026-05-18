@@ -12,8 +12,8 @@ package main
 import (
 	"fmt"
 
-	"github.com/trazo-lat/query/eval"
-	"github.com/trazo-lat/query/validate"
+	"github.com/heyllave/query/eval"
+	"github.com/heyllave/query/validate"
 )
 
 // Order is a struct-backed element used inside @(...) predicates.

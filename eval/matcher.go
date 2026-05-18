@@ -5,8 +5,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/trazo-lat/query/ast"
-	"github.com/trazo-lat/query/token"
+	"github.com/heyllave/query/ast"
+	"github.com/heyllave/query/token"
 )
 
 // matcher is a compiled function that evaluates a query against a data accessor.

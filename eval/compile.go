@@ -3,9 +3,9 @@ package eval
 import (
 	"fmt"
 
-	"github.com/trazo-lat/query/ast"
-	"github.com/trazo-lat/query/parser"
-	"github.com/trazo-lat/query/validate"
+	"github.com/heyllave/query/ast"
+	"github.com/heyllave/query/parser"
+	"github.com/heyllave/query/validate"
 )
 
 // Compile parses, validates, and compiles a query into an executable [Program].

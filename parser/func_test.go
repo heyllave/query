@@ -3,8 +3,8 @@ package parser
 import (
 	"testing"
 
-	"github.com/trazo-lat/query/ast"
-	"github.com/trazo-lat/query/token"
+	"github.com/heyllave/query/ast"
+	"github.com/heyllave/query/token"
 )
 
 // Note: literal function args (e.g., addDays(now, 7)) have a known parser

@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/trazo-lat/query/token"
+	"github.com/heyllave/query/token"
 )
 
 // ErrorKind classifies the type of parse error.

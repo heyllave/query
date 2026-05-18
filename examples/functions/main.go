@@ -12,8 +12,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/trazo-lat/query/eval"
-	"github.com/trazo-lat/query/validate"
+	"github.com/heyllave/query/eval"
+	"github.com/heyllave/query/validate"
 )
 
 var fields = []validate.FieldConfig{

@@ -1,6 +1,6 @@
 package eval
 
-import "github.com/trazo-lat/query/validate"
+import "github.com/heyllave/query/validate"
 
 type options struct {
 	maxLength     int

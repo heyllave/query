@@ -3,9 +3,9 @@ package query_test
 import (
 	"fmt"
 
-	"github.com/trazo-lat/query"
-	"github.com/trazo-lat/query/ast"
-	"github.com/trazo-lat/query/validate"
+	"github.com/heyllave/query"
+	"github.com/heyllave/query/ast"
+	"github.com/heyllave/query/validate"
 )
 
 func Example_parse() {

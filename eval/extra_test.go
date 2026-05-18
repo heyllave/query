@@ -4,7 +4,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/trazo-lat/query/validate"
+	"github.com/heyllave/query/validate"
 )
 
 func TestProgram_AST(t *testing.T) {

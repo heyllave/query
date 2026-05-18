@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/trazo-lat/query/ast"
-	"github.com/trazo-lat/query/token"
+	"github.com/heyllave/query/ast"
+	"github.com/heyllave/query/token"
 )
 
 // ErrorKind classifies validation errors.

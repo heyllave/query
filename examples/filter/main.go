@@ -13,9 +13,9 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/trazo-lat/query"
-	"github.com/trazo-lat/query/ast"
-	"github.com/trazo-lat/query/token"
+	"github.com/heyllave/query"
+	"github.com/heyllave/query/ast"
+	"github.com/heyllave/query/token"
 )
 
 type filterVisitor struct{}

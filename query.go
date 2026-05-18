@@ -1,9 +1,9 @@
 package query
 
 import (
-	"github.com/trazo-lat/query/ast"
-	"github.com/trazo-lat/query/parser"
-	"github.com/trazo-lat/query/validate"
+	"github.com/heyllave/query/ast"
+	"github.com/heyllave/query/parser"
+	"github.com/heyllave/query/validate"
 )
 
 // DefaultMaxLength is the default maximum query string length in bytes.

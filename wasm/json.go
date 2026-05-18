@@ -7,8 +7,8 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/trazo-lat/query/ast"
-	"github.com/trazo-lat/query/token"
+	"github.com/heyllave/query/ast"
+	"github.com/heyllave/query/token"
 )
 
 // jsonAST is the JSON-serializable representation of an AST node.

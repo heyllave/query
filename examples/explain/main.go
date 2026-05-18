@@ -14,9 +14,9 @@ import (
 	"os"
 	"strings"
 
-	"github.com/trazo-lat/query/ast"
-	"github.com/trazo-lat/query/output"
-	"github.com/trazo-lat/query/parser"
+	"github.com/heyllave/query/ast"
+	"github.com/heyllave/query/output"
+	"github.com/heyllave/query/parser"
 )
 
 func main() {

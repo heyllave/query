@@ -1,7 +1,7 @@
 package ast
 
 import (
-	"github.com/trazo-lat/query/token"
+	"github.com/heyllave/query/token"
 )
 
 // Node is the common interface for all AST nodes.

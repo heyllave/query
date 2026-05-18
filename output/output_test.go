@@ -8,8 +8,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/trazo-lat/query/ast"
-	"github.com/trazo-lat/query/parser"
+	"github.com/heyllave/query/ast"
+	"github.com/heyllave/query/parser"
 )
 
 func parse(t *testing.T, q string) ast.Expression {

@@ -3,7 +3,7 @@ package output
 import (
 	"io"
 
-	"github.com/trazo-lat/query/ast"
+	"github.com/heyllave/query/ast"
 )
 
 // Formatter converts an AST expression into formatted output.

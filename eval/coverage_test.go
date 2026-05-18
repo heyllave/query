@@ -3,9 +3,9 @@ package eval
 import (
 	"testing"
 
-	"github.com/trazo-lat/query/ast"
-	"github.com/trazo-lat/query/token"
-	"github.com/trazo-lat/query/validate"
+	"github.com/heyllave/query/ast"
+	"github.com/heyllave/query/token"
+	"github.com/heyllave/query/validate"
 )
 
 // TestQualifiers_Extract ensures ast.Qualifiers is exercised.
