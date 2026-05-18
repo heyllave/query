@@ -1,6 +1,6 @@
 package eval
 
-import "github.com/trazo-lat/query/ast"
+import "github.com/heyllave/query/ast"
 
 // Program is a compiled query ready for evaluation against data.
 // It is safe for concurrent use.

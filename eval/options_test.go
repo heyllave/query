@@ -4,8 +4,8 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/trazo-lat/query/ast"
-	"github.com/trazo-lat/query/validate"
+	"github.com/heyllave/query/ast"
+	"github.com/heyllave/query/validate"
 )
 
 // tenantValidator is a test AstValidator that blocks a denylist of fields

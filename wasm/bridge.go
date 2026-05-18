@@ -6,9 +6,9 @@ import (
 	"encoding/json"
 	"syscall/js"
 
-	"github.com/trazo-lat/query/ast"
-	"github.com/trazo-lat/query/parser"
-	"github.com/trazo-lat/query/validate"
+	"github.com/heyllave/query/ast"
+	"github.com/heyllave/query/parser"
+	"github.com/heyllave/query/validate"
 )
 
 // jsParse parses a query string and returns the AST as a JSON object.

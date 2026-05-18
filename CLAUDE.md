@@ -65,8 +65,8 @@ import (
     "strings"
 
     // 2. Internal packages
-    "github.com/trazo-lat/query/ast"
-    "github.com/trazo-lat/query/token"
+    "github.com/heyllave/query/ast"
+    "github.com/heyllave/query/token"
 )
 ```
 

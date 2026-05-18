@@ -3,7 +3,7 @@ package validate
 import (
 	"fmt"
 
-	"github.com/trazo-lat/query/ast"
+	"github.com/heyllave/query/ast"
 )
 
 // FieldValueType identifies the data type of a field.

@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"testing"
 
-	"github.com/trazo-lat/query/ast"
-	"github.com/trazo-lat/query/parser"
+	"github.com/heyllave/query/ast"
+	"github.com/heyllave/query/parser"
 )
 
 var testFields = []FieldConfig{

@@ -1,6 +1,6 @@
 # query
 
-[![CI](https://github.com/trazo-lat/query/actions/workflows/ci.yml/badge.svg)](https://github.com/trazo-lat/query/actions/workflows/ci.yml)
+[![CI](https://github.com/heyllave/query/actions/workflows/ci.yml/badge.svg)](https://github.com/heyllave/query/actions/workflows/ci.yml)
 
 Pure Go query language library. Handles lexing, parsing, AST construction, validation, and evaluation of a unified query syntax used across all clients (CLI, Web UI, API, VS Code, WASM).
 
@@ -9,7 +9,7 @@ Zero external dependencies. Compiles to WebAssembly.
 ## Install
 
 ```bash
-go get github.com/trazo-lat/query
+go get github.com/heyllave/query
 ```
 
 ## Packages
@@ -67,7 +67,7 @@ orders@(status=shipped)                            # selector: any element satis
 The `eval` package compiles a query into an executable program:
 
 ```go
-import "github.com/trazo-lat/query/eval"
+import "github.com/heyllave/query/eval"
 
 prog, err := eval.Compile("state=draft AND total>50000", fields)
 

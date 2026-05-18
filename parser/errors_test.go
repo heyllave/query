@@ -4,7 +4,7 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/trazo-lat/query/token"
+	"github.com/heyllave/query/token"
 )
 
 func TestErrorKind_String(t *testing.T) {

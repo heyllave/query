@@ -1,6 +1,6 @@
 package ast
 
-import "github.com/trazo-lat/query/token"
+import "github.com/heyllave/query/token"
 
 // Visitor defines typed callbacks for each AST node. Consumers implement this
 // interface to transform an AST into any target representation (SQL, JSON,

@@ -4,8 +4,8 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/trazo-lat/query/ast"
-	"github.com/trazo-lat/query/token"
+	"github.com/heyllave/query/ast"
+	"github.com/heyllave/query/token"
 )
 
 // parser builds an AST from a token stream using recursive descent.

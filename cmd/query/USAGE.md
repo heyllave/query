@@ -6,7 +6,7 @@ their AST structure, token streams, and validation results.
 ## Install
 
 ```bash
-go install github.com/trazo-lat/query/cmd/query@latest
+go install github.com/heyllave/query/cmd/query@latest
 ```
 
 Or run directly:

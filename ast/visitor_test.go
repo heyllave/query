@@ -3,7 +3,7 @@ package ast
 import (
 	"testing"
 
-	"github.com/trazo-lat/query/token"
+	"github.com/heyllave/query/token"
 )
 
 // countVisitor counts nodes of each type.

@@ -3,7 +3,7 @@ package ast
 import (
 	"strings"
 
-	"github.com/trazo-lat/query/token"
+	"github.com/heyllave/query/token"
 )
 
 // String serializes an AST expression back to a query string.

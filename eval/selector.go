@@ -3,7 +3,7 @@ package eval
 import (
 	"reflect"
 
-	"github.com/trazo-lat/query/ast"
+	"github.com/heyllave/query/ast"
 )
 
 // compileSelector handles `items@first`, `items@last`, and `items@(inner)`.

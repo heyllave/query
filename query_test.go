@@ -4,8 +4,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/trazo-lat/query"
-	"github.com/trazo-lat/query/validate"
+	"github.com/heyllave/query"
+	"github.com/heyllave/query/validate"
 )
 
 var testFields = []validate.FieldConfig{

@@ -4,7 +4,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/trazo-lat/query/token"
+	"github.com/heyllave/query/token"
 )
 
 func TestNodePos(t *testing.T) {

@@ -18,9 +18,9 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/trazo-lat/query/ast"
-	"github.com/trazo-lat/query/eval"
-	"github.com/trazo-lat/query/validate"
+	"github.com/heyllave/query/ast"
+	"github.com/heyllave/query/eval"
+	"github.com/heyllave/query/validate"
 )
 
 var allFields = []validate.FieldConfig{

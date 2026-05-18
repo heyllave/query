@@ -55,4 +55,4 @@ formatters:
   settings:
     goimports:
       local-prefixes:
-        - github.com/trazo-lat/query
+        - github.com/heyllave/query

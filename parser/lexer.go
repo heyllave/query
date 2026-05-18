@@ -5,7 +5,7 @@ import (
 	"time"
 	"unicode"
 
-	"github.com/trazo-lat/query/token"
+	"github.com/heyllave/query/token"
 )
 
 // lexer tokenizes a query string into a sequence of tokens.
