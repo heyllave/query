@@ -190,6 +190,15 @@ func (v *Validator) validateQualifier(q *ast.QualifierExpr) {
 	// validate the field references inside the function args instead.
 	if q.HasFieldFunc() {
 		v.validateFuncCallFields(q.FieldFunc)
+	}
+
+	// Validate functions appearing in value position (e.g., created_at>=now()).
+	// Their return type is opaque to the validator, so we only ensure the
+	// field references inside the function are declared.
+	v.validateValueFuncs(&q.Value)
+	v.validateValueFuncs(q.EndValue)
+
+	if q.HasFieldFunc() {
 		return
 	}
 
@@ -205,15 +214,41 @@ func (v *Validator) validateQualifier(q *ast.QualifierExpr) {
 			"operator %q is not allowed for field %q (type %s)", string(op), fieldName, cfg.Type)
 		return
 	}
-	if !typeCompatible(cfg.Type, q.Value) {
+	// Skip type-compatibility checks for function- and arithmetic-valued
+	// operands — we can't know the return type at parse time. The eval
+	// engine coerces at match time; mismatches there fall back to the
+	// comparison's default-false path.
+	if !isDynamicValue(q.Value) && !typeCompatible(cfg.Type, q.Value) {
 		v.addError(ErrTypeMismatch, q.Position,
 			"value type %s is not compatible with field %q (type %s)", q.Value.Type, fieldName, cfg.Type)
 	}
-	if q.EndValue != nil {
+	if q.EndValue != nil && !isDynamicValue(*q.EndValue) {
 		if !typeCompatible(cfg.Type, *q.EndValue) {
 			v.addError(ErrTypeMismatch, q.Position,
 				"range end value type %s is not compatible with field %q (type %s)", q.EndValue.Type, fieldName, cfg.Type)
 		}
+	}
+}
+
+// isDynamicValue reports whether a Value is resolved at match time
+// (function call or arithmetic) and therefore should not be type-checked
+// against the field's declared type.
+func isDynamicValue(v ast.Value) bool {
+	return v.Type == ast.ValueFunc || v.Type == ast.ValueArith
+}
+
+// validateValueFuncs walks a value's function/arithmetic subtree and validates
+// any embedded function-call field references.
+func (v *Validator) validateValueFuncs(val *ast.Value) {
+	if val == nil {
+		return
+	}
+	if val.Func != nil {
+		v.validateFuncCallFields(val.Func)
+	}
+	if val.Arith != nil {
+		v.validateValueFuncs(val.Arith.Left)
+		v.validateValueFuncs(val.Arith.Right)
 	}
 }
 

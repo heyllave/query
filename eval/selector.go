@@ -37,26 +37,52 @@ func compileSelector(e *ast.SelectorExpr, funcs FuncRegistry) matcher {
 		}
 	}
 
-	// @(inner): at least one element matches the inner expression.
+	// @(inner) / @any(inner) / @all(inner) / @none(inner): per-element predicate.
 	if e.Inner == nil {
 		return func(func(string) (any, bool)) bool { return false }
 	}
 	inner := compileMatcher(e.Inner, funcs)
+
+	// Selector mode:
+	//   "all"  → every element must satisfy
+	//   "none" → no element may satisfy (empty list ⇒ true)
+	//   ""     → anonymous @(...) (EXISTS, same as @any)
+	//   "any"  → explicit existential
+	mode := e.Selector
 	return func(get func(string) (any, bool)) bool {
 		raw, ok := get(field)
 		if !ok {
-			return false
+			return mode == "none" // missing field ≡ empty list for `none`
 		}
 		elems, ok := toSlice(raw)
 		if !ok {
 			return false
 		}
-		for _, elem := range elems {
-			if inner(elementAccessor(elem)) {
-				return true
+		switch mode {
+		case "all":
+			// Vacuous truth: an empty list satisfies "all". Matches SQL's
+			// ALL semantics and predicate logic.
+			for _, elem := range elems {
+				if !inner(elementAccessor(elem)) {
+					return false
+				}
 			}
+			return true
+		case "none":
+			for _, elem := range elems {
+				if inner(elementAccessor(elem)) {
+					return false
+				}
+			}
+			return true
+		default: // "" or "any"
+			for _, elem := range elems {
+				if inner(elementAccessor(elem)) {
+					return true
+				}
+			}
+			return false
 		}
-		return false
 	}
 }
 
