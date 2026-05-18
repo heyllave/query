@@ -28,6 +28,7 @@ func main() {
 	js.Global().Set("queryValidate", js.FuncOf(jsValidate))
 	js.Global().Set("queryStringify", js.FuncOf(jsStringify))
 	js.Global().Set("queryParseAndValidate", js.FuncOf(jsParseAndValidate))
+	js.Global().Set("queryTokens", js.FuncOf(jsTokens))
 
 	// Block forever so the WASM module stays alive
 	select {}

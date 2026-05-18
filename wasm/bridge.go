@@ -81,6 +81,39 @@ func jsStringify(_ js.Value, args []js.Value) any {
 	return jsResult(ast.String(expr), "")
 }
 
+// jsTokens lexes a query string and returns the token stream as JSON.
+//
+// JS signature: queryTokens(query: string, maxLength?: number) => { result?: TokenJSON[], error?: string }
+func jsTokens(_ js.Value, args []js.Value) any {
+	if len(args) < 1 {
+		return jsResult(nil, "queryTokens requires a query string argument")
+	}
+	q := args[0].String()
+	maxLen := 256
+	if len(args) > 1 && !args[1].IsUndefined() {
+		maxLen = args[1].Int()
+	}
+
+	tokens, err := parser.Lex(q, maxLen)
+	if err != nil {
+		return jsResult(nil, err.Error())
+	}
+
+	out := make([]map[string]any, len(tokens))
+	for i, t := range tokens {
+		entry := map[string]any{
+			"type":   t.Type.String(),
+			"value":  t.Value,
+			"offset": t.Pos.Offset,
+		}
+		if t.Quoted {
+			entry["quoted"] = true
+		}
+		out[i] = entry
+	}
+	return jsResult(out, "")
+}
+
 // jsParseAndValidate parses and validates in one call.
 //
 // JS signature: queryParseAndValidate(query: string, fieldsJSON: string) => { ast?: object, error?: string }
