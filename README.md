@@ -378,7 +378,7 @@ The language now covers most of what general-purpose expression engines offer fo
 - **Ternary / nullish** — `if(cond, a, b)` and `coalesce(a, b, c)` built-ins.
 - **Numeric / date / duration literals in function args** — `addDays(start, 7)`, `between(start, 2026-01-01, 2026-12-31)`.
 
-### Out of scope (no plans to add)
+### Carved out (no plans to add)
 
 These features would compromise the URL-safe identity or the static-validation contract:
 
