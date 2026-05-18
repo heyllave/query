@@ -360,31 +360,37 @@ Codegen via `Visitor[T]` is the consumer's responsibility — the library does n
 - **Round-trip fidelity** — `ast.String(ast.Parse(q)) == q` for all normalized queries.
 - **TypeScript package** — full type definitions, visitor pattern, and WASM loader for browser/Node.js.
 
-## Limitations
+## Scope
 
-Resolved (now supported):
+The language now covers most of what general-purpose expression engines offer for filter queries, while staying URL-safe and statically validatable. The lists below describe what's in scope and what's deliberately out.
 
-- ~~No string literals in function args~~ — `contains(name, "urgent")` works.
-- ~~No functions in value position~~ — `created_at>=now()`, `total>=threshold()` work.
-- ~~No quoted strings~~ — `field="hello world"` with `\"`, `\\`, `\n`, `\t`, `\r` escapes.
-- ~~No OR shorthand~~ — `state IN (draft, issued, paid)` desugars to an OR chain.
-- ~~Case-sensitive keywords~~ — `and`/`or`/`not`/`in` accepted in any case.
-- ~~No negated comparisons~~ — `total!>50000` desugars to `NOT total>50000` (missing-field safe).
-- ~~No arithmetic~~ — `total>=50000*1.1`, `created_at>=now()-7d`, `(50000+1000)*1.1` with precedence and parens. Operates on numeric literals, durations, dates, and function results; field references in arithmetic are intentionally excluded (use a custom function).
-- ~~No implicit AND~~ — `state=draft total>1000` parses identically to the explicit form.
-- ~~No general array operations~~ — `@all(inner)` (universal), `@any(inner)` (alias for `@(...)`), `@none(inner)` complement the existing `@first` / `@last`.
-- ~~No ternary / nullish~~ — covered via built-in functions `if(cond, a, b)` and `coalesce(a, b, c)`.
-- ~~Numeric literals in function args~~ — `addDays(start, 7)`, `between(start, 2026-01-01, 2026-12-31)`.
+### Supported
 
-Remaining limitations (no plans to add — they'd compromise the URL-safe identity):
+- **String literals in function args** — `contains(name, "urgent")`.
+- **Functions in value position** — `created_at>=now()`, `total>=threshold()`.
+- **Quoted strings** — `field="hello world"` with `\"`, `\\`, `\n`, `\t`, `\r` escapes.
+- **`IN` shorthand** — `state IN (draft, issued, paid)` desugars to an OR chain.
+- **Case-insensitive keywords** — `and`/`or`/`not`/`in` accepted in any case.
+- **Negated comparisons** — `total!>50000` desugars to `NOT total>50000`; missing-field safe.
+- **Arithmetic in value position** — `total>=50000*1.1`, `created_at>=now()-7d`, `(50000+1000)*1.1` with `* / % > + -` precedence and paren override. Operands may be numeric literals, durations, dates, and function results.
+- **Implicit AND** — `state=draft total>1000` parses identically to the explicit form.
+- **Array quantifiers** — `@all(inner)`, `@any(inner)` (alias for `@(...)`), `@none(inner)` complement the existing `@first` / `@last`.
+- **Ternary / nullish** — `if(cond, a, b)` and `coalesce(a, b, c)` built-ins.
+- **Numeric / date / duration literals in function args** — `addDays(start, 7)`, `between(start, 2026-01-01, 2026-12-31)`.
 
-- **No string concatenation** — `firstName + " " + lastName` is not supported. Use a custom function.
-- **No field references in arithmetic** — `total>=base*1.1` does not work because bareword idents would collide with hyphenated field names. Use a custom function: `scaled(total)>1.1`.
+### Out of scope (no plans to add)
 
-Performance-shaped limitations (not language features):
+These features would compromise the URL-safe identity or the static-validation contract:
+
+- **String concatenation** — `firstName + " " + lastName` is not a query. Build the string in a custom function instead.
+- **Field references as arithmetic operands** — `total>=base*1.1` cannot parse because bareword identifiers would collide with hyphenated field names (`customer-id`). Wrap the multiplication in a custom function: `scaled(total)>1.1`.
+
+### Performance characteristics
+
+Not language features, but worth knowing before deploying at scale:
 
 - **Closure-based eval** — the eval engine compiles to closure trees, not bytecode. For hot-path evaluation of millions of records, a bytecode compiler would be faster.
-- **Reflect in struct binding** — `CompileFor[T]` and `StructAccessor` use reflection. This is fine for compile-time setup but adds overhead if called per-record. Compile once, match many.
+- **Reflection in struct binding** — `CompileFor[T]` and `StructAccessor` use reflection. Fine for compile-time setup; adds overhead if called per-record. Compile once, match many.
 
 ## Comparison with expr-lang/expr
 
