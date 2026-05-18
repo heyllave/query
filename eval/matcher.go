@@ -83,9 +83,15 @@ func compileQualifier(e *ast.QualifierExpr, funcs FuncRegistry) matcher {
 		}
 	}
 
+	// Resolve the RHS value at match time. Static literals close over their
+	// own pointer; functions in value position (e.g. created_at>=now()) are
+	// evaluated against the function registry each call.
+	valueResolver := compileValueResolver(&e.Value, funcs)
+	endResolver := compileValueResolver(e.EndValue, funcs)
+
 	// Range: field BETWEEN start AND end
 	if e.IsRange() {
-		return compileRangeWithResolver(fieldResolver, &e.Value, e.EndValue)
+		return compileRangeWithResolver(fieldResolver, valueResolver, endResolver)
 	}
 
 	// Wildcard: pattern matching
@@ -94,7 +100,202 @@ func compileQualifier(e *ast.QualifierExpr, funcs FuncRegistry) matcher {
 	}
 
 	// Standard comparison
-	return compileComparisonWithResolver(fieldResolver, e.Operator, &e.Value)
+	return compileComparisonWithResolver(fieldResolver, e.Operator, valueResolver)
+}
+
+// valueResolver produces a *ast.Value at match time. For static literals it
+// returns the same pointer every call; for ValueFunc it evaluates the function
+// against the registry and synthesizes a transient Value carrying the result.
+type valueResolver func(get func(string) (any, bool)) *ast.Value
+
+func compileValueResolver(v *ast.Value, funcs FuncRegistry) valueResolver {
+	if v == nil {
+		return nil
+	}
+	switch v.Type {
+	case ast.ValueFunc:
+		if v.Func == nil {
+			return func(func(string) (any, bool)) *ast.Value { return nil }
+		}
+		argResolvers := compileArgResolvers(v.Func.Args, funcs)
+		fn, hasFn := funcs.Get(v.Func.Name)
+		return func(get func(string) (any, bool)) *ast.Value {
+			if !hasFn {
+				return nil
+			}
+			args := resolveArgs(argResolvers, get)
+			result, err := fn.Call(args...)
+			if err != nil {
+				return nil
+			}
+			return valueFromAny(result)
+		}
+	case ast.ValueArith:
+		if v.Arith == nil {
+			return func(func(string) (any, bool)) *ast.Value { return nil }
+		}
+		left := compileValueResolver(v.Arith.Left, funcs)
+		right := compileValueResolver(v.Arith.Right, funcs)
+		op := v.Arith.Op
+		return func(get func(string) (any, bool)) *ast.Value {
+			l := left(get)
+			r := right(get)
+			if l == nil || r == nil {
+				return nil
+			}
+			return applyArith(l, r, op)
+		}
+	default:
+		// Capture the pointer — for static literals nothing depends on `get`.
+		return func(func(string) (any, bool)) *ast.Value { return v }
+	}
+}
+
+// applyArith evaluates `left op right` and returns a transient Value carrying
+// the result. Type promotion mirrors Go's: int op int → int (except `/` which
+// always produces float), int op float → float, time op duration → time,
+// duration op int|float → duration. Anything else returns nil so the
+// comparison falls back to the default-false missing-operand path.
+func applyArith(left, right *ast.Value, op ast.ArithOp) *ast.Value {
+	// time ± duration → time. Other ops on (date, duration) are undefined
+	// and fall through to the final `return nil` below.
+	if left.Type == ast.ValueDate && right.Type == ast.ValueDuration {
+		switch op {
+		case ast.ArithAdd:
+			return valueFromAny(left.Date.Add(right.Duration))
+		case ast.ArithSub:
+			return valueFromAny(left.Date.Add(-right.Duration))
+		default:
+		}
+	}
+	// time - time → duration
+	if left.Type == ast.ValueDate && right.Type == ast.ValueDate && op == ast.ArithSub {
+		return valueFromAny(left.Date.Sub(right.Date))
+	}
+	// duration ± duration → duration. Multiplicative ops on two durations are
+	// undefined and fall through.
+	if left.Type == ast.ValueDuration && right.Type == ast.ValueDuration {
+		switch op {
+		case ast.ArithAdd:
+			return valueFromAny(left.Duration + right.Duration)
+		case ast.ArithSub:
+			return valueFromAny(left.Duration - right.Duration)
+		default:
+		}
+	}
+	// duration * number → duration; duration / number → duration. Additive ops
+	// between a duration and a unitless number are undefined and fall through.
+	if left.Type == ast.ValueDuration && isNumericValue(right) {
+		rf := numericFloat(right)
+		switch op {
+		case ast.ArithMul:
+			return valueFromAny(time.Duration(float64(left.Duration) * rf))
+		case ast.ArithDiv:
+			if rf == 0 {
+				return nil
+			}
+			return valueFromAny(time.Duration(float64(left.Duration) / rf))
+		default:
+		}
+	}
+	if isNumericValue(left) && right.Type == ast.ValueDuration && op == ast.ArithMul {
+		lf := numericFloat(left)
+		return valueFromAny(time.Duration(lf * float64(right.Duration)))
+	}
+	// pure numeric arithmetic
+	if isNumericValue(left) && isNumericValue(right) {
+		// Stay in int if both sides are integers and the op preserves it.
+		// ArithDiv is excluded by the guard above (int/int always promotes to
+		// float, matching Go's float division semantics for queries).
+		if left.Type == ast.ValueInteger && right.Type == ast.ValueInteger && op != ast.ArithDiv {
+			a, b := left.Int, right.Int
+			switch op {
+			case ast.ArithAdd:
+				return valueFromAny(a + b)
+			case ast.ArithSub:
+				return valueFromAny(a - b)
+			case ast.ArithMul:
+				return valueFromAny(a * b)
+			case ast.ArithMod:
+				if b == 0 {
+					return nil
+				}
+				return valueFromAny(a % b)
+			case ast.ArithDiv:
+				// unreachable — guarded above
+			}
+		}
+		a := numericFloat(left)
+		b := numericFloat(right)
+		switch op {
+		case ast.ArithAdd:
+			return valueFromAny(a + b)
+		case ast.ArithSub:
+			return valueFromAny(a - b)
+		case ast.ArithMul:
+			return valueFromAny(a * b)
+		case ast.ArithDiv:
+			if b == 0 {
+				return nil
+			}
+			return valueFromAny(a / b)
+		case ast.ArithMod:
+			if b == 0 {
+				return nil
+			}
+			// Modulo on floats — use math.Mod semantics via int conversion to
+			// keep the closure-eval deps to zero. For real-world fractional
+			// modulo, fall through to nil.
+			if a == float64(int64(a)) && b == float64(int64(b)) {
+				return valueFromAny(int64(a) % int64(b))
+			}
+			return nil
+		}
+	}
+	return nil
+}
+
+func isNumericValue(v *ast.Value) bool {
+	return v != nil && (v.Type == ast.ValueInteger || v.Type == ast.ValueFloat)
+}
+
+func numericFloat(v *ast.Value) float64 {
+	if v.Type == ast.ValueInteger {
+		return float64(v.Int)
+	}
+	return v.Float
+}
+
+// valueFromAny coerces a Go value (typically the return of a registered
+// function) into an *ast.Value suitable for comparison. The mapping mirrors
+// the literal types the lexer can produce. Unknown shapes fall back to
+// stringification.
+func valueFromAny(v any) *ast.Value {
+	switch x := v.(type) {
+	case string:
+		return &ast.Value{Type: ast.ValueString, Raw: x, Str: x}
+	case bool:
+		return &ast.Value{Type: ast.ValueBoolean, Raw: fmt.Sprint(x), Bool: x}
+	case int:
+		return &ast.Value{Type: ast.ValueInteger, Raw: fmt.Sprint(x), Int: int64(x)}
+	case int32:
+		return &ast.Value{Type: ast.ValueInteger, Raw: fmt.Sprint(x), Int: int64(x)}
+	case int64:
+		return &ast.Value{Type: ast.ValueInteger, Raw: fmt.Sprint(x), Int: x}
+	case float32:
+		return &ast.Value{Type: ast.ValueFloat, Raw: fmt.Sprint(x), Float: float64(x)}
+	case float64:
+		return &ast.Value{Type: ast.ValueFloat, Raw: fmt.Sprint(x), Float: x}
+	case time.Time:
+		return &ast.Value{Type: ast.ValueDate, Raw: x.Format(time.RFC3339), Date: x}
+	case time.Duration:
+		return &ast.Value{Type: ast.ValueDuration, Raw: x.String(), Duration: x}
+	case nil:
+		return nil
+	default:
+		s := fmt.Sprint(x)
+		return &ast.Value{Type: ast.ValueString, Raw: s, Str: s}
+	}
 }
 
 // compileFuncCallBool compiles a standalone function call as a boolean predicate.
@@ -159,13 +360,21 @@ func resolveArgs(resolvers []argResolver, get func(string) (any, bool)) []any {
 	return args
 }
 
-func compileRangeWithResolver(resolve func(func(string) (any, bool)) (any, bool), start, end *ast.Value) matcher {
+func compileRangeWithResolver(resolve func(func(string) (any, bool)) (any, bool), start, end valueResolver) matcher {
 	return func(get func(string) (any, bool)) bool {
 		raw, ok := resolve(get)
 		if !ok {
 			return false
 		}
-		return compareValues(raw, start, token.Gte) && compareValues(raw, end, token.Lte)
+		s := start(get)
+		if s == nil {
+			return false
+		}
+		e := end(get)
+		if e == nil {
+			return false
+		}
+		return compareValues(raw, s, token.Gte) && compareValues(raw, e, token.Lte)
 	}
 }
 
@@ -194,19 +403,23 @@ func compileWildcardWithResolver(resolve func(func(string) (any, bool)) (any, bo
 	}
 }
 
-func compileComparisonWithResolver(resolve func(func(string) (any, bool)) (any, bool), op token.Type, expected *ast.Value) matcher {
+func compileComparisonWithResolver(resolve func(func(string) (any, bool)) (any, bool), op token.Type, expected valueResolver) matcher {
 	return func(get func(string) (any, bool)) bool {
 		raw, ok := resolve(get)
 		if !ok {
 			return false
 		}
+		ev := expected(get)
+		if ev == nil {
+			return false
+		}
 		switch op { //nolint:exhaustive // only comparison operators
 		case token.Eq:
-			return equalValues(raw, expected)
+			return equalValues(raw, ev)
 		case token.Neq:
-			return !equalValues(raw, expected)
+			return !equalValues(raw, ev)
 		default:
-			return compareValues(raw, expected, op)
+			return compareValues(raw, ev, op)
 		}
 	}
 }

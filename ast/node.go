@@ -77,11 +77,18 @@ func (e *PresenceExpr) Pos() token.Position { return e.Position }
 func (e *PresenceExpr) node()               { _ = e }
 func (e *PresenceExpr) expr()               { _ = e }
 
-// SelectorExpr represents a selector expression: expr @first, expr @last, or expr @(inner).
+// SelectorExpr represents a selector expression applied to a list-valued field:
+//
+//	expr @first              — list exists and has ≥ 1 element
+//	expr @last               — list exists and has ≥ 1 element (distinct for codegen)
+//	expr @(inner)            — EXISTS: at least one element satisfies inner
+//	expr @any(inner)         — alias of @(inner)
+//	expr @all(inner)         — universal: every element satisfies inner
+//	expr @none(inner)        — no element satisfies inner
 type SelectorExpr struct {
 	Base     Expression
-	Selector string     // "first", "last", or "" for @(...)
-	Inner    Expression // inner expression for @(...)
+	Selector string     // "first", "last", "any", "all", "none", or "" for @(...)
+	Inner    Expression // inner expression for @(...), @any/@all/@none
 	Position token.Position
 }
 

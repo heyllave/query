@@ -449,3 +449,87 @@ func TestValidate_CustomValidator_NestedFieldOverride(t *testing.T) {
 		t.Errorf("unexpected error: %v", err)
 	}
 }
+
+// TestValidate_DynamicValues_BypassTypeCheck — function and arithmetic values
+// have opaque return types, so the validator must skip type-compatibility
+// against the field config. Field references inside function args and
+// arithmetic operands are still validated.
+func TestValidate_DynamicValues_BypassTypeCheck(t *testing.T) {
+	v := New(testFields)
+
+	// total is TypeDecimal — a plain string value would fail typeCompatible.
+	// Wrapping in ValueArith / ValueFunc must bypass that check.
+	cases := []struct {
+		name string
+		q    string
+	}{
+		{"arith literal", "total>=50000*1.1"},
+		{"arith paren precedence", "total>=(50000+1000)*1.1"},
+		{"func value", "created_at>=now()"},
+		{"func arith mix", "created_at>=now()-7d"},
+		{"range with func endpoints", "created_at:daysAgo(30)..now()"},
+	}
+	for _, tt := range cases {
+		t.Run(tt.name, func(t *testing.T) {
+			expr, err := parser.Parse(tt.q, 0)
+			if err != nil {
+				t.Fatalf("parse: %v", err)
+			}
+			if err := v.Validate(expr); err != nil {
+				t.Errorf("validate: unexpected error: %v", err)
+			}
+		})
+	}
+}
+
+// TestValidate_DynamicValues_StillCatchesFieldErrors — even though the
+// surrounding ValueArith / ValueFunc bypasses type checks, field references
+// inside their subtrees must still be resolved.
+func TestValidate_DynamicValues_StillCatchesFieldErrors(t *testing.T) {
+	v := New(testFields)
+	expr, err := parser.Parse("created_at>=daysAgo(unknown_field)", 0)
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	if err := v.Validate(expr); err == nil {
+		t.Fatal("expected validation error for unknown_field inside function arg")
+	}
+}
+
+// TestValidate_Selector_BaseFieldRequired — every selector kind validates the
+// base field reference; the inner expression is also validated recursively.
+func TestValidate_Selector_BaseFieldRequired(t *testing.T) {
+	fields := append([]FieldConfig{},
+		FieldConfig{Name: "orders", Type: TypeText, AllowedOps: TextOps, Nested: true},
+		FieldConfig{Name: "status", Type: TypeText, AllowedOps: TextOps},
+	)
+	v := New(fields)
+
+	valid := []string{
+		"orders@first",
+		"orders@last",
+		"orders@(status=shipped)",
+		"orders@any(status=shipped)",
+		"orders@all(status=shipped)",
+		"orders@none(status=cancelled)",
+	}
+	for _, q := range valid {
+		t.Run("ok/"+q, func(t *testing.T) {
+			expr, err := parser.Parse(q, 0)
+			if err != nil {
+				t.Fatalf("parse: %v", err)
+			}
+			if err := v.Validate(expr); err != nil {
+				t.Errorf("validate: %v", err)
+			}
+		})
+	}
+
+	// Unknown base field is flagged.
+	t.Run("unknown base", func(t *testing.T) {
+		expr, _ := parser.Parse("missing@all(status=shipped)", 0)
+		if err := v.Validate(expr); err == nil {
+			t.Error("expected unknown-field error for missing base")
+		}
+	})
+}

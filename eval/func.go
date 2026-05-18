@@ -49,7 +49,42 @@ func BuiltinFunctions() FuncRegistry {
 	r.Register(Func{Name: "day", Call: fnDay})
 	r.Register(Func{Name: "daysAgo", Call: fnDaysAgo})
 
+	// Logical helpers — cover the ternary/nullish gap without new syntax.
+	r.Register(Func{Name: "coalesce", Call: fnCoalesce})
+	r.Register(Func{Name: "if", Call: fnIf})
+
 	return r
+}
+
+// fnCoalesce returns the first argument that is non-nil and non-empty.
+// Mirrors SQL COALESCE / expr-lang's `??`.
+func fnCoalesce(args ...any) (any, error) {
+	for _, a := range args {
+		if a == nil {
+			continue
+		}
+		if s, ok := a.(string); ok && s == "" {
+			continue
+		}
+		return a, nil
+	}
+	return nil, nil
+}
+
+// fnIf returns args[1] when args[0] is truthy, args[2] otherwise. Two-arg
+// form omits the else branch and returns nil. Covers the ternary `a ? b : c`
+// gap without introducing dedicated syntax.
+func fnIf(args ...any) (any, error) {
+	if len(args) < 2 || len(args) > 3 {
+		return nil, fmt.Errorf("if() requires 2 or 3 arguments, got %d", len(args))
+	}
+	if toBool(args[0]) {
+		return args[1], nil
+	}
+	if len(args) == 3 {
+		return args[2], nil
+	}
+	return nil, nil
 }
 
 // --- String functions ---

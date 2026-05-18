@@ -4,6 +4,12 @@
 // functions for filtering in-memory data. Useful for CLI tools, WASM clients,
 // or any context where you filter objects without a database.
 //
+// Covered:
+//   - equality / not-equal / wildcard / presence
+//   - logical AND / OR / NOT / grouping
+//   - selectors @first / @last / @(...) / @any / @all / @none over slice fields
+//     where elements are map[string]any (the JSON-ish shape)
+//
 // Run:
 //
 //	go run ./examples/filter
@@ -18,23 +24,25 @@ import (
 	"github.com/heyllave/query/token"
 )
 
+type predicate = func(map[string]any) bool
+
 type filterVisitor struct{}
 
-func (v *filterVisitor) VisitBinary(e *ast.BinaryExpr) func(map[string]any) bool {
-	left := ast.Visit[func(map[string]any) bool](v, e.Left)
-	right := ast.Visit[func(map[string]any) bool](v, e.Right)
+func (v *filterVisitor) VisitBinary(e *ast.BinaryExpr) predicate {
+	left := ast.Visit[predicate](v, e.Left)
+	right := ast.Visit[predicate](v, e.Right)
 	if e.Op == token.And {
 		return func(obj map[string]any) bool { return left(obj) && right(obj) }
 	}
 	return func(obj map[string]any) bool { return left(obj) || right(obj) }
 }
 
-func (v *filterVisitor) VisitUnary(e *ast.UnaryExpr) func(map[string]any) bool {
-	inner := ast.Visit[func(map[string]any) bool](v, e.Expr)
+func (v *filterVisitor) VisitUnary(e *ast.UnaryExpr) predicate {
+	inner := ast.Visit[predicate](v, e.Expr)
 	return func(obj map[string]any) bool { return !inner(obj) }
 }
 
-func (v *filterVisitor) VisitQualifier(e *ast.QualifierExpr) func(map[string]any) bool {
+func (v *filterVisitor) VisitQualifier(e *ast.QualifierExpr) predicate {
 	field := e.Field.String()
 	expected := e.Value.Any()
 
@@ -46,16 +54,16 @@ func (v *filterVisitor) VisitQualifier(e *ast.QualifierExpr) func(map[string]any
 				return false
 			}
 			s := fmt.Sprint(val)
-			if strings.HasPrefix(pattern, "*") && strings.HasSuffix(pattern, "*") {
+			switch {
+			case strings.HasPrefix(pattern, "*") && strings.HasSuffix(pattern, "*"):
 				return strings.Contains(s, pattern[1:len(pattern)-1])
-			}
-			if strings.HasPrefix(pattern, "*") {
+			case strings.HasPrefix(pattern, "*"):
 				return strings.HasSuffix(s, pattern[1:])
-			}
-			if strings.HasSuffix(pattern, "*") {
+			case strings.HasSuffix(pattern, "*"):
 				return strings.HasPrefix(s, pattern[:len(pattern)-1])
+			default:
+				return s == pattern
 			}
-			return s == pattern
 		}
 	}
 
@@ -75,7 +83,7 @@ func (v *filterVisitor) VisitQualifier(e *ast.QualifierExpr) func(map[string]any
 	}
 }
 
-func (v *filterVisitor) VisitPresence(e *ast.PresenceExpr) func(map[string]any) bool {
+func (v *filterVisitor) VisitPresence(e *ast.PresenceExpr) predicate {
 	field := e.Field.String()
 	return func(obj map[string]any) bool {
 		_, ok := obj[field]
@@ -83,37 +91,110 @@ func (v *filterVisitor) VisitPresence(e *ast.PresenceExpr) func(map[string]any) 
 	}
 }
 
-func (v *filterVisitor) VisitGroup(e *ast.GroupExpr) func(map[string]any) bool {
-	return ast.Visit[func(map[string]any) bool](v, e.Expr)
+func (v *filterVisitor) VisitGroup(e *ast.GroupExpr) predicate {
+	return ast.Visit[predicate](v, e.Expr)
 }
 
-func (v *filterVisitor) VisitSelector(e *ast.SelectorExpr) func(map[string]any) bool {
-	return ast.Visit[func(map[string]any) bool](v, e.Base)
+// VisitSelector applies the inner predicate to each element of a list field.
+// Element shape here is map[string]any — the same contract @(...) honors at
+// eval time. Adapters that filter struct slices would adjust the lookup.
+func (v *filterVisitor) VisitSelector(e *ast.SelectorExpr) predicate {
+	listField := ""
+	if p, ok := e.Base.(*ast.PresenceExpr); ok {
+		listField = p.Field.String()
+	}
+	var inner predicate
+	if e.Inner != nil {
+		inner = ast.Visit[predicate](v, e.Inner)
+	}
+	return func(obj map[string]any) bool {
+		raw, ok := obj[listField]
+		if !ok {
+			// Missing field: @none is satisfied (equivalent to empty list),
+			// @all is vacuously true, everything else is false.
+			return e.Selector == "none" || e.Selector == "all"
+		}
+		items, ok := raw.([]map[string]any)
+		if !ok {
+			return false
+		}
+		if inner == nil {
+			return len(items) > 0
+		}
+		switch e.Selector {
+		case "all":
+			for _, it := range items {
+				if !inner(it) {
+					return false
+				}
+			}
+			return true
+		case "none":
+			for _, it := range items {
+				if inner(it) {
+					return false
+				}
+			}
+			return true
+		default: // "" and "any"
+			for _, it := range items {
+				if inner(it) {
+					return true
+				}
+			}
+			return false
+		}
+	}
 }
 
-func (v *filterVisitor) VisitFuncCall(e *ast.FuncCallExpr) func(map[string]any) bool {
+// VisitFuncCall is a stub: standalone function-call predicates are
+// target-specific. The eval package handles built-in and registered
+// functions; consumers using ast.Visitor[T] decide which calls to support.
+func (v *filterVisitor) VisitFuncCall(e *ast.FuncCallExpr) predicate {
 	return func(map[string]any) bool { return false }
 }
 
 func main() {
-	q := "state=draft AND name=John*"
-	expr, err := query.Parse(q)
-	if err != nil {
-		panic(err)
+	demo := func(q string, items []map[string]any) {
+		expr, err := query.Parse(q)
+		if err != nil {
+			fmt.Printf("parse error %q: %v\n", q, err)
+			return
+		}
+		fv := &filterVisitor{}
+		matches := ast.Visit[predicate](fv, expr)
+		fmt.Printf("Query: %s\n", q)
+		for _, item := range items {
+			label := fmt.Sprintf("%v", item)
+			if len(label) > 70 {
+				label = label[:70] + "…"
+			}
+			fmt.Printf("  %-72s → %v\n", label, matches(item))
+		}
+		fmt.Println()
 	}
 
-	fv := &filterVisitor{}
-	matches := ast.Visit[func(map[string]any) bool](fv, expr)
-
-	items := []map[string]any{
+	scalar := []map[string]any{
 		{"state": "draft", "name": "John Doe"},
 		{"state": "draft", "name": "Jane Smith"},
 		{"state": "published", "name": "John Wick"},
 		{"state": "draft", "name": "Johnny Appleseed"},
 	}
+	demo("state=draft AND name=John*", scalar)
+	demo("name=*son", scalar)
+	demo("NOT state=published", scalar)
 
-	fmt.Printf("Query: %s\n\n", q)
-	for _, item := range items {
-		fmt.Printf("  %-12s %-20s → %v\n", item["state"], item["name"], matches(item))
+	withLists := []map[string]any{
+		{"customer": "acme", "orders": []map[string]any{
+			{"status": "shipped"}, {"status": "pending"},
+		}},
+		{"customer": "globex", "orders": []map[string]any{
+			{"status": "cancelled"},
+		}},
+		{"customer": "initech", "orders": []map[string]any{}},
+		{"customer": "umbrella"}, // missing field
 	}
+	demo("orders@(status=shipped)", withLists)
+	demo("orders@all(status=shipped)", withLists)
+	demo("orders@none(status=cancelled)", withLists)
 }

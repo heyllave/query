@@ -36,7 +36,7 @@ import (
 //	fields := eval.FieldsFromStruct(Invoice{})
 func FieldsFromStruct(v any) []validate.FieldConfig {
 	t := reflect.TypeOf(v)
-	if t.Kind() == reflect.Ptr {
+	if t.Kind() == reflect.Pointer {
 		t = t.Elem()
 	}
 	if t.Kind() != reflect.Struct {
@@ -71,7 +71,7 @@ func FieldsFromStruct(v any) []validate.FieldConfig {
 // resolving field names via `query` tags.
 func StructAccessor(v any) func(string) (any, bool) {
 	rv := reflect.ValueOf(v)
-	if rv.Kind() == reflect.Ptr {
+	if rv.Kind() == reflect.Pointer {
 		rv = rv.Elem()
 	}
 	if rv.Kind() != reflect.Struct {
@@ -108,7 +108,7 @@ var durationType = reflect.TypeOf(time.Duration(0))
 
 func goTypeToFieldConfig(t reflect.Type) (validate.FieldValueType, []validate.Op) {
 	// Handle pointer types
-	if t.Kind() == reflect.Ptr {
+	if t.Kind() == reflect.Pointer {
 		t = t.Elem()
 	}
 
