@@ -144,19 +144,21 @@ func jsParseAndValidate(_ js.Value, args []js.Value) any {
 	return jsResult(node, "")
 }
 
-// jsResult creates a {result, error} JS object.
+// jsResult creates a {result, error} JS object. The whole map is marshaled
+// once at the end so the inner result is a real JS value (array, object,
+// string, etc.) rather than the opaque encoding of a js.Value.
+//
+// (The earlier version called toJSValue(result) and stored the resulting
+// js.Value back into the map. encoding/json cannot marshal a js.Value's
+// unexported ref field, so the inner value showed up as {} on the JS side
+// — silently corrupting array and AST returns.)
 func jsResult(result any, errMsg string) any {
 	obj := map[string]any{}
 	if errMsg != "" {
 		obj["error"] = errMsg
 	}
 	if result != nil {
-		switch v := result.(type) {
-		case string:
-			obj["result"] = v
-		default:
-			obj["result"] = toJSValue(v)
-		}
+		obj["result"] = result
 	}
 	return toJSValue(obj)
 }
