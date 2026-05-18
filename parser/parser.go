@@ -2,6 +2,7 @@ package parser
 
 import (
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/heyllave/query/ast"
@@ -61,8 +62,23 @@ func (p *parser) parseLogicalOr() ast.Expression {
 
 func (p *parser) parseLogicalAnd() ast.Expression {
 	left := p.parseChainExpr()
-	for p.peek().Type == token.And {
-		op := p.advance()
+	for {
+		t := p.peek().Type
+		// Explicit AND or an implicit one (juxtaposition). Implicit AND fires
+		// when the next token can legitimately start a new term — Ident,
+		// LParen, NOT, or function-call ident. Keywords like AND/OR don't
+		// trigger it (they're handled by the explicit branches), and EOF/`)`
+		// end the chain.
+		implicit := t != token.And && p.canStartTerm(t)
+		if t != token.And && !implicit {
+			return left
+		}
+		var pos token.Position
+		if t == token.And {
+			pos = p.advance().Pos
+		} else {
+			pos = p.peek().Pos
+		}
 		right := p.parseChainExpr()
 		if right == nil {
 			break
@@ -71,10 +87,22 @@ func (p *parser) parseLogicalAnd() ast.Expression {
 			Op:       token.And,
 			Left:     left,
 			Right:    right,
-			Position: op.Pos,
+			Position: pos,
 		}
 	}
 	return left
+}
+
+// canStartTerm reports whether a token type can start a fresh term (qualifier,
+// presence, group, or NOT). Used by parseLogicalAnd to detect implicit-AND
+// between adjacent terms separated only by whitespace.
+func (p *parser) canStartTerm(t token.Type) bool {
+	switch t { //nolint:exhaustive // only term-starters matter
+	case token.Ident, token.LParen, token.Not:
+		return true
+	default:
+		return false
+	}
 }
 
 // parseChainExpr parses a term optionally followed by one or more selector
@@ -93,7 +121,12 @@ func (p *parser) parseChainExpr() ast.Expression {
 }
 
 // parseSelector parses the portion after an '@' token:
-// `first`, `last`, or `(expression)`.
+//
+//	@first | @last                — list non-emptiness
+//	@(expression)                  — EXISTS (any element matches)
+//	@any(expression)               — alias for @(...)
+//	@all(expression)               — universal (every element matches)
+//	@none(expression)              — no element matches
 func (p *parser) parseSelector(base ast.Expression, pos token.Position) ast.Expression {
 	next := p.peek()
 	switch {
@@ -102,6 +135,22 @@ func (p *parser) parseSelector(base ast.Expression, pos token.Position) ast.Expr
 		return &ast.SelectorExpr{
 			Base:     base,
 			Selector: next.Value,
+			Position: pos,
+		}
+	case next.Type == token.Ident && (next.Value == "any" || next.Value == "all" || next.Value == "none") && p.peekAt(1).Type == token.LParen:
+		name := p.advance().Value
+		p.advance() // consume '('
+		inner := p.parseExpression()
+		if p.peek().Type != token.RParen {
+			p.errors.add(newError(ErrSyntax, p.peek().Pos,
+				"expected ')' to close @%s selector, got %s", name, p.peek()))
+			return nil
+		}
+		p.advance()
+		return &ast.SelectorExpr{
+			Base:     base,
+			Selector: name,
+			Inner:    inner,
 			Position: pos,
 		}
 	case next.Type == token.LParen:
@@ -120,7 +169,7 @@ func (p *parser) parseSelector(base ast.Expression, pos token.Position) ast.Expr
 		}
 	default:
 		p.errors.add(newError(ErrUnexpectedToken, next.Pos,
-			"expected 'first', 'last', or '(' after '@', got %s", next))
+			"expected 'first', 'last', 'any(...)', 'all(...)', 'none(...)', or '(' after '@', got %s", next))
 		return nil
 	}
 }
@@ -180,11 +229,33 @@ func (p *parser) parseQualifier() ast.Expression {
 		p.advance()
 		return p.parseRangeExpr(field, startPos)
 	}
+	if tok.Type == token.In {
+		p.advance()
+		return p.parseInExpr(field, startPos)
+	}
 	if tok.Type.IsOperator() {
 		p.advance()
 		val := p.parseValue()
 		if val == nil {
 			return nil
+		}
+		// Desugar negated comparisons (field !> val) into NOT (field > val).
+		// Missing-field semantics in eval — see compileComparisonWithResolver —
+		// make a plain operator flip incorrect: a missing field makes both
+		// `field>val` and `field<=val` return false, so `NOT (field>val)` is
+		// the only logically consistent rewrite.
+		if tok.Type.IsNegatedOperator() {
+			inner := &ast.QualifierExpr{
+				Field:    field,
+				Operator: token.NegateOperator(tok.Type),
+				Value:    *val,
+				Position: startPos,
+			}
+			return &ast.UnaryExpr{
+				Op:       token.Not,
+				Expr:     inner,
+				Position: startPos,
+			}
 		}
 		return &ast.QualifierExpr{
 			Field:    field,
@@ -197,6 +268,67 @@ func (p *parser) parseQualifier() ast.Expression {
 		Field:    field,
 		Position: startPos,
 	}
+}
+
+// parseInExpr parses the right-hand side of `field IN (...)` and lowers it to
+// an OR chain of equality qualifiers. The IN form is pure surface syntax —
+// once parsed it is indistinguishable from `field=v1 OR field=v2`, and
+// round-tripping normalizes to the expanded form.
+func (p *parser) parseInExpr(field ast.FieldPath, startPos token.Position) ast.Expression {
+	if p.peek().Type != token.LParen {
+		p.errors.add(newError(ErrSyntax, p.peek().Pos,
+			"expected '(' after IN, got %s", p.peek()))
+		return nil
+	}
+	p.advance() // consume '('
+
+	var values []ast.Value
+	for p.peek().Type != token.RParen && p.peek().Type != token.EOF {
+		if len(values) > 0 {
+			if p.peek().Type != token.Comma {
+				p.errors.add(newError(ErrSyntax, p.peek().Pos,
+					"expected ',' or ')' in IN list, got %s", p.peek()))
+				return nil
+			}
+			p.advance()
+		}
+		val := p.parseValue()
+		if val == nil {
+			return nil
+		}
+		values = append(values, *val)
+	}
+	if p.peek().Type != token.RParen {
+		p.errors.add(newError(ErrSyntax, p.peek().Pos, "expected ')' to close IN list"))
+		return nil
+	}
+	p.advance() // consume ')'
+
+	if len(values) == 0 {
+		p.errors.add(newError(ErrSyntax, startPos, "IN list cannot be empty"))
+		return nil
+	}
+
+	var expr ast.Expression
+	for i, v := range values {
+		q := &ast.QualifierExpr{
+			Field:    field,
+			Operator: token.Eq,
+			Value:    v,
+			Position: startPos,
+		}
+		if i == 0 {
+			expr = q
+			continue
+		}
+		expr = &ast.BinaryExpr{
+			Op:       token.Or,
+			Left:     expr,
+			Right:    q,
+			Position: startPos,
+		}
+	}
+	return expr
 }
 
 func (p *parser) parseRangeExpr(field ast.FieldPath, startPos token.Position) ast.Expression {
@@ -238,12 +370,89 @@ func (p *parser) parseFieldName() ast.FieldPath {
 	return ast.FieldPath(parts)
 }
 
+// parseValue parses a value expression. Top-level entry runs additive
+// precedence so arithmetic like 50000*1.1 + 1000 is recognized.
 func (p *parser) parseValue() *ast.Value {
+	return p.parseValueAdditive()
+}
+
+// parseValueAdditive: parseValueMultiplicative (('+' | '-') parseValueMultiplicative)*
+func (p *parser) parseValueAdditive() *ast.Value {
+	left := p.parseValueMultiplicative()
+	if left == nil {
+		return nil
+	}
+	for {
+		t := p.peek().Type
+		if t != token.Plus && t != token.Minus {
+			return left
+		}
+		op := p.advance()
+		right := p.parseValueMultiplicative()
+		if right == nil {
+			return nil
+		}
+		left = mkArithValue(op.Type, left, right, left.Raw+token.OperatorSymbol(op.Type)+right.Raw)
+	}
+}
+
+// parseValueMultiplicative: parseValuePrimary (('*' | '/' | '%') parseValuePrimary)*
+func (p *parser) parseValueMultiplicative() *ast.Value {
+	left := p.parseValuePrimary()
+	if left == nil {
+		return nil
+	}
+	for {
+		t := p.peek().Type
+		if t != token.Mul && t != token.Div && t != token.Mod {
+			return left
+		}
+		op := p.advance()
+		right := p.parseValuePrimary()
+		if right == nil {
+			return nil
+		}
+		left = mkArithValue(op.Type, left, right, left.Raw+token.OperatorSymbol(op.Type)+right.Raw)
+	}
+}
+
+// parseValuePrimary parses a single arithmetic-value primary: a literal, a
+// quoted string, a function call, a wildcard pattern, or a parenthesized
+// sub-expression.
+func (p *parser) parseValuePrimary() *ast.Value {
 	tok := p.peek()
 	switch tok.Type {
-	case token.String:
+	case token.LParen:
+		p.advance()
+		inner := p.parseValueAdditive()
+		if inner == nil {
+			return nil
+		}
+		if p.peek().Type != token.RParen {
+			p.errors.add(newError(ErrSyntax, p.peek().Pos,
+				"expected ')' to close value expression, got %s", p.peek()))
+			return nil
+		}
+		p.advance()
+		// Preserve grouping in Raw for faithful round-trip — the AST itself
+		// doesn't have a value-group node, but the Raw text retains parens.
+		inner.Raw = "(" + inner.Raw + ")"
+		return inner
+	case token.Ident:
+		// An Ident in value position is either a function call (now(),
+		// daysAgo(7)) or a barword string value (e.g. inside IN(draft, issued)).
+		if p.peekAt(1).Type == token.LParen {
+			fc := p.parseFuncCall()
+			if fc == nil {
+				return nil
+			}
+			return &ast.Value{Type: ast.ValueFunc, Raw: funcCallString(fc), Func: fc}
+		}
 		p.advance()
 		return &ast.Value{Type: ast.ValueString, Raw: tok.Value, Str: tok.Value}
+	case token.String:
+		p.advance()
+		return &ast.Value{Type: ast.ValueString, Raw: tok.Value, Str: tok.Value, Quoted: tok.Quoted}
 	case token.Integer:
 		p.advance()
 		n, err := strconv.ParseInt(tok.Value, 10, 64)
@@ -289,6 +498,20 @@ func (p *parser) parseValue() *ast.Value {
 		p.errors.add(newError(ErrUnexpectedToken, tok.Pos, "expected value, got %s", tok))
 		p.advance()
 		return nil
+	}
+}
+
+// mkArithValue wraps two operands and an arithmetic operator into a Value of
+// type ValueArith. Raw is preserved for round-tripping.
+func mkArithValue(op token.Type, left, right *ast.Value, raw string) *ast.Value {
+	return &ast.Value{
+		Type: ast.ValueArith,
+		Raw:  raw,
+		Arith: &ast.ArithExpr{
+			Op:    token.OperatorSymbol(op),
+			Left:  left,
+			Right: right,
+		},
 	}
 }
 
@@ -387,6 +610,34 @@ func (p *parser) parseFuncArg() *ast.FuncArg {
 	p.errors.add(newError(ErrUnexpectedToken, tok.Pos,
 		"expected function argument, got %s", tok))
 	return nil
+}
+
+// funcCallString renders a function call back to source form. Used for Value.Raw
+// when a function appears in value position (e.g. created_at>=now()) so the
+// QualifierExpr.String() can faithfully round-trip the expression.
+func funcCallString(fc *ast.FuncCallExpr) string {
+	var b strings.Builder
+	writeFuncCall(&b, fc)
+	return b.String()
+}
+
+func writeFuncCall(b *strings.Builder, fc *ast.FuncCallExpr) {
+	b.WriteString(fc.Name)
+	b.WriteByte('(')
+	for i, arg := range fc.Args {
+		if i > 0 {
+			b.WriteString(", ")
+		}
+		switch {
+		case arg.Field != nil:
+			b.WriteString(arg.Field.String())
+		case arg.Value != nil:
+			b.WriteString(arg.Value.Raw)
+		case arg.Call != nil:
+			writeFuncCall(b, arg.Call)
+		}
+	}
+	b.WriteByte(')')
 }
 
 func (p *parser) peek() token.Token {

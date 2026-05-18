@@ -7,11 +7,6 @@ import (
 	"github.com/heyllave/query/token"
 )
 
-// Note: literal function args (e.g., addDays(now, 7)) have a known parser
-// ambiguity — the lexer only switches to value-mode after comparison
-// operators, so integer literals in function position aren't parsed yet.
-// Use field references for function arguments.
-
 func TestParse_FuncCall(t *testing.T) {
 	tests := []struct {
 		name  string
