@@ -77,11 +77,28 @@ type Value struct {
 	Arith    *ArithExpr    // for ValueArith: arithmetic expression resolved at match time
 }
 
+// ArithOp identifies a binary arithmetic operator inside an [ArithExpr]. The
+// string representation is also the canonical round-trip form rendered by
+// [String].
+type ArithOp string
+
+// Arithmetic operator constants.
+const (
+	ArithAdd ArithOp = "+"
+	ArithSub ArithOp = "-"
+	ArithMul ArithOp = "*"
+	ArithDiv ArithOp = "/"
+	ArithMod ArithOp = "%"
+)
+
+// String implements [fmt.Stringer]; the symbol is its own canonical form.
+func (a ArithOp) String() string { return string(a) }
+
 // ArithExpr is a binary arithmetic expression appearing in value position:
 // 50000*1.1, now()-7d, (a+b)*c. Operands are themselves Values, so the tree
 // can mix literals, function calls, and nested arithmetic.
 type ArithExpr struct {
-	Op    string // "+", "-", "*", "/", "%"
+	Op    ArithOp
 	Left  *Value
 	Right *Value
 }

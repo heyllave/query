@@ -154,7 +154,7 @@ func (v *sqlVisitor) renderValue(val *ast.Value) string {
 }
 
 func (v *sqlVisitor) renderArith(a *ast.ArithExpr) string {
-	return "(" + v.renderValue(a.Left) + " " + a.Op + " " + v.renderValue(a.Right) + ")"
+	return "(" + v.renderValue(a.Left) + " " + a.Op.String() + " " + v.renderValue(a.Right) + ")"
 }
 
 // renderFuncCall translates a few well-known functions to their SQL

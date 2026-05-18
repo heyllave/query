@@ -1,6 +1,7 @@
 package parser
 
 import (
+	"fmt"
 	"strconv"
 	"strings"
 	"time"
@@ -508,10 +509,30 @@ func mkArithValue(op token.Type, left, right *ast.Value, raw string) *ast.Value 
 		Type: ast.ValueArith,
 		Raw:  raw,
 		Arith: &ast.ArithExpr{
-			Op:    token.OperatorSymbol(op),
+			Op:    arithOpFromToken(op),
 			Left:  left,
 			Right: right,
 		},
+	}
+}
+
+// arithOpFromToken maps the lexer's arithmetic token types onto the AST's
+// typed [ast.ArithOp] constants. Any non-arithmetic token type is a parser
+// invariant violation and panics.
+func arithOpFromToken(op token.Type) ast.ArithOp {
+	switch op {
+	case token.Plus:
+		return ast.ArithAdd
+	case token.Minus:
+		return ast.ArithSub
+	case token.Mul:
+		return ast.ArithMul
+	case token.Div:
+		return ast.ArithDiv
+	case token.Mod:
+		return ast.ArithMod
+	default:
+		panic(fmt.Sprintf("arithOpFromToken: not an arithmetic token: %v", op))
 	}
 }
 

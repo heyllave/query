@@ -156,26 +156,26 @@ func compileValueResolver(v *ast.Value, funcs FuncRegistry) valueResolver {
 // always produces float), int op float → float, time op duration → time,
 // duration op int|float → duration. Anything else returns nil so the
 // comparison falls back to the default-false missing-operand path.
-func applyArith(left, right *ast.Value, op string) *ast.Value {
+func applyArith(left, right *ast.Value, op ast.ArithOp) *ast.Value {
 	// time + duration / time - duration → time
 	if left.Type == ast.ValueDate && right.Type == ast.ValueDuration {
 		switch op {
-		case "+":
+		case ast.ArithAdd:
 			return valueFromAny(left.Date.Add(right.Duration))
-		case "-":
+		case ast.ArithSub:
 			return valueFromAny(left.Date.Add(-right.Duration))
 		}
 	}
 	// time - time → duration
-	if left.Type == ast.ValueDate && right.Type == ast.ValueDate && op == "-" {
+	if left.Type == ast.ValueDate && right.Type == ast.ValueDate && op == ast.ArithSub {
 		return valueFromAny(left.Date.Sub(right.Date))
 	}
 	// duration arithmetic
 	if left.Type == ast.ValueDuration && right.Type == ast.ValueDuration {
 		switch op {
-		case "+":
+		case ast.ArithAdd:
 			return valueFromAny(left.Duration + right.Duration)
-		case "-":
+		case ast.ArithSub:
 			return valueFromAny(left.Duration - right.Duration)
 		}
 	}
@@ -183,32 +183,32 @@ func applyArith(left, right *ast.Value, op string) *ast.Value {
 	if left.Type == ast.ValueDuration && isNumericValue(right) {
 		rf := numericFloat(right)
 		switch op {
-		case "*":
+		case ast.ArithMul:
 			return valueFromAny(time.Duration(float64(left.Duration) * rf))
-		case "/":
+		case ast.ArithDiv:
 			if rf == 0 {
 				return nil
 			}
 			return valueFromAny(time.Duration(float64(left.Duration) / rf))
 		}
 	}
-	if isNumericValue(left) && right.Type == ast.ValueDuration && op == "*" {
+	if isNumericValue(left) && right.Type == ast.ValueDuration && op == ast.ArithMul {
 		lf := numericFloat(left)
 		return valueFromAny(time.Duration(lf * float64(right.Duration)))
 	}
 	// pure numeric arithmetic
 	if isNumericValue(left) && isNumericValue(right) {
 		// Stay in int if both sides are integers and the op preserves it.
-		if left.Type == ast.ValueInteger && right.Type == ast.ValueInteger && op != "/" {
+		if left.Type == ast.ValueInteger && right.Type == ast.ValueInteger && op != ast.ArithDiv {
 			a, b := left.Int, right.Int
 			switch op {
-			case "+":
+			case ast.ArithAdd:
 				return valueFromAny(a + b)
-			case "-":
+			case ast.ArithSub:
 				return valueFromAny(a - b)
-			case "*":
+			case ast.ArithMul:
 				return valueFromAny(a * b)
-			case "%":
+			case ast.ArithMod:
 				if b == 0 {
 					return nil
 				}
@@ -218,18 +218,18 @@ func applyArith(left, right *ast.Value, op string) *ast.Value {
 		a := numericFloat(left)
 		b := numericFloat(right)
 		switch op {
-		case "+":
+		case ast.ArithAdd:
 			return valueFromAny(a + b)
-		case "-":
+		case ast.ArithSub:
 			return valueFromAny(a - b)
-		case "*":
+		case ast.ArithMul:
 			return valueFromAny(a * b)
-		case "/":
+		case ast.ArithDiv:
 			if b == 0 {
 				return nil
 			}
 			return valueFromAny(a / b)
-		case "%":
+		case ast.ArithMod:
 			if b == 0 {
 				return nil
 			}

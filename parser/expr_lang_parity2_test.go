@@ -22,7 +22,7 @@ func TestParse_Arith_BinaryNumeric(t *testing.T) {
 	if q.Value.Type != ast.ValueArith {
 		t.Fatalf("value type: got %v, want ValueArith", q.Value.Type)
 	}
-	if q.Value.Arith == nil || q.Value.Arith.Op != "*" {
+	if q.Value.Arith == nil || q.Value.Arith.Op != ast.ArithMul {
 		t.Fatalf("arith op: got %+v, want *", q.Value.Arith)
 	}
 	if q.Value.Arith.Left.Type != ast.ValueInteger || q.Value.Arith.Left.Int != 50000 {
@@ -40,10 +40,10 @@ func TestParse_Arith_Precedence(t *testing.T) {
 		t.Fatalf("parse: %v", err)
 	}
 	q := expr.(*ast.QualifierExpr)
-	if q.Value.Arith.Op != "+" {
+	if q.Value.Arith.Op != ast.ArithAdd {
 		t.Errorf("outer op: got %q, want +", q.Value.Arith.Op)
 	}
-	if q.Value.Arith.Right.Arith == nil || q.Value.Arith.Right.Arith.Op != "*" {
+	if q.Value.Arith.Right.Arith == nil || q.Value.Arith.Right.Arith.Op != ast.ArithMul {
 		t.Errorf("right subtree should be * — got %+v", q.Value.Arith.Right)
 	}
 }
@@ -55,10 +55,10 @@ func TestParse_Arith_ParensOverridePrecedence(t *testing.T) {
 		t.Fatalf("parse: %v", err)
 	}
 	q := expr.(*ast.QualifierExpr)
-	if q.Value.Arith.Op != "*" {
+	if q.Value.Arith.Op != ast.ArithMul {
 		t.Errorf("outer op: got %q, want *", q.Value.Arith.Op)
 	}
-	if q.Value.Arith.Left.Arith == nil || q.Value.Arith.Left.Arith.Op != "+" {
+	if q.Value.Arith.Left.Arith == nil || q.Value.Arith.Left.Arith.Op != ast.ArithAdd {
 		t.Errorf("left subtree should be + — got %+v", q.Value.Arith.Left)
 	}
 }
@@ -72,7 +72,7 @@ func TestParse_Arith_FunctionAndDuration(t *testing.T) {
 	if q.Value.Type != ast.ValueArith {
 		t.Fatalf("expected ValueArith, got %v", q.Value.Type)
 	}
-	if q.Value.Arith.Op != "-" {
+	if q.Value.Arith.Op != ast.ArithSub {
 		t.Errorf("op: got %q, want -", q.Value.Arith.Op)
 	}
 	if q.Value.Arith.Left.Type != ast.ValueFunc || q.Value.Arith.Left.Func.Name != "now" {

@@ -104,7 +104,7 @@ func writeValue(buf *strings.Builder, v *Value) {
 	}
 	if v.Type == ValueArith && v.Arith != nil {
 		writeArithOperand(buf, v.Arith.Left, v.Arith.Op, true)
-		buf.WriteString(v.Arith.Op)
+		buf.WriteString(v.Arith.Op.String())
 		writeArithOperand(buf, v.Arith.Right, v.Arith.Op, false)
 		return
 	}
@@ -120,14 +120,14 @@ func writeValue(buf *strings.Builder, v *Value) {
 // correctly instead of degenerating to `1+2*3`). The right operand of a
 // non-commutative parent (`-`, `/`, `%`) also needs parens when its operator
 // has equal precedence — `5-(2-1)` is not `5-2-1`.
-func writeArithOperand(buf *strings.Builder, v *Value, parentOp string, isLeft bool) {
+func writeArithOperand(buf *strings.Builder, v *Value, parentOp ArithOp, isLeft bool) {
 	if v != nil && v.Type == ValueArith && v.Arith != nil {
 		childPrec := arithPrecedence(v.Arith.Op)
 		parentPrec := arithPrecedence(parentOp)
 		needParens := childPrec < parentPrec
 		if !needParens && !isLeft && childPrec == parentPrec {
 			switch parentOp {
-			case "-", "/", "%":
+			case ArithSub, ArithDiv, ArithMod:
 				needParens = true
 			}
 		}
@@ -141,11 +141,11 @@ func writeArithOperand(buf *strings.Builder, v *Value, parentOp string, isLeft b
 	writeValue(buf, v)
 }
 
-func arithPrecedence(op string) int {
+func arithPrecedence(op ArithOp) int {
 	switch op {
-	case "*", "/", "%":
+	case ArithMul, ArithDiv, ArithMod:
 		return 2
-	case "+", "-":
+	case ArithAdd, ArithSub:
 		return 1
 	default:
 		return 0
