@@ -1,6 +1,12 @@
 // Example: @ selector operator — list-field predicates.
 //
-// Demonstrates @first / @last / @(inner) against realistic shapes:
+// Demonstrates every selector form against realistic shapes:
+//   - @first / @last       — list non-emptiness
+//   - @(inner) / @any(...) — EXISTS (at least one satisfies)
+//   - @all(inner)          — universal (every element satisfies; empty list vacuously true)
+//   - @none(inner)         — no element satisfies (missing field ≡ empty list)
+//
+// Element shapes covered:
 //   - slices of map[string]any (JSON-ish records)
 //   - slices of tagged structs (native Go records)
 //
@@ -79,8 +85,17 @@ func main() {
 		// @first — the list exists and has ≥ 1 element.
 		"tags@first",
 
-		// EXISTS semantics.
+		// EXISTS (anonymous and explicit @any).
 		"orders@(status=shipped)",
+		"orders@any(status=shipped)",
+
+		// @all — every element satisfies. Empty list is vacuously true,
+		// so initech (orders=[]) matches.
+		"orders@all(price>0)",
+
+		// @none — no element satisfies. initech (empty list) and any record
+		// without a "cancelled" order both match.
+		"orders@none(status=cancelled)",
 
 		// Numeric predicate against nested prices.
 		"orders@(price>100)",

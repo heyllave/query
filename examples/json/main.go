@@ -27,6 +27,9 @@ type jsonNode struct {
 	Value    any         `json:"value,omitempty"`
 	EndValue any         `json:"endValue,omitempty"`
 	Wildcard bool        `json:"wildcard,omitempty"`
+	Selector string      `json:"selector,omitempty"`
+	Base     *jsonNode   `json:"base,omitempty"`
+	Inner    *jsonNode   `json:"inner,omitempty"`
 	Left     *jsonNode   `json:"left,omitempty"`
 	Right    *jsonNode   `json:"right,omitempty"`
 	Expr     *jsonNode   `json:"expr,omitempty"`
@@ -60,14 +63,45 @@ func (v *jsonVisitor) VisitQualifier(e *ast.QualifierExpr) *jsonNode {
 		Type:     "qualifier",
 		Op:       token.OperatorSymbol(e.Operator),
 		Field:    e.Field.String(),
-		Value:    e.Value.Any(),
+		Value:    valueJSON(&e.Value),
 		Wildcard: e.IsWildcard(),
 	}
 	if e.IsRange() {
 		n.Op = ".."
-		n.EndValue = e.EndValue.Any()
+		n.EndValue = valueJSON(e.EndValue)
 	}
 	return n
+}
+
+// valueJSON returns a JSON-friendly representation of a Value. Function- and
+// arithmetic-valued expressions (e.g. now() or 50000*1.1 in value position)
+// emit a small object so the JSON tree stays self-describing.
+func valueJSON(v *ast.Value) any {
+	if v == nil {
+		return nil
+	}
+	if v.Type == ast.ValueFunc && v.Func != nil {
+		args := make([]any, 0, len(v.Func.Args))
+		for _, a := range v.Func.Args {
+			switch {
+			case a.Field != nil:
+				args = append(args, map[string]any{"field": a.Field.String()})
+			case a.Value != nil:
+				args = append(args, valueJSON(a.Value))
+			case a.Call != nil:
+				args = append(args, map[string]any{"func": a.Call.Name})
+			}
+		}
+		return map[string]any{"func": v.Func.Name, "args": args}
+	}
+	if v.Type == ast.ValueArith && v.Arith != nil {
+		return map[string]any{
+			"arith": v.Arith.Op,
+			"left":  valueJSON(v.Arith.Left),
+			"right": valueJSON(v.Arith.Right),
+		}
+	}
+	return v.Any()
 }
 
 func (v *jsonVisitor) VisitPresence(e *ast.PresenceExpr) *jsonNode {
@@ -82,7 +116,22 @@ func (v *jsonVisitor) VisitGroup(e *ast.GroupExpr) *jsonNode {
 }
 
 func (v *jsonVisitor) VisitSelector(e *ast.SelectorExpr) *jsonNode {
-	return ast.Visit[*jsonNode](v, e.Base)
+	// Selector codegen is target-specific (SQL EXISTS, JSON path, etc.). The
+	// JSON tree surfaces the kind and inner predicate so a consumer can choose
+	// how to translate. @first / @last carry no inner expression.
+	kind := e.Selector
+	if kind == "" {
+		kind = "any"
+	}
+	n := &jsonNode{
+		Type:     "selector",
+		Selector: kind,
+		Base:     ast.Visit[*jsonNode](v, e.Base),
+	}
+	if e.Inner != nil {
+		n.Inner = ast.Visit[*jsonNode](v, e.Inner)
+	}
+	return n
 }
 
 func (v *jsonVisitor) VisitFuncCall(e *ast.FuncCallExpr) *jsonNode {

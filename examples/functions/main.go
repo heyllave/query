@@ -18,37 +18,41 @@ import (
 
 var fields = []validate.FieldConfig{
 	{Name: "name", Type: validate.TypeText, AllowedOps: validate.TextOps},
+	{Name: "nickname", Type: validate.TypeText, AllowedOps: validate.TextOps},
 	{Name: "state", Type: validate.TypeText, AllowedOps: validate.TextOps},
 	{Name: "description", Type: validate.TypeText, AllowedOps: validate.TextOps},
 	{Name: "year", Type: validate.TypeInteger, AllowedOps: validate.NumericOps},
 	{Name: "total", Type: validate.TypeDecimal, AllowedOps: validate.NumericOps},
 	{Name: "created_at", Type: validate.TypeDate, AllowedOps: validate.DateOps},
 	{Name: "tags", Type: validate.TypeText, AllowedOps: validate.TextOps},
+	{Name: "active", Type: validate.TypeBoolean, AllowedOps: validate.BoolOps},
 }
 
 func main() {
 	data := map[string]any{
 		"name":        "John Doe",
+		"nickname":    "",
 		"state":       "DRAFT",
 		"description": "  urgent repair needed  ",
 		"year":        2025,
 		"total":       75000.50,
 		"created_at":  time.Date(2026, 3, 15, 0, 0, 0, 0, time.UTC),
 		"tags":        "urgent,high-priority",
+		"active":      true,
 	}
 
 	fmt.Println("=== Built-in String Functions ===")
 	fmt.Println()
 	runExample(data, "lower(state)=draft",
 		"lower() — case-insensitive match (DRAFT → draft)")
-	runExample(data, "upper(name)=JOHN DOE",
-		"upper() — uppercase transform")
-	runExample(data, "trim(description)=urgent repair needed",
-		"trim() — strip whitespace")
+	runExample(data, `upper(name)="JOHN DOE"`,
+		"upper() — uppercase transform with quoted string value")
+	runExample(data, `trim(description)="urgent repair needed"`,
+		"trim() — strip whitespace, compare to quoted string")
 	runExample(data, "len(name)>5",
 		"len() — string length comparison")
-	runExample(data, "contains(tags, urgent)",
-		"contains(field, field) — check if one field's value contains another's")
+	runExample(data, `contains(tags, "urgent")`,
+		`contains(field, "literal") — string literal argument`)
 	runExample(data, "startsWith(name, tags)",
 		"startsWith(field, field) — prefix check (tags='urgent', name='John' → false)")
 
@@ -78,7 +82,7 @@ func main() {
 	)
 
 	runExampleWithFuncs(data,
-		"currency(total)=75000.50 USD",
+		`currency(total)="75000.50 USD"`,
 		"currency() — custom formatter (returns formatted string)",
 		eval.Func{
 			Name: "currency",
@@ -114,23 +118,50 @@ func main() {
 		"Function with NOT")
 
 	fmt.Println()
-	fmt.Println("=== Edge Cases & Limitations ===")
+	fmt.Println("=== Functions in Value Position ===")
 	fmt.Println()
+	runExample(data, "created_at>=daysAgo(365)",
+		"daysAgo() in value position — match dates within the last year")
+	runExample(data, "created_at:daysAgo(365)..now()",
+		"Functions on both sides of a date range")
+	runExampleWithFuncs(data,
+		"total>=threshold()",
+		"Custom function returning a comparison value",
+		eval.Func{
+			Name: "threshold",
+			Call: func(...any) (any, error) { return int64(10000), nil },
+		},
+	)
 
-	// Limitation: function args are field references, not string literals
-	fmt.Println("  [LIMITATION] Function args are field references, not string literals.")
-	fmt.Println("               contains(name, tags) compares two field values.")
-	fmt.Println("               To search for a literal string, use wildcards: name=*urgent*")
 	fmt.Println()
-
-	// Limitation: no nested function-as-value yet
-	fmt.Println("  [LIMITATION] Functions in value position (created_at>=now()) are not yet")
-	fmt.Println("               supported. Use daysAgo() or compute the value before compiling.")
+	fmt.Println("=== Arithmetic in Value Position ===")
 	fmt.Println()
+	runExample(data, "total>=50000*1.1",
+		"Multiplication with precedence (50000*1.1 = 55000)")
+	runExample(data, "total>=(50000+1000)*1.1",
+		"Parens override precedence ((51000)*1.1 = 56100)")
+	runExample(data, "created_at>=now()-7d",
+		"Date - duration → time within the last week")
 
-	// Limitation: no arithmetic in functions
-	fmt.Println("  [LIMITATION] No arithmetic expressions: total>50000*1.1 is not supported.")
-	fmt.Println("               Register a custom function for computed comparisons.")
+	fmt.Println()
+	fmt.Println("=== Ternary / Nullish via Built-in Functions ===")
+	fmt.Println()
+	runExample(data, `coalesce(name, "unknown")="John Doe"`,
+		"coalesce() — first non-null/non-empty arg (SQL COALESCE)")
+	runExample(data, `coalesce(nickname, name)="John Doe"`,
+		"coalesce() — empty nickname falls through to name")
+	runExample(data, `if(active, "on", "off")="on"`,
+		"if(cond, a, b) — ternary; active=true picks the first branch")
+	runExample(data, `if(active, "on", "off")="off"`,
+		"if() — false branch is rejected, so this is false")
+
+	fmt.Println()
+	fmt.Println("=== Remaining Limitations ===")
+	fmt.Println()
+	fmt.Println("  [LIMITATION] No string concatenation — use a custom function (e.g.")
+	fmt.Println("               full_name(first, last)) when you need to build strings.")
+	fmt.Println("  [LIMITATION] No field refs as bare arithmetic operands — total>=base*1.1")
+	fmt.Println("               doesn't work. Register a function: scaled(total)>50000.")
 }
 
 func runExample(data map[string]any, q, desc string) {

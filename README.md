@@ -47,19 +47,33 @@ prog.Match(map[string]any{"state": "draft", "total": 60000}) // true
 state=draft                                        # equality
 state!=cancelled                                   # not equal
 year>2020                                          # comparison (>, >=, <, <=)
+total!>50000                                       # negated comparison (≡ NOT total>50000)
 name=John*                                         # wildcard (prefix, suffix, contains)
+name="John Doe"                                    # quoted string (spaces, special chars)
 tire_size                                          # presence check
 state=draft AND customer_id=customer_john-doe      # logical AND
+state=draft total>1000                             # implicit AND (juxtaposition)
+state=draft and customer_id=cust_jd                # keywords are case-insensitive (and/or/not/in)
 (state=draft OR state=issued) AND total>50000      # grouping with precedence
+state IN (draft, issued, paid)                     # IN shorthand (desugars to OR chain)
 NOT state=cancelled                                # negation
 created_at:2026-01-01..2026-03-31                  # date range
+created_at>=now()                                  # function in value position
+created_at>=now()-7d                               # arithmetic on dates/durations
+total>=(50000+1000)*1.1                            # arithmetic with parens & precedence
+created_at:daysAgo(30)..now()                      # functions on both ends of a range
 ttl.duration>1d                                    # duration comparison
 labels.dev=jane                                    # nested field access
 lower(name)=john*                                  # function call as field transform
 len(name)>5                                        # function in comparison
-contains(tags, category)                           # function as boolean predicate
+contains(tags, "urgent")                           # function with string-literal arg
+contains(tags, category)                           # function comparing two fields
+coalesce(nickname, name)="John"                    # nullish-style fallback via function
+if(active, "on", "off")="on"                       # ternary-style via function
 orders@first                                       # selector: list is non-empty
-orders@(status=shipped)                            # selector: any element satisfies
+orders@(status=shipped)                            # selector: any element satisfies (EXISTS)
+orders@all(status=shipped)                         # selector: every element satisfies
+orders@none(status=cancelled)                      # selector: no element satisfies
 ```
 
 ## Compile and Evaluate
@@ -275,15 +289,27 @@ ast.String(expr)      // round-trip back to query string
 
 ## Selectors (list fields)
 
-Selectors apply a predicate to a list-valued field. Three forms are supported:
+Selectors apply a predicate to a list-valued field. Six forms are supported:
 
 ```
-items@first            # list exists and has ≥ 1 element
-items@last             # list exists and has ≥ 1 element (distinct for codegen)
+items@first              # list exists and has ≥ 1 element
+items@last               # list exists and has ≥ 1 element (distinct for codegen)
 orders@(status=shipped)  # EXISTS: at least one element satisfies the inner
+orders@any(status=shipped)   # alias of @(...)
+orders@all(price>0)      # universal: every element satisfies inner
+orders@none(status=cancelled) # no element satisfies inner
 ```
 
-Element shapes inside `@(...)`:
+Semantics on edge cases:
+
+| Selector | Empty list | Missing field |
+|----------|------------|---------------|
+| `@first` / `@last` | `false` | `false` |
+| `@(...)` / `@any(...)` | `false` | `false` |
+| `@all(...)` | `true` (vacuously) | `false` |
+| `@none(...)` | `true` | `true` (≡ empty list) |
+
+Element shapes inside `@(...)`, `@any`, `@all`, `@none`:
 
 - `map[string]any` — inner fields resolve by key: `orders@(status=shipped)` reads `"status"` on each map.
 - Struct with `query:"..."` tags — inner fields resolve by tag, same contract as `StructAccessor`.
@@ -296,21 +322,30 @@ Composition works as expected:
 ```
 (orders@(status=shipped) OR orders@(status=delivered)) AND total>500
 NOT line_items@(price>100)
+orders@all(price>0) AND orders@none(status=cancelled)
 ```
 
-Codegen via `Visitor[T]` is the consumer's responsibility — the library does not translate selectors into SQL `EXISTS` or JSON path queries. See `ast.VisitSelector` to plug in your target.
+Codegen via `Visitor[T]` is the consumer's responsibility — the library does not translate selectors into SQL `EXISTS` or JSON path queries. See `ast.VisitSelector` to plug in your target. `examples/sql/main.go` shows a translation to `EXISTS` / `NOT EXISTS` correlated subqueries.
 
 ## Operators
 
 | Operator | Allowed Types | Description |
 |----------|--------------|-------------|
-| `=` | all | Equality or wildcard match |
+| `=` | all | Equality or wildcard match (`name=John*`) |
 | `!=` | all | Not equal |
 | `>` `>=` `<` `<=` | number, date, duration | Comparison |
+| `!>` `!>=` `!<` `!<=` | number, date, duration | Negated comparison (`total!>50000` ≡ `NOT total>50000`; missing field is `true`) |
 | `..` | number, date, duration | Inclusive range (`field:start..end`) |
-| `NOT` | expression | Boolean negation |
-| `AND` | expressions | Logical AND (higher precedence than OR) |
-| `OR` | expressions | Logical OR |
+| `IN` | all literal types | List shorthand (`state IN (draft, issued)` desugars to OR chain) |
+| `<field>` (bare) | any | Presence — field exists and is non-empty |
+| `@first` `@last` | list | Non-emptiness |
+| `@(...)` `@any(...)` | list | EXISTS — at least one element satisfies |
+| `@all(...)` | list | Universal — every element satisfies (empty list is vacuously true) |
+| `@none(...)` | list | No element satisfies (missing field ≡ empty list) |
+| `+` `-` `*` `/` `%` | numeric, date±duration, duration*number | Arithmetic in value position; precedence `* / % > + -`, parens override |
+| `NOT` | expression | Boolean negation (case-insensitive) |
+| `AND` | expressions | Logical AND, higher precedence than OR (juxtaposition is implicit AND) |
+| `OR` | expressions | Logical OR (case-insensitive) |
 
 ## Strengths
 
@@ -327,16 +362,27 @@ Codegen via `Visitor[T]` is the consumer's responsibility — the library does n
 
 ## Limitations
 
-These are known limitations that we plan to address in future versions:
+Resolved (now supported):
 
-- **No string literals in function args** — function arguments are parsed as field references, not quoted strings. `contains(name, "urgent")` won't work; use wildcard `name=*urgent*` or pass both as field refs: `contains(name, search_term)`.
-- **No functions in value position** — `created_at>=now()` is not yet supported. Compute dynamic values before compiling, or use `daysAgo()` as a field transform workaround.
-- **No arithmetic** — `total>50000*1.1` is not supported. Register a custom function for computed comparisons.
-- **No implicit AND** — `state=draft total>50000` requires explicit `AND`. Some query languages allow space as implicit AND.
-- **No quoted strings** — values are unquoted and terminated by whitespace or `)`. Values containing spaces are not directly expressible.
-- **No OR shorthand** — `state=(draft,issued)` or `state IN (draft,issued)` is not supported. Use `state=draft OR state=issued`.
-- **Case-sensitive keywords** — `AND`, `OR`, `NOT` must be uppercase. `and`, `or`, `not` are treated as identifiers.
-- **No negated comparisons** — `NOT total>50000` works, but `total!>50000` does not exist.
+- ~~No string literals in function args~~ — `contains(name, "urgent")` works.
+- ~~No functions in value position~~ — `created_at>=now()`, `total>=threshold()` work.
+- ~~No quoted strings~~ — `field="hello world"` with `\"`, `\\`, `\n`, `\t`, `\r` escapes.
+- ~~No OR shorthand~~ — `state IN (draft, issued, paid)` desugars to an OR chain.
+- ~~Case-sensitive keywords~~ — `and`/`or`/`not`/`in` accepted in any case.
+- ~~No negated comparisons~~ — `total!>50000` desugars to `NOT total>50000` (missing-field safe).
+- ~~No arithmetic~~ — `total>=50000*1.1`, `created_at>=now()-7d`, `(50000+1000)*1.1` with precedence and parens. Operates on numeric literals, durations, dates, and function results; field references in arithmetic are intentionally excluded (use a custom function).
+- ~~No implicit AND~~ — `state=draft total>1000` parses identically to the explicit form.
+- ~~No general array operations~~ — `@all(inner)` (universal), `@any(inner)` (alias for `@(...)`), `@none(inner)` complement the existing `@first` / `@last`.
+- ~~No ternary / nullish~~ — covered via built-in functions `if(cond, a, b)` and `coalesce(a, b, c)`.
+- ~~Numeric literals in function args~~ — `addDays(start, 7)`, `between(start, 2026-01-01, 2026-12-31)`.
+
+Remaining limitations (no plans to add — they'd compromise the URL-safe identity):
+
+- **No string concatenation** — `firstName + " " + lastName` is not supported. Use a custom function.
+- **No field references in arithmetic** — `total>=base*1.1` does not work because bareword idents would collide with hyphenated field names. Use a custom function: `scaled(total)>1.1`.
+
+Performance-shaped limitations (not language features):
+
 - **Closure-based eval** — the eval engine compiles to closure trees, not bytecode. For hot-path evaluation of millions of records, a bytecode compiler would be faster.
 - **Reflect in struct binding** — `CompileFor[T]` and `StructAccessor` use reflection. This is fine for compile-time setup but adds overhead if called per-record. Compile once, match many.
 
@@ -350,15 +396,22 @@ These are known limitations that we plan to address in future versions:
 | **Wildcards** | `name=John*` native | Regex or custom function |
 | **Ranges** | `created_at:2026-01-01..2026-03-31` | Manual `>=` and `<=` |
 | **Presence** | `tire_size` | `tire_size != nil` |
+| **Quoted strings** | `name="John Doe"` with `\"`, `\n`, etc. | `"John Doe"` |
+| **IN list** | `state IN (draft, issued)` | `state in ["draft", "issued"]` |
+| **Negated comparisons** | `total!>50000` (≡ `NOT total>50000`) | `!(total > 50000)` |
+| **Case-insensitive keywords** | `and`/`or`/`not`/`in` in any case | Lowercase keywords |
+| **Functions in value position** | `created_at>=now()` | `createdAt >= now()` |
+| **String literals in func args** | `contains(name, "urgent")` | `contains(name, "urgent")` |
 | **Field validation** | Per-field type + operator config | Struct-based type checking |
 | **Code generation** | `Visitor[T]` for SQL/JSON/React/etc. | Not designed for this |
 | **Dependencies** | Zero (stdlib only) | reflect, unsafe, internal |
 | **WASM** | First-class target | Possible but heavy |
 | **Functions** | Built-in + custom registry | Rich expression language |
-| **Arithmetic** | Not supported | Full arithmetic |
-| **String operations** | Via functions (`lower`, `len`) | Native (`+`, `contains`, etc.) |
-| **Ternary/nullish** | Not supported | `?:`, `??` |
-| **Array operations** | Not supported | `map`, `filter`, `all`, `any` |
+| **Arithmetic** | `total>=50000*1.1`, `now()-7d` (literals/durations/dates/calls; no field refs) | Full arithmetic including field refs |
+| **String operations** | Via functions (`lower`, `len`, `contains`); no concatenation | Native (`+`, `contains`, etc.) |
+| **Ternary/nullish** | Via `if()` and `coalesce()` builtins | `?:`, `??` |
+| **Array operations** | `@(...)` / `@any` / `@all` / `@none` selectors | `map`, `filter`, `all`, `any` |
+| **Implicit AND** | `state=draft total>1000` works | `&&` required |
 | **Maturity** | New | Battle-tested, years of production |
 
 **Choose this library** when you need a search/filter language for end users (search bars, `?q=` params, API filters) with multi-target code generation and query sandboxing.
