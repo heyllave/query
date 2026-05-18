@@ -132,7 +132,7 @@ func elementAccessor(elem any) func(string) (any, bool) {
 		}
 	}
 	rv := reflect.ValueOf(elem)
-	if rv.Kind() == reflect.Ptr {
+	if rv.Kind() == reflect.Pointer {
 		if rv.IsNil() {
 			return func(string) (any, bool) { return nil, false }
 		}

@@ -157,29 +157,34 @@ func compileValueResolver(v *ast.Value, funcs FuncRegistry) valueResolver {
 // duration op int|float → duration. Anything else returns nil so the
 // comparison falls back to the default-false missing-operand path.
 func applyArith(left, right *ast.Value, op ast.ArithOp) *ast.Value {
-	// time + duration / time - duration → time
+	// time ± duration → time. Other ops on (date, duration) are undefined
+	// and fall through to the final `return nil` below.
 	if left.Type == ast.ValueDate && right.Type == ast.ValueDuration {
 		switch op {
 		case ast.ArithAdd:
 			return valueFromAny(left.Date.Add(right.Duration))
 		case ast.ArithSub:
 			return valueFromAny(left.Date.Add(-right.Duration))
+		default:
 		}
 	}
 	// time - time → duration
 	if left.Type == ast.ValueDate && right.Type == ast.ValueDate && op == ast.ArithSub {
 		return valueFromAny(left.Date.Sub(right.Date))
 	}
-	// duration arithmetic
+	// duration ± duration → duration. Multiplicative ops on two durations are
+	// undefined and fall through.
 	if left.Type == ast.ValueDuration && right.Type == ast.ValueDuration {
 		switch op {
 		case ast.ArithAdd:
 			return valueFromAny(left.Duration + right.Duration)
 		case ast.ArithSub:
 			return valueFromAny(left.Duration - right.Duration)
+		default:
 		}
 	}
-	// duration * number / duration / number
+	// duration * number → duration; duration / number → duration. Additive ops
+	// between a duration and a unitless number are undefined and fall through.
 	if left.Type == ast.ValueDuration && isNumericValue(right) {
 		rf := numericFloat(right)
 		switch op {
@@ -190,6 +195,7 @@ func applyArith(left, right *ast.Value, op ast.ArithOp) *ast.Value {
 				return nil
 			}
 			return valueFromAny(time.Duration(float64(left.Duration) / rf))
+		default:
 		}
 	}
 	if isNumericValue(left) && right.Type == ast.ValueDuration && op == ast.ArithMul {
@@ -199,6 +205,8 @@ func applyArith(left, right *ast.Value, op ast.ArithOp) *ast.Value {
 	// pure numeric arithmetic
 	if isNumericValue(left) && isNumericValue(right) {
 		// Stay in int if both sides are integers and the op preserves it.
+		// ArithDiv is excluded by the guard above (int/int always promotes to
+		// float, matching Go's float division semantics for queries).
 		if left.Type == ast.ValueInteger && right.Type == ast.ValueInteger && op != ast.ArithDiv {
 			a, b := left.Int, right.Int
 			switch op {
@@ -213,6 +221,8 @@ func applyArith(left, right *ast.Value, op ast.ArithOp) *ast.Value {
 					return nil
 				}
 				return valueFromAny(a % b)
+			case ast.ArithDiv:
+				// unreachable — guarded above
 			}
 		}
 		a := numericFloat(left)

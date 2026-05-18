@@ -126,9 +126,13 @@ func writeArithOperand(buf *strings.Builder, v *Value, parentOp ArithOp, isLeft 
 		parentPrec := arithPrecedence(parentOp)
 		needParens := childPrec < parentPrec
 		if !needParens && !isLeft && childPrec == parentPrec {
+			// Non-commutative ops need right-side parens at equal precedence
+			// (`5-(2-1)` is not `5-2-1`). Commutative `+` and `*` don't.
 			switch parentOp {
 			case ArithSub, ArithDiv, ArithMod:
 				needParens = true
+			default:
+				// ArithAdd, ArithMul — commutative, no parens needed.
 			}
 		}
 		if needParens {
