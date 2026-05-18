@@ -38,6 +38,8 @@ const (
 	ValueBoolean                   // true or false
 	ValueDate                      // date (YYYY-MM-DD)
 	ValueDuration                  // duration (1d, 4h, etc.)
+	ValueFunc                      // function call resolved at match time, e.g. now()
+	ValueArith                     // arithmetic expression resolved at match time, e.g. 50000*1.1
 )
 
 var valueTypeNames = [...]string{
@@ -47,6 +49,8 @@ var valueTypeNames = [...]string{
 	ValueBoolean:  "boolean",
 	ValueDate:     "date",
 	ValueDuration: "duration",
+	ValueFunc:     "function",
+	ValueArith:    "arithmetic",
 }
 
 // String returns the name of the value type.
@@ -68,9 +72,23 @@ type Value struct {
 	Date     time.Time     // for date values
 	Duration time.Duration // for duration values
 	Wildcard bool          // true if the value contains wildcards
+	Quoted   bool          // true if the string value came from a "..."-quoted literal
+	Func     *FuncCallExpr // for ValueFunc: function call resolved at match time
+	Arith    *ArithExpr    // for ValueArith: arithmetic expression resolved at match time
+}
+
+// ArithExpr is a binary arithmetic expression appearing in value position:
+// 50000*1.1, now()-7d, (a+b)*c. Operands are themselves Values, so the tree
+// can mix literals, function calls, and nested arithmetic.
+type ArithExpr struct {
+	Op    string // "+", "-", "*", "/", "%"
+	Left  *Value
+	Right *Value
 }
 
 // Any returns the typed Go value (string, int64, float64, bool, time.Time, or time.Duration).
+// For ValueFunc, returns nil — the function call must be resolved by the eval
+// engine against a function registry.
 func (v Value) Any() any {
 	if v.Wildcard {
 		return v.Str
@@ -88,6 +106,8 @@ func (v Value) Any() any {
 		return v.Date
 	case ValueDuration:
 		return v.Duration
+	case ValueFunc, ValueArith:
+		return nil
 	default:
 		return v.Raw
 	}

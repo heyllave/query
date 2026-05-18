@@ -38,12 +38,22 @@ const (
 	And                  // AND
 	Or                   // OR
 	Not                  // NOT
+	In                   // IN
 	LParen               // (
 	RParen               // )
 	At                   // @
 	Dot                  // .
 	Comma                // ,
 	Wildcard             // * (within string values)
+	Ngt                  // !>  (NOT greater than)
+	Ngte                 // !>= (NOT greater than or equal)
+	Nlt                  // !<  (NOT less than)
+	Nlte                 // !<= (NOT less than or equal)
+	Plus                 // + (arithmetic)
+	Minus                // - (arithmetic / unary)
+	Mul                  // * (arithmetic — distinct from Wildcard)
+	Div                  // / (arithmetic)
+	Mod                  // % (arithmetic)
 )
 
 var typeNames = [...]string{
@@ -67,12 +77,32 @@ var typeNames = [...]string{
 	And:      "AND",
 	Or:       "OR",
 	Not:      "NOT",
+	In:       "IN",
 	LParen:   "(",
 	RParen:   ")",
 	At:       "@",
 	Dot:      ".",
 	Comma:    ",",
 	Wildcard: "*",
+	Ngt:      "!>",
+	Ngte:     "!>=",
+	Nlt:      "!<",
+	Nlte:     "!<=",
+	Plus:     "+",
+	Minus:    "-",
+	Mul:      "*",
+	Div:      "/",
+	Mod:      "%",
+}
+
+// IsArithmetic reports whether the token type is an arithmetic operator.
+func (t Type) IsArithmetic() bool {
+	switch t { //nolint:exhaustive // only arithmetic tokens return true
+	case Plus, Minus, Mul, Div, Mod:
+		return true
+	default:
+		return false
+	}
 }
 
 // String returns the human-readable name of the token type.
@@ -86,10 +116,39 @@ func (t Type) String() string {
 // IsOperator reports whether the token type is a comparison operator.
 func (t Type) IsOperator() bool {
 	switch t { //nolint:exhaustive // only operator tokens return true
-	case Eq, Neq, Gt, Gte, Lt, Lte, Colon:
+	case Eq, Neq, Gt, Gte, Lt, Lte, Ngt, Ngte, Nlt, Nlte, Colon:
 		return true
 	default:
 		return false
+	}
+}
+
+// IsNegatedOperator reports whether the token type is a negated comparison
+// operator (!>, !>=, !<, !<=).
+func (t Type) IsNegatedOperator() bool {
+	switch t { //nolint:exhaustive // only operator tokens return true
+	case Ngt, Ngte, Nlt, Nlte:
+		return true
+	default:
+		return false
+	}
+}
+
+// NegateOperator returns the positive form of a negated comparison operator
+// (!> → >, !>= → >=, !< → <, !<= → <=). For non-negated operators it returns
+// the input unchanged.
+func NegateOperator(t Type) Type {
+	switch t { //nolint:exhaustive // only negated comparison operators
+	case Ngt:
+		return Gt
+	case Ngte:
+		return Gte
+	case Nlt:
+		return Lt
+	case Nlte:
+		return Lte
+	default:
+		return t
 	}
 }
 
@@ -100,9 +159,10 @@ func (t Type) IsLogical() bool {
 
 // Token represents a single lexical token with its type, value, and position.
 type Token struct {
-	Type  Type
-	Value string
-	Pos   Position
+	Type   Type
+	Value  string
+	Pos    Position
+	Quoted bool // true if a String token came from a "..."-quoted literal
 }
 
 // String returns a debug representation of the token.
@@ -128,6 +188,24 @@ func OperatorSymbol(op Type) string {
 		return "<"
 	case Lte:
 		return "<="
+	case Ngt:
+		return "!>"
+	case Ngte:
+		return "!>="
+	case Nlt:
+		return "!<"
+	case Nlte:
+		return "!<="
+	case Plus:
+		return "+"
+	case Minus:
+		return "-"
+	case Mul:
+		return "*"
+	case Div:
+		return "/"
+	case Mod:
+		return "%"
 	case Range:
 		return ".."
 	case Colon:
