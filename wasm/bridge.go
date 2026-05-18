@@ -7,9 +7,51 @@ import (
 	"syscall/js"
 
 	"github.com/heyllave/query/ast"
+	"github.com/heyllave/query/eval"
 	"github.com/heyllave/query/parser"
 	"github.com/heyllave/query/validate"
 )
+
+// jsMatch compiles the query and matches it against each provided record.
+//
+// JS signature: queryMatch(query: string, fieldsJSON: string, recordsJSON: string) =>
+//
+//	{ result?: { matched: bool[] }, error?: string }
+//
+// The fields argument may be "[]" / "null" — validation is skipped and the
+// matcher runs against whatever the record's map provides.
+func jsMatch(_ js.Value, args []js.Value) any {
+	if len(args) < 3 {
+		return jsResult(nil, "queryMatch requires query, fields, and records arguments")
+	}
+
+	q := args[0].String()
+	fieldsJSON := args[1].String()
+	recordsJSON := args[2].String()
+
+	var fields []validate.FieldConfig
+	if fieldsJSON != "" && fieldsJSON != "null" {
+		if err := json.Unmarshal([]byte(fieldsJSON), &fields); err != nil {
+			return jsResult(nil, "invalid fields config: "+err.Error())
+		}
+	}
+
+	var records []map[string]any
+	if err := json.Unmarshal([]byte(recordsJSON), &records); err != nil {
+		return jsResult(nil, "invalid records: "+err.Error())
+	}
+
+	prog, err := eval.Compile(q, fields)
+	if err != nil {
+		return jsResult(nil, err.Error())
+	}
+
+	matched := make([]bool, len(records))
+	for i, r := range records {
+		matched[i] = prog.Match(r)
+	}
+	return jsResult(map[string]any{"matched": matched}, "")
+}
 
 // jsParse parses a query string and returns the AST as a JSON object.
 //
