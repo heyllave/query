@@ -34,6 +34,25 @@ func Lex(input string, maxLength int) ([]token.Token, error) {
 	return l.tokens, nil
 }
 
+// LexValue tokenizes input as a value expression, starting in value mode so a
+// leading literal, arithmetic expression, or function call lexes correctly at
+// position 0 (where the boolean grammar would expect a field name). It backs
+// [ParseValue].
+func LexValue(input string, maxLength int) ([]token.Token, error) {
+	if maxLength > 0 && len(input) > maxLength {
+		return nil, ErrorList{newError(ErrQueryTooLong, token.Position{},
+			"query length %d exceeds maximum of %d characters", len(input), maxLength)}
+	}
+
+	l := &lexer{input: input, afterOperator: true}
+	l.run()
+
+	if err := l.errors.errOrNil(); err != nil {
+		return nil, err
+	}
+	return l.tokens, nil
+}
+
 func (l *lexer) run() {
 	for l.pos < len(l.input) {
 		l.skipWhitespace()

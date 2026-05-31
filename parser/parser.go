@@ -39,6 +39,42 @@ func Parse(input string, maxLength int) (ast.Expression, error) {
 	return expr, nil
 }
 
+// ParseValue lexes and parses a bare value expression as the root, producing an
+// *[ast.ValueExpr]. Unlike [Parse], which requires a boolean predicate, this
+// accepts a value-producing expression — a literal, arithmetic, or function
+// call — so the query computes and returns a value rather than true/false.
+//
+//	now()-7d
+//	(50000+1000)*1.1
+//	upper(name)
+//
+// Field references are only reachable through function arguments, matching the
+// arithmetic-operand rules of value position.
+func ParseValue(input string, maxLength int) (ast.Expression, error) {
+	tokens, err := LexValue(input, maxLength)
+	if err != nil {
+		return nil, err
+	}
+	p := &parser{tokens: tokens}
+	startPos := p.peek().Pos
+	val := p.parseValue()
+	if err := p.errors.errOrNil(); err != nil {
+		return nil, err
+	}
+	if val == nil {
+		return nil, ErrorList{newError(ErrUnexpectedEOF, startPos, "expected a value expression")}
+	}
+	if p.peek().Type != token.EOF {
+		tok := p.peek()
+		p.errors.add(newError(ErrUnexpectedToken, tok.Pos,
+			"unexpected token %s, expected end of value expression", tok))
+	}
+	if err := p.errors.errOrNil(); err != nil {
+		return nil, err
+	}
+	return &ast.ValueExpr{Value: *val, Position: startPos}, nil
+}
+
 func (p *parser) parseExpression() ast.Expression {
 	return p.parseLogicalOr()
 }
