@@ -290,9 +290,16 @@ func valueFromAny(v any) *ast.Value {
 		return &ast.Value{Type: ast.ValueDate, Raw: x.Format(time.RFC3339), Date: x}
 	case time.Duration:
 		return &ast.Value{Type: ast.ValueDuration, Raw: x.String(), Duration: x}
+	case []any:
+		return &ast.Value{Type: ast.ValueList, Raw: fmt.Sprint(x), List: x}
 	case nil:
 		return nil
 	default:
+		// Typed slices ([]string, []int, …) are preserved as lists so value
+		// expressions can return collections; everything else stringifies.
+		if elems, ok := toSlice(x); ok {
+			return &ast.Value{Type: ast.ValueList, Raw: fmt.Sprint(x), List: elems}
+		}
 		s := fmt.Sprint(x)
 		return &ast.Value{Type: ast.ValueString, Raw: s, Str: s}
 	}
@@ -438,6 +445,12 @@ func equalValues(actual any, expected *ast.Value) bool {
 		return toTime(actual).Equal(expected.Date)
 	case ast.ValueDuration:
 		return toDuration(actual) == expected.Duration
+	case ast.ValueList:
+		// A list-valued operand that reaches a scalar comparison is matched on
+		// its string form, case-insensitively — the same semantics every other
+		// comparable type uses. Without this case it would fall to the default
+		// branch and compare case-sensitively, diverging from ValueString.
+		return strings.EqualFold(fmt.Sprint(actual), expected.Raw)
 	default:
 		return fmt.Sprint(actual) == expected.Raw
 	}

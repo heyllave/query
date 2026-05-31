@@ -40,6 +40,7 @@ const (
 	ValueDuration                  // duration (1d, 4h, etc.)
 	ValueFunc                      // function call resolved at match time, e.g. now()
 	ValueArith                     // arithmetic expression resolved at match time, e.g. 50000*1.1
+	ValueList                      // a list of values produced at match time, e.g. a function returning a slice
 )
 
 var valueTypeNames = [...]string{
@@ -51,6 +52,7 @@ var valueTypeNames = [...]string{
 	ValueDuration: "duration",
 	ValueFunc:     "function",
 	ValueArith:    "arithmetic",
+	ValueList:     "list",
 }
 
 // String returns the name of the value type.
@@ -75,6 +77,7 @@ type Value struct {
 	Quoted   bool          // true if the string value came from a "..."-quoted literal
 	Func     *FuncCallExpr // for ValueFunc: function call resolved at match time
 	Arith    *ArithExpr    // for ValueArith: arithmetic expression resolved at match time
+	List     []any         // for ValueList: elements produced at match time
 }
 
 // ArithOp identifies a binary arithmetic operator inside an [ArithExpr]. The
@@ -123,6 +126,8 @@ func (v Value) Any() any {
 		return v.Date
 	case ValueDuration:
 		return v.Duration
+	case ValueList:
+		return v.List
 	case ValueFunc, ValueArith:
 		return nil
 	default:
