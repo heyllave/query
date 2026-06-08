@@ -31,28 +31,78 @@ func Walk(expr Expression, fn func(Expression) bool) {
 	}
 }
 
-// Fields returns all unique field paths referenced in the expression.
+// Fields returns all unique field paths referenced in the expression. This
+// includes the comparison/presence field of each node and any fields referenced
+// in value position — bracketed field-ref operands ([cpu_limit]) and field
+// arguments to functions — so a query like cpu>[cpu_limit] reports both cpu and
+// cpu_limit. Walk itself stays leaf-only over Expression nodes because the value
+// subtrees are not Expressions; Fields descends into the Value layer explicitly.
 func Fields(expr Expression) []FieldPath {
 	seen := make(map[string]bool)
 	var result []FieldPath
-	Walk(expr, func(e Expression) bool {
-		var fp FieldPath
-		switch n := e.(type) {
-		case *QualifierExpr:
-			fp = n.Field
-		case *PresenceExpr:
-			fp = n.Field
-		default:
-			return true
-		}
+	add := func(fp FieldPath) {
 		key := fp.String()
 		if !seen[key] {
 			seen[key] = true
 			result = append(result, fp)
 		}
+	}
+	Walk(expr, func(e Expression) bool {
+		switch n := e.(type) {
+		case *QualifierExpr:
+			add(n.Field)
+			if n.FieldFunc != nil {
+				collectFuncFields(n.FieldFunc, add)
+			}
+			collectValueFields(&n.Value, add)
+			collectValueFields(n.EndValue, add)
+		case *PresenceExpr:
+			add(n.Field)
+		case *ValueExpr:
+			collectValueFields(&n.Value, add)
+		case *FuncCallExpr:
+			collectFuncFields(n, add)
+		}
 		return true
 	})
 	return result
+}
+
+// collectValueFields surfaces field references reachable inside a Value: a
+// bracketed field-ref operand, the operands of an arithmetic subtree, and the
+// arguments of a function-valued operand.
+func collectValueFields(v *Value, add func(FieldPath)) {
+	if v == nil {
+		return
+	}
+	switch v.Type { //nolint:exhaustive // only composite value types carry nested field refs
+	case ValueFieldRef:
+		add(v.Field)
+	case ValueArith:
+		if v.Arith != nil {
+			collectValueFields(v.Arith.Left, add)
+			collectValueFields(v.Arith.Right, add)
+		}
+	case ValueFunc:
+		if v.Func != nil {
+			collectFuncFields(v.Func, add)
+		}
+	}
+}
+
+// collectFuncFields surfaces field references in a function call's arguments,
+// recursing into nested calls.
+func collectFuncFields(fc *FuncCallExpr, add func(FieldPath)) {
+	for _, arg := range fc.Args {
+		switch {
+		case arg.Field != nil:
+			add(*arg.Field)
+		case arg.Value != nil:
+			collectValueFields(arg.Value, add)
+		case arg.Call != nil:
+			collectFuncFields(arg.Call, add)
+		}
+	}
 }
 
 // Qualifiers returns all qualifier expressions in the AST.

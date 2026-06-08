@@ -226,20 +226,18 @@ func (l *lexer) lexNumericLiteral() {
 	l.tokens = append(l.tokens, tok)
 }
 
-// lexQuotedString lexes a double-quoted string and emits a String token. The
-// opening quote is at l.pos. Supports the escape sequences: \", \\, \n, \t, \r.
-// Any other \x is preserved as the literal character x.
-func (l *lexer) lexQuotedString() {
-	start := l.pos
+// readQuotedString decodes a double-quoted run with the opening quote at l.pos,
+// advancing past the closing quote. It returns the decoded text and whether the
+// string was terminated. Escape sequences: \", \\, \n, \t, \r; any other \x is
+// the literal x. Shared by lexQuotedString and lexFieldRef.
+func (l *lexer) readQuotedString() (string, bool) {
 	l.pos++ // skip opening quote
 	var buf strings.Builder
-	terminated := false
 	for l.pos < len(l.input) {
 		ch := l.input[l.pos]
 		if ch == '"' {
-			terminated = true
 			l.pos++
-			break
+			return buf.String(), true
 		}
 		if ch == '\\' && l.pos+1 < len(l.input) {
 			next := l.input[l.pos+1]
@@ -261,6 +259,14 @@ func (l *lexer) lexQuotedString() {
 		buf.WriteByte(ch)
 		l.pos++
 	}
+	return buf.String(), false
+}
+
+// lexQuotedString lexes a double-quoted string and emits a String token. The
+// opening quote is at l.pos.
+func (l *lexer) lexQuotedString() {
+	start := l.pos
+	value, terminated := l.readQuotedString()
 	pos := token.Position{Offset: start, Length: l.pos - start}
 	if !terminated {
 		l.errors.add(newError(ErrSyntax, pos, "unterminated string literal"))
@@ -271,11 +277,71 @@ func (l *lexer) lexQuotedString() {
 	// that they want a literal string.
 	l.tokens = append(l.tokens, token.Token{
 		Type:   token.String,
-		Value:  buf.String(),
+		Value:  value,
 		Pos:    pos,
 		Quoted: true,
 	})
 	// Quoted strings are full values; we are no longer expecting one.
+	l.afterOperator = false
+}
+
+// lexFieldRef lexes a bracketed field reference in value position with the
+// opening '[' at l.pos: [name], [labels.dev], or ["name with-special.chars"].
+// The bare form is a dot-separated path over the identifier alphabet; the quoted
+// form takes the whole inner text as a single segment. Emits a FieldRef token.
+func (l *lexer) lexFieldRef() {
+	start := l.pos
+	l.pos++ // skip '['
+	l.skipWhitespace()
+
+	var name string
+	var quoted bool
+	if l.pos < len(l.input) && l.input[l.pos] == '"' {
+		var ok bool
+		name, ok = l.readQuotedString()
+		quoted = true
+		if !ok {
+			l.errors.add(newError(ErrSyntax,
+				token.Position{Offset: start, Length: l.pos - start},
+				"unterminated field reference"))
+			return
+		}
+	} else {
+		nameStart := l.pos
+		for l.pos < len(l.input) {
+			c := l.input[l.pos]
+			if isIdentChar(c) || c == '.' {
+				l.pos++
+				continue
+			}
+			break
+		}
+		name = l.input[nameStart:l.pos]
+	}
+
+	l.skipWhitespace()
+	if l.pos >= len(l.input) || l.input[l.pos] != ']' {
+		l.errors.add(newError(ErrSyntax,
+			token.Position{Offset: start, Length: l.pos - start},
+			"unterminated field reference"))
+		return
+	}
+	l.pos++ // skip ']'
+
+	if name == "" {
+		l.errors.add(newError(ErrSyntax,
+			token.Position{Offset: start, Length: l.pos - start},
+			"empty field reference"))
+		return
+	}
+
+	l.tokens = append(l.tokens, token.Token{
+		Type:   token.FieldRef,
+		Value:  name,
+		Pos:    token.Position{Offset: start, Length: l.pos - start},
+		Quoted: quoted,
+	})
+	// A field reference is a complete value.
 	l.afterOperator = false
 }
 
@@ -295,20 +361,28 @@ func (l *lexer) lexValue() {
 	}
 
 	// Arithmetic-style value. Examples:
-	//   (50000+1000)*1.1, now()-7d, daysAgo(7)+1d, 50000*1.1
+	//   (50000+1000)*1.1, now()-7d, daysAgo(7)+1d, 50000*1.1, [base]*1.1
 	//
 	// To avoid breaking wildcard semantics like `year=202*` (where `*` is a
 	// wildcard suffix, not a partial multiplication), the look-ahead in
 	// isArithValueAhead requires every arithmetic operator to have operands
-	// on BOTH sides.
+	// on BOTH sides. This runs before the lone-field-ref branch so a field ref
+	// followed by an operator ([base]*1.1) lexes as one arithmetic value.
 	if l.isArithValueAhead() {
 		l.lexArithValueExpr()
 		return
 	}
 
-	// Otherwise: unquoted string with possible wildcards. Field references
-	// inside arithmetic are intentionally not supported (would collide with
-	// hyphenated idents and unquoted strings); use a custom function instead.
+	// Bracketed field reference standing alone: field=[other] or
+	// field>=["other-field"].
+	if ch == '[' {
+		l.lexFieldRef()
+		return
+	}
+
+	// Otherwise: unquoted string with possible wildcards. A bareword field
+	// reference is written in brackets ([field], handled above) so it does not
+	// collide with hyphenated idents and unquoted string values.
 	l.lexUnquotedStringValue()
 }
 
@@ -326,6 +400,10 @@ func (l *lexer) isArithValueAhead() bool {
 	}
 	ch := l.input[l.pos]
 	if ch == '(' {
+		return true
+	}
+	// A field reference at the start routes to arithmetic, e.g. [base]*1.1.
+	if ch == '[' {
 		return true
 	}
 	// Function-call primary: <ident>(
@@ -393,11 +471,12 @@ func (l *lexer) hasOperandsAround(i int) bool {
 }
 
 // endsPrimary reports whether l.input[i] is the last byte of a value primary:
-// a digit (number end), `)` (closing call/group), or a duration suffix
-// immediately preceded by a digit (so "7d" / "30m" register as primaries).
+// a digit (number end), `)` (closing call/group), `]` (closing field ref), or a
+// duration suffix immediately preceded by a digit (so "7d" / "30m" register as
+// primaries).
 func (l *lexer) endsPrimary(i int) bool {
 	c := l.input[i]
-	if isDigit(c) || c == ')' {
+	if isDigit(c) || c == ')' || c == ']' {
 		return true
 	}
 	if (c == 'd' || c == 'h' || c == 'w' || c == 'm') && i >= 1 && isDigit(l.input[i-1]) {
@@ -407,10 +486,11 @@ func (l *lexer) endsPrimary(i int) bool {
 }
 
 // beginsPrimary reports whether l.input[i] starts a value primary: a digit,
-// an opening paren, or the start of a function-call identifier.
+// an opening paren, an opening field-ref bracket, or the start of a
+// function-call identifier.
 func (l *lexer) beginsPrimary(i int) bool {
 	c := l.input[i]
-	if isDigit(c) || c == '(' {
+	if isDigit(c) || c == '(' || c == '[' {
 		return true
 	}
 	if isIdentStart(c) {
@@ -435,7 +515,7 @@ func (l *lexer) lexUnquotedStringValue() {
 
 	for l.pos < len(l.input) {
 		ch := l.input[l.pos]
-		if ch == ' ' || ch == '\t' || ch == '\n' || ch == '\r' || ch == ')' {
+		if ch == ' ' || ch == '\t' || ch == '\n' || ch == '\r' || ch == ')' || ch == '[' || ch == ']' {
 			break
 		}
 		if ch == '.' && l.peek(1) == '.' {
@@ -617,6 +697,10 @@ func (l *lexer) lexArithPrimary() bool {
 
 	if ch == '"' {
 		l.lexQuotedString()
+		return true
+	}
+	if ch == '[' {
+		l.lexFieldRef()
 		return true
 	}
 	if ch == ')' {
