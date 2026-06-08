@@ -216,14 +216,12 @@ func TestCompileValue_ListOperations(t *testing.T) {
 	})
 }
 
-// TestListValueOnBooleanPath guards the boolean Match path against the
-// list-coercion change in valueFromAny. Two behaviors are pinned:
+// TestListValueOnBooleanPath pins how a list value behaves on the boolean
+// Match path:
 //
-//   - len() over a list field counts elements (a deliberate change — it
-//     previously returned the length of the slice's string form), and
+//   - len() over a list field counts its elements, and
 //   - a list-valued operand reaching a scalar = comparison matches on its
-//     string form case-insensitively, the same as ValueString (without the
-//     ValueList case in equalValues it would silently become case-sensitive).
+//     string form case-insensitively, the same as a plain string value.
 func TestListValueOnBooleanPath(t *testing.T) {
 	t.Run("len over list field counts elements", func(t *testing.T) {
 		fields := []validate.FieldConfig{
@@ -458,10 +456,9 @@ func TestCompileValue_SourceAndAST(t *testing.T) {
 	}
 }
 
-// TestCompileValue_BooleanPathUnaffected guards that the value entrypoint did
-// not regress the predicate engine: the same library still compiles and matches
-// boolean queries.
-func TestCompileValue_BooleanPathUnaffected(t *testing.T) {
+// TestCompile_BooleanPredicateMatches exercises the boolean predicate engine:
+// eval.Compile compiles a predicate and Match evaluates it against a record.
+func TestCompile_BooleanPredicateMatches(t *testing.T) {
 	fields := []validate.FieldConfig{
 		{Name: "total", Type: validate.TypeDecimal, AllowedOps: validate.NumericOps},
 	}

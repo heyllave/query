@@ -448,8 +448,7 @@ func equalValues(actual any, expected *ast.Value) bool {
 	case ast.ValueList:
 		// A list-valued operand that reaches a scalar comparison is matched on
 		// its string form, case-insensitively — the same semantics every other
-		// comparable type uses. Without this case it would fall to the default
-		// branch and compare case-sensitively, diverging from ValueString.
+		// comparable type uses.
 		return strings.EqualFold(fmt.Sprint(actual), expected.Raw)
 	default:
 		return fmt.Sprint(actual) == expected.Raw

@@ -115,7 +115,7 @@ func fnLen(args ...any) (any, error) {
 		return nil, fmt.Errorf("len() requires 1 argument, got %d", len(args))
 	}
 	// A list reports its element count; anything else reports the length of its
-	// string form (so len() of a name is its character count, as before).
+	// string form (so len() of a name is its character count).
 	if elems, ok := toSlice(args[0]); ok {
 		return int64(len(elems)), nil
 	}

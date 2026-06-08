@@ -135,7 +135,7 @@ v, _ = prog.Eval(nil)                        // int64(2)
 
 The result is the typed Go value: `int64`, `float64`, `string`, `bool`, `time.Time`, `time.Duration`, or `[]any` for a list. When an expression cannot resolve — division or modulo by zero, a missing field — `Eval` returns `eval.ErrNoValue` rather than a silently-wrong zero. (In a boolean predicate the same condition folds to a false comparison.)
 
-`CompileValue` accepts the same options as `Compile` (`WithFunctions`, `WithAllowedFields`, `WithAllowedOps`, `WithMaxLength`, `WithCustomValidator`). The boolean grammar (`Compile`/`Match`) is unchanged — value parsing is a separate entry point (`parser.ParseValue`), so a value expression never reaches the predicate engine and vice versa.
+`CompileValue` accepts the same options as `Compile` (`WithFunctions`, `WithAllowedFields`, `WithAllowedOps`, `WithMaxLength`, `WithCustomValidator`). Boolean predicates and value expressions have separate entry points — `Compile`/`Match` parse a predicate, `CompileValue`/`Eval` parse a value via `parser.ParseValue` — so a value expression never reaches the predicate engine and vice versa.
 
 ```bash
 go run ./examples/value   # arithmetic, functions, time, lists, error handling
@@ -410,7 +410,7 @@ The language now covers most of what general-purpose expression engines offer fo
 
 - **String literals in function args** — `contains(name, "urgent")`.
 - **Functions in value position** — `created_at>=now()`, `total>=threshold()`.
-- **Value-returning queries** — a query can compute and return a value (number, string, time, duration, or list) instead of a boolean, via `eval.CompileValue` → `Eval`. Boolean remains the default result domain; see [Value Queries](#value-queries).
+- **Value-returning queries** — a query can compute and return a value (number, string, time, duration, or list), via `eval.CompileValue` → `Eval`, in addition to boolean predicates; see [Value Queries](#value-queries).
 - **Lists as values** — a function returning a slice is preserved as a list (`labels()` → `[]any{...}`); `len()` counts list elements; element extraction is a function (`first(tags)`), not a selector.
 - **Quoted strings** — `field="hello world"` with `\"`, `\\`, `\n`, `\t`, `\r` escapes.
 - **`IN` shorthand** — `state IN (draft, issued, paid)` desugars to an OR chain.

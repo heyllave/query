@@ -1,8 +1,8 @@
 // Command value demonstrates value-returning queries: expressions that compute
 // and return a value (number, string, time, duration, or list) rather than
-// evaluating to a boolean. The boolean predicate engine (eval.Compile +
-// Program.Match) is unchanged; eval.CompileValue + ValueProgram.Eval is the
-// value-domain counterpart.
+// evaluating to a boolean. eval.CompileValue + ValueProgram.Eval is the
+// value-domain counterpart to the boolean predicate engine (eval.Compile +
+// Program.Match).
 //
 // Run with:
 //
@@ -26,7 +26,7 @@ func main() {
 	timeValues()
 	lists()
 	errorHandling()
-	booleanStillWorks()
+	booleanPredicate()
 }
 
 // arithmetic: a query can compute a number. Precedence and grouping are honored;
@@ -130,10 +130,10 @@ func errorHandling() {
 	fmt.Printf("  %-18s => err: %v (is ErrNoValue: %v)\n", "5/0", err, errors.Is(err, eval.ErrNoValue))
 }
 
-// booleanStillWorks: the predicate engine is untouched — the same library still
-// answers boolean queries via Compile + Match.
-func booleanStillWorks() {
-	section("boolean predicate (unchanged)")
+// booleanPredicate: the predicate domain — eval.Compile + Match answer a
+// boolean query against a record, alongside the value domain shown above.
+func booleanPredicate() {
+	section("boolean predicate")
 	fields := []validate.FieldConfig{
 		{Name: "total", Type: validate.TypeDecimal, AllowedOps: validate.NumericOps},
 	}
