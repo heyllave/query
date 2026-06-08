@@ -431,10 +431,26 @@ func compileComparisonWithResolver(resolve func(func(string) (any, bool)) (any, 
 	}
 }
 
+// stringifyActual renders a record value to its canonical string form for
+// comparison against a string-typed expected value. time.Time and
+// time.Duration use the same RFC3339 / String() forms as valueFromAny, so a
+// time-typed field compares equal to string(timeExpr); everything else uses its
+// default representation.
+func stringifyActual(v any) string {
+	switch x := v.(type) {
+	case time.Time:
+		return x.Format(time.RFC3339)
+	case time.Duration:
+		return x.String()
+	default:
+		return fmt.Sprint(v)
+	}
+}
+
 func equalValues(actual any, expected *ast.Value) bool {
 	switch expected.Type {
 	case ast.ValueString:
-		return strings.EqualFold(fmt.Sprint(actual), expected.Str)
+		return strings.EqualFold(stringifyActual(actual), expected.Str)
 	case ast.ValueInteger:
 		return toInt64(actual) == expected.Int
 	case ast.ValueFloat:
@@ -449,9 +465,9 @@ func equalValues(actual any, expected *ast.Value) bool {
 		// A list-valued operand that reaches a scalar comparison is matched on
 		// its string form, case-insensitively — the same semantics every other
 		// comparable type uses.
-		return strings.EqualFold(fmt.Sprint(actual), expected.Raw)
+		return strings.EqualFold(stringifyActual(actual), expected.Raw)
 	default:
-		return fmt.Sprint(actual) == expected.Raw
+		return stringifyActual(actual) == expected.Raw
 	}
 }
 
@@ -485,7 +501,7 @@ func compareValues(actual any, expected *ast.Value, op token.Type) bool {
 		b := int64(expected.Duration)
 		return compareOrdered(a, b, op)
 	default:
-		a := fmt.Sprint(actual)
+		a := stringifyActual(actual)
 		b := expected.Raw
 		return compareOrdered(a, b, op)
 	}
