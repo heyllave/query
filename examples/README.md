@@ -24,6 +24,9 @@ go run ./examples/value
 # Rule derivation (do X when A, do Y when B): first-match, collect-all, hybrid
 go run ./examples/rules
 
+# Business days with a computed, always-current Colombian holiday calendar
+go run ./examples/colombia
+
 # Struct binding with compile-time type safety
 go run ./examples/struct
 
@@ -50,6 +53,7 @@ go run ./examples/explain
 | [`functions/`](functions/) | Built-in function families — string, numeric math (abs/round/min/max), time-component (hour/weekday/addDays), list aggregation (count/sum/avg/first/last), type coercion — and custom function registration |
 | [`value/`](value/) | `CompileValue` / `Eval` — value-returning queries: arithmetic, functions over fields, time values, lists, and `ErrNoValue` handling |
 | [`rules/`](rules/) | Rule derivation — pair predicates with actions: first-match routing, collect-all tagging, and hybrid predicate-selects-value-computes |
+| [`colombia/`](colombia/) | A computed Colombian public-holiday calendar (Easter computus + Ley Emiliani Monday shift) wired into `isBusinessDay` / `addBusinessDays` — correct for any year, never stale |
 | [`struct/`](struct/) | `CompileFor[T]` struct binding, `MatchStruct`, type safety |
 | [`restrictions/`](restrictions/) | `WithAllowedFields`, `WithAllowedOps`, `WithMaxDepth`, `WithMaxLength` |
 | [`selector/`](selector/) | `@first`, `@last`, `@(inner)` against map- and struct-backed list fields |
