@@ -13,7 +13,6 @@ import (
 	"errors"
 	"fmt"
 	"log"
-	"reflect"
 	"time"
 
 	"github.com/heyllave/query/eval"
@@ -83,29 +82,26 @@ func timeValues() {
 }
 
 // lists: a function returning a slice is preserved as a collection, and the
-// list-aware builtins (len, and a custom extractor) operate on it.
+// list-aware built-ins (len, count, first, last, sum, avg, contains) operate on
+// it. labels() and amounts() stand in for list-valued record fields.
 func lists() {
 	section("lists")
 	withFns := eval.WithFunctions(
 		eval.Func{Name: "labels", Call: func(...any) (any, error) {
 			return []string{"urgent", "backend", "p0"}, nil
 		}},
-		// A function receives the raw Go value of its argument, so a list arrives
-		// as whatever slice type produced it ([]string here, []any when it comes
-		// from a record). first() handles both via reflect, mirroring how the
-		// built-in len() accepts any slice.
-		eval.Func{Name: "first", Call: func(a ...any) (any, error) {
-			if len(a) != 1 {
-				return nil, nil
-			}
-			rv := reflect.ValueOf(a[0])
-			if (rv.Kind() == reflect.Slice || rv.Kind() == reflect.Array) && rv.Len() > 0 {
-				return rv.Index(0).Interface(), nil
-			}
-			return nil, nil
+		eval.Func{Name: "amounts", Call: func(...any) (any, error) {
+			return []float64{19.99, 5.50, 100.00}, nil
 		}},
 	)
-	for _, q := range []string{"labels()", "len(labels())", "first(labels())"} {
+	for _, q := range []string{
+		"labels()",
+		"count(labels())",
+		"first(labels())",
+		"last(labels())",
+		"sum(amounts())",
+		"avg(amounts())",
+	} {
 		prog, err := eval.CompileValue(q, nil, withFns)
 		if err != nil {
 			log.Fatalf("compile %q: %v", q, err)
