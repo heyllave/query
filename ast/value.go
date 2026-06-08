@@ -41,6 +41,7 @@ const (
 	ValueFunc                      // function call resolved at match time, e.g. now()
 	ValueArith                     // arithmetic expression resolved at match time, e.g. 50000*1.1
 	ValueList                      // a list of values produced at match time, e.g. a function returning a slice
+	ValueFieldRef                  // a field reference in value position, e.g. [base] or ["base-1"]
 )
 
 var valueTypeNames = [...]string{
@@ -53,6 +54,7 @@ var valueTypeNames = [...]string{
 	ValueFunc:     "function",
 	ValueArith:    "arithmetic",
 	ValueList:     "list",
+	ValueFieldRef: "field",
 }
 
 // String returns the name of the value type.
@@ -78,6 +80,7 @@ type Value struct {
 	Func     *FuncCallExpr // for ValueFunc: function call resolved at match time
 	Arith    *ArithExpr    // for ValueArith: arithmetic expression resolved at match time
 	List     []any         // for ValueList: elements produced at match time
+	Field    FieldPath     // for ValueFieldRef: the referenced field path
 }
 
 // ArithOp identifies a binary arithmetic operator inside an [ArithExpr]. The
@@ -128,7 +131,7 @@ func (v Value) Any() any {
 		return v.Duration
 	case ValueList:
 		return v.List
-	case ValueFunc, ValueArith:
+	case ValueFunc, ValueArith, ValueFieldRef:
 		return nil
 	default:
 		return v.Raw

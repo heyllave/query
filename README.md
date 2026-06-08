@@ -66,6 +66,9 @@ created_at:2026-01-01..2026-03-31                  # date range
 created_at>=now()                                  # function in value position
 created_at>=now()-7d                               # arithmetic on dates/durations
 total>=(50000+1000)*1.1                            # arithmetic with parens & precedence
+total>=[base]*1.1                                  # field reference as an arithmetic operand
+cpu>[cpu_limit]                                    # cross-field comparison
+["line-item"]-1                                    # bracketed name with hyphen (value position)
 created_at:daysAgo(30)..now()                      # functions on both ends of a range
 ttl.duration>1d                                    # duration comparison
 labels.dev=jane                                    # nested field access
@@ -407,6 +410,7 @@ Codegen via `Visitor[T]` is the consumer's responsibility — the library does n
 | `@all(...)` | list | Universal — every element satisfies (empty list is vacuously true) |
 | `@none(...)` | list | No element satisfies (missing field ≡ empty list) |
 | `+` `-` `*` `/` `%` | numeric, date±duration, duration*number | Arithmetic in value position; precedence `* / % > + -`, parens override |
+| `[field]` | any | Field reference in value position — an arithmetic/comparison operand (`[base]*1.1`, `cpu>[cpu_limit]`); `["name"]` for hyphen/space/dot names |
 | `NOT` | expression | Boolean negation (case-insensitive) |
 | `AND` | expressions | Logical AND, higher precedence than OR (juxtaposition is implicit AND) |
 | `OR` | expressions | Logical OR (case-insensitive) |
@@ -438,7 +442,9 @@ The language covers most of what general-purpose expression engines offer for fi
 - **`IN` shorthand** — `state IN (draft, issued, paid)` desugars to an OR chain.
 - **Case-insensitive keywords** — `and`/`or`/`not`/`in` accepted in any case.
 - **Negated comparisons** — `total!>50000` desugars to `NOT total>50000`; missing-field safe.
-- **Arithmetic in value position** — `total>=50000*1.1`, `created_at>=now()-7d`, `(50000+1000)*1.1` with `* / % > + -` precedence and paren override. Operands may be numeric literals, durations, dates, and function results.
+- **Arithmetic in value position** — `total>=50000*1.1`, `created_at>=now()-7d`, `(50000+1000)*1.1` with `* / % > + -` precedence and paren override. Operands may be numeric literals, durations, dates, function results, and bracketed field references.
+- **Field references in value position** — a field is referenced in brackets, `[base]`, as an arithmetic operand (`total>=[base]*1.1`) or a comparison operand. The bracket disambiguates from hyphenated bareword field names; use the quoted form `["line-item"]` for names with hyphens, spaces, or dots. (LHS of a qualifier stays a bareword: `total>=[base]`, not `[total]>=base`.)
+- **Cross-field comparison** — compare two fields by referencing the right-hand one: `cpu>[cpu_limit]`, `start<[end]`. A missing right-hand field makes the comparison false.
 - **Implicit AND** — `state=draft total>1000` parses identically to the explicit form.
 - **Array quantifiers** — `@all(inner)`, `@any(inner)` (alias for `@(...)`), `@none(inner)` complement `@first` / `@last`.
 - **Ternary / nullish** — `if(cond, a, b)` and `coalesce(a, b, c)` built-ins.
@@ -454,9 +460,8 @@ The language covers most of what general-purpose expression engines offer for fi
 These features would compromise the URL-safe identity or the static-validation contract:
 
 - **String concatenation** — `firstName + " " + lastName` is not a query. Build the string in a custom function instead.
-- **Field references as arithmetic operands** — `total>=base*1.1` cannot parse because bareword identifiers would collide with hyphenated field names (`customer-id`). Wrap the multiplication in a custom function: `scaled(total)>1.1`.
+- **Bareword field references in arithmetic** — `total>=base*1.1` (without brackets) is not supported, because a bareword would collide with hyphenated field names (`customer-id`). Bracket the reference instead: `total>=[base]*1.1`.
 - **Text-pattern and string-construction functions** — regular-expression match, `replace`, `split`, `substr`, `indexOf`, and `join` are intentionally excluded from the built-in set: their primary arguments are patterns, delimiters, or arbitrary text that would require quoting and `%`-encoding in a `?q=` param, breaking the URL-safe identity. Register them with `WithFunctions` when a non-URL consumer needs them.
-- **Cross-field comparison** — a field on the right-hand side (`resource.owner=department`, `cpu>cpu_limit`) is not supported; the RHS parses as a literal. This needs a parser change, not a built-in.
 
 ### Performance characteristics
 

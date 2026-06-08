@@ -187,7 +187,7 @@ func (v *Validator) validate(expr ast.Expression) {
 		// its type is resolved at match time, like any function/arithmetic
 		// value (see isDynamicValue). We only ensure embedded function field
 		// references are declared.
-		v.validateValueFuncs(&e.Value)
+		v.validateValueFuncs(&e.Value, e.Position)
 	}
 }
 
@@ -201,8 +201,8 @@ func (v *Validator) validateQualifier(q *ast.QualifierExpr) {
 	// Validate functions appearing in value position (e.g., created_at>=now()).
 	// Their return type is opaque to the validator, so we only ensure the
 	// field references inside the function are declared.
-	v.validateValueFuncs(&q.Value)
-	v.validateValueFuncs(q.EndValue)
+	v.validateValueFuncs(&q.Value, q.Position)
+	v.validateValueFuncs(q.EndValue, q.Position)
 
 	if q.HasFieldFunc() {
 		return
@@ -236,25 +236,33 @@ func (v *Validator) validateQualifier(q *ast.QualifierExpr) {
 	}
 }
 
-// isDynamicValue reports whether a Value is resolved at match time
-// (function call or arithmetic) and therefore should not be type-checked
-// against the field's declared type.
+// isDynamicValue reports whether a Value is resolved at match time (function
+// call, arithmetic, or a field reference) and therefore should not be
+// type-checked against the field's declared type.
 func isDynamicValue(v ast.Value) bool {
-	return v.Type == ast.ValueFunc || v.Type == ast.ValueArith
+	return v.Type == ast.ValueFunc || v.Type == ast.ValueArith || v.Type == ast.ValueFieldRef
 }
 
 // validateValueFuncs walks a value's function/arithmetic subtree and validates
-// any embedded function-call field references.
-func (v *Validator) validateValueFuncs(val *ast.Value) {
+// any embedded field references — both function-call field arguments and
+// bracketed field-ref operands ([cpu_limit]) — against the field config. pos is
+// the enclosing expression's position, used for any error (Value carries none).
+func (v *Validator) validateValueFuncs(val *ast.Value, pos token.Position) {
 	if val == nil {
 		return
+	}
+	if val.Type == ast.ValueFieldRef {
+		fieldName := val.Field.String()
+		if _, ok := v.resolveField(fieldName); !ok {
+			v.addError(ErrFieldNotFound, pos, "unknown field %q", fieldName)
+		}
 	}
 	if val.Func != nil {
 		v.validateFuncCallFields(val.Func)
 	}
 	if val.Arith != nil {
-		v.validateValueFuncs(val.Arith.Left)
-		v.validateValueFuncs(val.Arith.Right)
+		v.validateValueFuncs(val.Arith.Left, pos)
+		v.validateValueFuncs(val.Arith.Right, pos)
 	}
 }
 

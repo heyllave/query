@@ -487,6 +487,25 @@ func (p *parser) parseValuePrimary() *ast.Value {
 		}
 		p.advance()
 		return &ast.Value{Type: ast.ValueString, Raw: tok.Value, Str: tok.Value}
+	case token.FieldRef:
+		p.advance()
+		var fp ast.FieldPath
+		if tok.Quoted {
+			// The quoted form takes the whole inner text as one segment so a
+			// name like "weird.name" is not split into a nested path.
+			fp = ast.FieldPath{tok.Value}
+		} else {
+			fp = ast.FieldPath(strings.Split(tok.Value, "."))
+		}
+		// Raw carries the bracket form so arithmetic round-trips ([base]*1.1
+		// must not collapse to base*1.1); shared with ast.String via
+		// ast.FieldRefString.
+		return &ast.Value{
+			Type:   ast.ValueFieldRef,
+			Raw:    ast.FieldRefString(fp, tok.Quoted),
+			Field:  fp,
+			Quoted: tok.Quoted,
+		}
 	case token.String:
 		p.advance()
 		return &ast.Value{Type: ast.ValueString, Raw: tok.Value, Str: tok.Value, Quoted: tok.Quoted}
