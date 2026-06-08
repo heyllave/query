@@ -145,6 +145,18 @@ func compileValueResolver(v *ast.Value, funcs FuncRegistry) valueResolver {
 			}
 			return applyArith(l, r, op)
 		}
+	case ast.ValueFieldRef:
+		// Resolve the referenced field from the record at match time. A missing
+		// or nil field yields a nil value, which folds the comparison to false
+		// (predicate) or ErrNoValue (value domain), like any unresolved operand.
+		field := v.Field.String()
+		return func(get func(string) (any, bool)) *ast.Value {
+			raw, ok := get(field)
+			if !ok {
+				return nil
+			}
+			return valueFromAny(raw)
+		}
 	default:
 		// Capture the pointer — for static literals nothing depends on `get`.
 		return func(func(string) (any, bool)) *ast.Value { return v }

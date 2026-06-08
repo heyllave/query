@@ -54,6 +54,7 @@ const (
 	Mul                  // * (arithmetic — distinct from Wildcard)
 	Div                  // / (arithmetic)
 	Mod                  // % (arithmetic)
+	FieldRef             // [field] or ["field"] — a field reference in value position
 )
 
 var typeNames = [...]string{
@@ -93,6 +94,7 @@ var typeNames = [...]string{
 	Mul:      "*",
 	Div:      "/",
 	Mod:      "%",
+	FieldRef: "FIELDREF",
 }
 
 // IsArithmetic reports whether the token type is an arithmetic operator.

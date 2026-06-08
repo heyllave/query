@@ -110,6 +110,10 @@ func writeValue(buf *strings.Builder, v *Value) {
 		writeArithOperand(buf, v.Arith.Right, v.Arith.Op, false)
 		return
 	}
+	if v.Type == ValueFieldRef {
+		buf.WriteString(FieldRefString(v.Field, v.Quoted))
+		return
+	}
 	if v.Type == ValueString && v.Quoted {
 		writeQuotedString(buf, v.Str)
 		return
@@ -156,6 +160,50 @@ func arithPrecedence(op ArithOp) int {
 	default:
 		return 0
 	}
+}
+
+// FieldRefString renders a value-position field reference: the bare form
+// [path] when every path segment is a plain identifier, otherwise the quoted
+// form ["text"] over the full dotted path. quoted forces the quoted form so a
+// source that was written ["base-1"] round-trips quoted even though [base-1]
+// would also be legal. Parser and serializer share this so Value.Raw and
+// String() output stay in lockstep.
+func FieldRefString(fp FieldPath, quoted bool) string {
+	var buf strings.Builder
+	buf.WriteByte('[')
+	if quoted || fieldRefNeedsQuote(fp) {
+		writeQuotedString(&buf, fp.String())
+	} else {
+		buf.WriteString(fp.String())
+	}
+	buf.WriteByte(']')
+	return buf.String()
+}
+
+// fieldRefNeedsQuote reports whether a field path must use the quoted bracket
+// form because a segment is empty or contains a character outside the bare
+// identifier alphabet (letters, digits, underscore, hyphen; not leading digit).
+func fieldRefNeedsQuote(fp FieldPath) bool {
+	if len(fp) == 0 {
+		return true
+	}
+	for _, seg := range fp {
+		if seg == "" {
+			return true
+		}
+		for i := 0; i < len(seg); i++ {
+			c := seg[i]
+			isAlpha := c == '_' || (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z')
+			isDigit := c >= '0' && c <= '9'
+			if i == 0 && !isAlpha {
+				return true
+			}
+			if !isAlpha && !isDigit && c != '-' {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func writeQuotedString(buf *strings.Builder, s string) {
