@@ -178,6 +178,16 @@ func main() {
 		"weekday() — Sunday=0..Saturday=6 (2026-03-15 is a Sunday)")
 	runExample(data, "year(addDays(created_at, 365))=2027",
 		"addDays() — calendar-day arithmetic; a year later is 2027")
+	runExample(data, "isBusinessDay(created_at)=false",
+		"isBusinessDay() — 2026-03-15 is a Sunday, so false")
+	runExample(data, "weekday(addBusinessDays(created_at, 1))=1",
+		"addBusinessDays() — Sunday + 1 business day is Monday (weekday 1)")
+	runExampleWithFuncs(data,
+		"day(addBusinessDays(created_at, 1, holidays()))=17",
+		"addBusinessDays() with a holiday list — Monday the 16th is a holiday, so the 17th",
+		eval.Func{Name: "holidays", Call: func(...any) (any, error) {
+			return []any{time.Date(2026, 3, 16, 0, 0, 0, 0, time.UTC)}, nil
+		}})
 	fmt.Println("  [RECURRENCE] A schedule is a predicate over decomposed now():")
 	fmt.Println("               weekday(now())>=1 AND weekday(now())<=5 AND hour(now())>=9")
 	fmt.Println("               — \"weekdays from 9am\" — no cron string needed.")

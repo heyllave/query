@@ -185,7 +185,9 @@ hour(created_at)>=9       // hour of day, 0..23
 minute(created_at)=0      // minute of hour, 0..59
 second(created_at)=0      // second of minute, 0..59
 weekday(created_at)=1     // day of week, Sunday=0..Saturday=6
+isBusinessDay(created_at) // true Mon–Fri (weekends excluded)
 addDays(created_at, 7)    // calendar-day arithmetic (value position)
+addBusinessDays(created_at, 3) // add days, skipping weekends
 
 // Date generators
 // (use in eval context)
@@ -424,7 +426,7 @@ Codegen via `Visitor[T]` is the consumer's responsibility — the library does n
 
 ## Scope
 
-The language now covers most of what general-purpose expression engines offer for filter queries, while staying URL-safe and statically validatable. The lists below describe what's in scope and what's deliberately out.
+The language covers most of what general-purpose expression engines offer for filter queries, while staying URL-safe and statically validatable. The lists below describe what's in scope and what's deliberately out.
 
 ### Supported
 
@@ -438,11 +440,12 @@ The language now covers most of what general-purpose expression engines offer fo
 - **Negated comparisons** — `total!>50000` desugars to `NOT total>50000`; missing-field safe.
 - **Arithmetic in value position** — `total>=50000*1.1`, `created_at>=now()-7d`, `(50000+1000)*1.1` with `* / % > + -` precedence and paren override. Operands may be numeric literals, durations, dates, and function results.
 - **Implicit AND** — `state=draft total>1000` parses identically to the explicit form.
-- **Array quantifiers** — `@all(inner)`, `@any(inner)` (alias for `@(...)`), `@none(inner)` complement the existing `@first` / `@last`.
+- **Array quantifiers** — `@all(inner)`, `@any(inner)` (alias for `@(...)`), `@none(inner)` complement `@first` / `@last`.
 - **Ternary / nullish** — `if(cond, a, b)` and `coalesce(a, b, c)` built-ins.
-- **Numeric / date / duration literals in function args** — `addDays(start, 7)`, `between(start, 2026-01-01, 2026-12-31)`.
+- **Numeric / date / duration literals in function args** — `addDays(start, 7)`, `daysAgo(30)`.
 - **Numeric math built-ins** — `abs`, `ceil`, `floor`, `round` (half away from zero), `sqrt`, `pow`, and variadic/list `min` / `max`. Operations with no real result (`sqrt` of a negative, `pow` overflow, `min`/`max` of an empty list) resolve to no value, so a comparison against them is false.
 - **Time-component extractors** — `hour`, `minute`, `second`, and `weekday` (Sunday=0 .. Saturday=6, matching cron) complement `year` / `month` / `day`. A recurrence schedule is then a predicate over `now()`, e.g. `weekday(now())>=1 AND weekday(now())<=5 AND hour(now())>=9`.
+- **Business days** — `isBusinessDay(date)` is true Monday–Friday; `addBusinessDays(date, n)` moves `n` days forward (or back for negative `n`) skipping weekends. Public holidays are calendar- and locale-specific and stay out of scope — register a custom function for those.
 - **List aggregations** — `count`, `sum`, `avg`, `first`, `last` reduce a list to a value; `contains(list, x)` tests membership. `avg`/`first`/`last` of an empty list resolve to no value; `sum` of an empty list is 0.
 - **Type coercions** — `int`, `float`, `string` coerce a value at evaluation time. These are coercion *hints*, not statically-checked casts; an unparseable input resolves to no value.
 
