@@ -6,6 +6,11 @@ Pure Go query language library. Handles lexing, parsing, AST construction, valid
 
 Zero external dependencies. Compiles to WebAssembly.
 
+A query has **two result domains**:
+
+- **Boolean predicate** (the default) — `state=draft AND total>50000` evaluates to `true`/`false` against a record. Compile with `eval.Compile` and run with `Match`.
+- **Value** — `(50000+1000)*1.1`, `now()-7d`, `upper(name)`, or a list — *computes and returns a value*. Compile with `eval.CompileValue` and run with `Eval`. See [Value Queries](#value-queries).
+
 ## Install
 
 ```bash
@@ -21,7 +26,7 @@ go get github.com/heyllave/query
 | `query/ast` | AST nodes, `Visitor[T]` pattern, `Walk`, `String` |
 | `query/parser` | Lexer and recursive descent parser |
 | `query/validate` | Field configuration and AST validation |
-| `query/eval` | Compile-and-match engine with functions and struct binding |
+| `query/eval` | Compile-and-match engine (`Compile`/`Match`), value evaluation (`CompileValue`/`Eval`), functions, struct binding |
 
 ## Quick Start
 
@@ -97,6 +102,43 @@ prog.MatchFunc(func(field string) (any, bool) {
 prog.Fields()    // []ast.FieldPath{["state"], ["total"]}
 prog.Stringify() // "state=draft AND total>50000"
 prog.AST()       // ast.Expression
+```
+
+## Value Queries
+
+A query can also *compute and return a value* rather than evaluate to a boolean. `eval.CompileValue` compiles a value expression — arithmetic, a function call, or a literal — and `Eval` returns the typed Go value:
+
+```go
+import "github.com/heyllave/query/eval"
+
+// Arithmetic — precedence and grouping honored; integer division promotes to float
+prog, _ := eval.CompileValue("(50000+1000)*1.1", nil)
+v, _ := prog.Eval(nil)                       // 56100.00000000001 (float64)
+
+// Functions over record fields (field refs reached through function args)
+fields := []validate.FieldConfig{{Name: "name", Type: validate.TypeText, AllowedOps: validate.TextOps}}
+prog, _ = eval.CompileValue("upper(name)", fields)
+v, _ = prog.Eval(map[string]any{"name": "draft"})   // "DRAFT"
+
+// Time arithmetic
+prog, _ = eval.CompileValue("now()-7d", nil)
+v, _ = prog.Eval(nil)                        // time.Time, seven days ago
+
+// Lists — a function returning a slice is preserved as a collection
+labels := eval.WithFunctions(eval.Func{Name: "labels",
+    Call: func(...any) (any, error) { return []string{"urgent", "backend"}, nil }})
+prog, _ = eval.CompileValue("labels()", nil, labels)
+v, _ = prog.Eval(nil)                        // []any{"urgent", "backend"}
+prog, _ = eval.CompileValue("len(labels())", nil, labels)
+v, _ = prog.Eval(nil)                        // int64(2)
+```
+
+The result is the typed Go value: `int64`, `float64`, `string`, `bool`, `time.Time`, `time.Duration`, or `[]any` for a list. When an expression cannot resolve — division or modulo by zero, a missing field — `Eval` returns `eval.ErrNoValue` rather than a silently-wrong zero. (In a boolean predicate the same condition folds to a false comparison.)
+
+`CompileValue` accepts the same options as `Compile` (`WithFunctions`, `WithAllowedFields`, `WithAllowedOps`, `WithMaxLength`, `WithCustomValidator`). The boolean grammar (`Compile`/`Match`) is unchanged — value parsing is a separate entry point (`parser.ParseValue`), so a value expression never reaches the predicate engine and vice versa.
+
+```bash
+go run ./examples/value   # arithmetic, functions, time, lists, error handling
 ```
 
 ## Struct Binding
@@ -368,6 +410,8 @@ The language now covers most of what general-purpose expression engines offer fo
 
 - **String literals in function args** — `contains(name, "urgent")`.
 - **Functions in value position** — `created_at>=now()`, `total>=threshold()`.
+- **Value-returning queries** — a query can compute and return a value (number, string, time, duration, or list) instead of a boolean, via `eval.CompileValue` → `Eval`. Boolean remains the default result domain; see [Value Queries](#value-queries).
+- **Lists as values** — a function returning a slice is preserved as a list (`labels()` → `[]any{...}`); `len()` counts list elements; element extraction is a function (`first(tags)`), not a selector.
 - **Quoted strings** — `field="hello world"` with `\"`, `\\`, `\n`, `\t`, `\r` escapes.
 - **`IN` shorthand** — `state IN (draft, issued, paid)` desugars to an OR chain.
 - **Case-insensitive keywords** — `and`/`or`/`not`/`in` accepted in any case.
@@ -497,6 +541,7 @@ go run ./examples/sql "state=draft AND total>50000"
 go run ./examples/json "(state=draft OR state=issued) AND total>50000"
 go run ./examples/filter
 go run ./examples/functions
+go run ./examples/value
 go run ./examples/struct
 go run ./examples/restrictions
 go run ./examples/customvalidator
