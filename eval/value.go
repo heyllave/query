@@ -12,8 +12,14 @@ import (
 // ErrNoValue is returned by [ValueProgram.Eval] and [ValueProgram.EvalFunc]
 // when the expression cannot resolve to a value: a referenced field is missing,
 // a registered function returns an error, or arithmetic divides (or takes a
-// modulo) by zero. In a predicate ([Program.Match]) these conditions silently
-// fold to a false comparison; when the value *is* the result they surface here.
+// modulo) by zero. In a predicate ([Program.Match]) these conditions fold to a
+// false comparison; when the value *is* the result they surface here.
+//
+// Because an unresolved operand makes a comparison false regardless of
+// operator, both `field = expr` and `field != expr` are false when expr does not
+// resolve — they are not complementary in that case. A value reduction with no
+// defined result behaves the same way: avg, first, and last of an empty list do
+// not resolve, whereas sum of an empty list is 0 and count is the element count.
 var ErrNoValue = errors.New("expression did not resolve to a value")
 
 // ValueProgram is a compiled value expression ready for evaluation against

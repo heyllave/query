@@ -181,12 +181,34 @@ endsWith(name, suffix)    // suffix check
 year(created_at)=2026     // extract year
 month(created_at)=3       // extract month
 day(created_at)=15        // extract day
+hour(created_at)>=9       // hour of day, 0..23
+minute(created_at)=0      // minute of hour, 0..59
+second(created_at)=0      // second of minute, 0..59
+weekday(created_at)=1     // day of week, Sunday=0..Saturday=6
+isBusinessDay(created_at) // true Mon–Fri (weekends excluded)
+addDays(created_at, 7)    // calendar-day arithmetic (value position)
+addBusinessDays(created_at, 3) // add days, skipping weekends
 
 // Date generators
 // (use in eval context)
 now()                     // current timestamp
 today()                   // midnight today
 daysAgo(7)                // 7 days ago
+
+// Numeric functions
+abs(balance)>=100         // absolute value (preserves int/float kind)
+ceil(rate)                // round up; floor() rounds down
+round(price, 2)           // round to N places (half away from zero)
+sqrt(area)                // square root; pow(base, exp)
+min(a, b, c)              // smallest; max(...) largest (variadic or over a list)
+
+// List aggregations (value position)
+count(tags)>=2            // element count
+sum(amounts)>1000         // numeric total; avg(...) mean
+first(tags)               // first/last element
+
+// Type coercions (evaluation-time, not static casts)
+int("42")                 // parse to int64; float(...), string(...)
 ```
 
 ## Custom Functions
@@ -396,7 +418,7 @@ Codegen via `Visitor[T]` is the consumer's responsibility — the library does n
 - **Compile-time type safety** — `CompileFor[T]` catches field name typos and type mismatches before any data is evaluated.
 - **Multi-target code generation** — one AST, many outputs. The `Visitor[T]` pattern makes it trivial to generate SQL, JSON, React components, or filter functions.
 - **Query sandboxing** — `WithAllowedFields`, `WithAllowedOps`, `WithMaxDepth` let you expose different query capabilities to different user roles.
-- **Built-in + custom functions** — `lower()`, `year()`, `len()` out of the box; register your own with `WithFunctions`.
+- **Built-in + custom functions** — string (`lower`, `contains`), date-component (`year`, `hour`, `weekday`), numeric math (`abs`, `round`, `min`/`max`), and list aggregation (`count`, `sum`, `avg`) families out of the box; register your own with `WithFunctions`.
 - **Rich value types** — native support for dates (`2026-01-01`), durations (`1d`, `4h`), wildcards (`John*`), and ranges (`field:start..end`).
 - **Struct binding** — `query:"field_name"` tags on Go structs auto-generate field configs.
 - **Round-trip fidelity** — `ast.String(ast.Parse(q)) == q` for all normalized queries.
@@ -404,7 +426,7 @@ Codegen via `Visitor[T]` is the consumer's responsibility — the library does n
 
 ## Scope
 
-The language now covers most of what general-purpose expression engines offer for filter queries, while staying URL-safe and statically validatable. The lists below describe what's in scope and what's deliberately out.
+The language covers most of what general-purpose expression engines offer for filter queries, while staying URL-safe and statically validatable. The lists below describe what's in scope and what's deliberately out.
 
 ### Supported
 
@@ -418,9 +440,14 @@ The language now covers most of what general-purpose expression engines offer fo
 - **Negated comparisons** — `total!>50000` desugars to `NOT total>50000`; missing-field safe.
 - **Arithmetic in value position** — `total>=50000*1.1`, `created_at>=now()-7d`, `(50000+1000)*1.1` with `* / % > + -` precedence and paren override. Operands may be numeric literals, durations, dates, and function results.
 - **Implicit AND** — `state=draft total>1000` parses identically to the explicit form.
-- **Array quantifiers** — `@all(inner)`, `@any(inner)` (alias for `@(...)`), `@none(inner)` complement the existing `@first` / `@last`.
+- **Array quantifiers** — `@all(inner)`, `@any(inner)` (alias for `@(...)`), `@none(inner)` complement `@first` / `@last`.
 - **Ternary / nullish** — `if(cond, a, b)` and `coalesce(a, b, c)` built-ins.
-- **Numeric / date / duration literals in function args** — `addDays(start, 7)`, `between(start, 2026-01-01, 2026-12-31)`.
+- **Numeric / date / duration literals in function args** — `addDays(start, 7)`, `daysAgo(30)`.
+- **Numeric math built-ins** — `abs`, `ceil`, `floor`, `round` (half away from zero), `sqrt`, `pow`, and variadic/list `min` / `max`. Operations with no real result (`sqrt` of a negative, `pow` overflow, `min`/`max` of an empty list) resolve to no value, so a comparison against them is false.
+- **Time-component extractors** — `hour`, `minute`, `second`, and `weekday` (Sunday=0 .. Saturday=6, matching cron) complement `year` / `month` / `day`. A recurrence schedule is then a predicate over `now()`, e.g. `weekday(now())>=1 AND weekday(now())<=5 AND hour(now())>=9`.
+- **Business days** — `isBusinessDay(date)` is true Monday–Friday; `addBusinessDays(date, n)` moves `n` days forward (or back for negative `n`) skipping weekends. Public holidays are calendar- and locale-specific and stay out of scope — register a custom function for those.
+- **List aggregations** — `count`, `sum`, `avg`, `first`, `last` reduce a list to a value; `contains(list, x)` tests membership. `avg`/`first`/`last` of an empty list resolve to no value; `sum` of an empty list is 0.
+- **Type coercions** — `int`, `float`, `string` coerce a value at evaluation time. These are coercion *hints*, not statically-checked casts; an unparseable input resolves to no value.
 
 ### Out of scope (no plans to add)
 
@@ -428,6 +455,8 @@ These features would compromise the URL-safe identity or the static-validation c
 
 - **String concatenation** — `firstName + " " + lastName` is not a query. Build the string in a custom function instead.
 - **Field references as arithmetic operands** — `total>=base*1.1` cannot parse because bareword identifiers would collide with hyphenated field names (`customer-id`). Wrap the multiplication in a custom function: `scaled(total)>1.1`.
+- **Text-pattern and string-construction functions** — regular-expression match, `replace`, `split`, `substr`, `indexOf`, and `join` are intentionally excluded from the built-in set: their primary arguments are patterns, delimiters, or arbitrary text that would require quoting and `%`-encoding in a `?q=` param, breaking the URL-safe identity. Register them with `WithFunctions` when a non-URL consumer needs them.
+- **Cross-field comparison** — a field on the right-hand side (`resource.owner=department`, `cpu>cpu_limit`) is not supported; the RHS parses as a literal. This needs a parser change, not a built-in.
 
 ### Performance characteristics
 
@@ -542,6 +571,7 @@ go run ./examples/json "(state=draft OR state=issued) AND total>50000"
 go run ./examples/filter
 go run ./examples/functions
 go run ./examples/value
+go run ./examples/rules
 go run ./examples/struct
 go run ./examples/restrictions
 go run ./examples/customvalidator

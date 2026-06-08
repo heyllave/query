@@ -156,6 +156,60 @@ func main() {
 		"if() — false branch is rejected, so this is false")
 
 	fmt.Println()
+	fmt.Println("=== Numeric Functions ===")
+	fmt.Println()
+	runExample(data, "abs(total)>=75000",
+		"abs() — magnitude; preserves int/float kind")
+	runExample(data, "ceil(total)>=75001",
+		"ceil() — round up to a float64")
+	runExample(data, "floor(total)=75000",
+		"floor() — round down")
+	runExample(data, "round(total)=75001",
+		"round() — nearest, half away from zero (75000.50 → 75001)")
+	runExample(data, "max(year, 2020)=2025",
+		"max() — variadic; larger of a field and a literal")
+
+	fmt.Println()
+	fmt.Println("=== Time-Component Extractors ===")
+	fmt.Println()
+	runExample(data, "hour(created_at)=0",
+		"hour() — 0..23 (created_at is midnight)")
+	runExample(data, "weekday(created_at)=0",
+		"weekday() — Sunday=0..Saturday=6 (2026-03-15 is a Sunday)")
+	runExample(data, "year(addDays(created_at, 365))=2027",
+		"addDays() — calendar-day arithmetic; a year later is 2027")
+	runExample(data, "isBusinessDay(created_at)=false",
+		"isBusinessDay() — 2026-03-15 is a Sunday, so false")
+	runExample(data, "weekday(addBusinessDays(created_at, 1))=1",
+		"addBusinessDays() — Sunday + 1 business day is Monday (weekday 1)")
+	runExampleWithFuncs(data,
+		"day(addBusinessDays(created_at, 1, holidays()))=17",
+		"addBusinessDays() with a holiday list — Monday the 16th is a holiday, so the 17th",
+		eval.Func{Name: "holidays", Call: func(...any) (any, error) {
+			return []any{time.Date(2026, 3, 16, 0, 0, 0, 0, time.UTC)}, nil
+		}})
+	fmt.Println("  [RECURRENCE] A schedule is a predicate over decomposed now():")
+	fmt.Println("               weekday(now())>=1 AND weekday(now())<=5 AND hour(now())>=9")
+	fmt.Println("               — \"weekdays from 9am\" — no cron string needed.")
+	fmt.Println()
+
+	fmt.Println("=== List Aggregations (value position) ===")
+	fmt.Println()
+	scores := eval.WithFunctions(eval.Func{
+		Name: "scores", Call: func(...any) (any, error) { return []float64{80, 90, 100}, nil },
+	})
+	runValue(data, "count(scores())", "count() — element count → 3", scores)
+	runValue(data, "sum(scores())", "sum() — total → 270", scores)
+	runValue(data, "avg(scores())", "avg() — mean as float → 90", scores)
+	runValue(data, "first(scores())", "first() — leading element → 80", scores)
+	runValue(data, "last(scores())", "last() — trailing element → 100", scores)
+
+	fmt.Println("=== Type Coercions (evaluation-time hints, not static casts) ===")
+	fmt.Println()
+	runValue(data, `int("42")`, "int() — parse string to int64", scores)
+	runValue(data, `float("3.5")`, "float() — parse string to float64", scores)
+	runValue(data, `string(year(created_at))`, "string() — render a value as text", scores)
+
 	fmt.Println("=== Remaining Limitations ===")
 	fmt.Println()
 	fmt.Println("  [LIMITATION] No string concatenation — use a custom function (e.g.")
@@ -183,5 +237,22 @@ func runExampleWithFuncs(data map[string]any, q, desc string, funcs ...eval.Func
 	}
 	result := prog.Match(data)
 	fmt.Printf("  %-45s  → %v\n", q, result)
+	fmt.Printf("    %s\n\n", desc)
+}
+
+// runValue compiles and evaluates a value-returning query (eval.CompileValue),
+// printing the computed value rather than a boolean match.
+func runValue(data map[string]any, q, desc string, opts ...eval.Option) {
+	prog, err := eval.CompileValue(q, fields, opts...)
+	if err != nil {
+		fmt.Printf("  %-45s  ERROR: %v\n", q, err)
+		return
+	}
+	v, err := prog.Eval(data)
+	if err != nil {
+		fmt.Printf("  %-45s  ERROR: %v\n", q, err)
+		return
+	}
+	fmt.Printf("  %-45s  → %v\n", q, v)
 	fmt.Printf("    %s\n\n", desc)
 }

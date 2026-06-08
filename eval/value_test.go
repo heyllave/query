@@ -172,19 +172,11 @@ func TestCompileValue_ReturnsList(t *testing.T) {
 }
 
 func TestCompileValue_ListOperations(t *testing.T) {
-	// Field-valued lists feed list-aware builtins: len() counts elements and a
-	// custom extractor returns a scalar element.
+	// Field-valued lists feed list-aware built-ins: len() counts elements and
+	// first() returns a scalar element.
 	fields := []validate.FieldConfig{
 		{Name: "tags", Type: validate.TypeText, AllowedOps: validate.TextOps},
 	}
-	firstFn := WithFunctions(Func{Name: "first", Call: func(a ...any) (any, error) {
-		if len(a) == 1 {
-			if s, ok := a[0].([]any); ok && len(s) > 0 {
-				return s[0], nil
-			}
-		}
-		return nil, nil
-	}})
 	rec := map[string]any{"tags": []any{"urgent", "blocked"}}
 
 	t.Run("len counts elements", func(t *testing.T) {
@@ -202,7 +194,7 @@ func TestCompileValue_ListOperations(t *testing.T) {
 	})
 
 	t.Run("element extraction returns scalar", func(t *testing.T) {
-		prog, err := CompileValue("first(tags)", fields, firstFn)
+		prog, err := CompileValue("first(tags)", fields)
 		if err != nil {
 			t.Fatalf("CompileValue error: %v", err)
 		}
