@@ -462,8 +462,8 @@ These features would compromise the URL-safe identity or the static-validation c
 
 Not language features, but worth knowing before deploying at scale:
 
-- **Closure-based eval** — the eval engine compiles to closure trees, not bytecode. For hot-path evaluation of millions of records, a bytecode compiler would be faster.
-- **Reflection in struct binding** — `CompileFor[T]` and `StructAccessor` use reflection. Fine for compile-time setup; adds overhead if called per-record. Compile once, match many.
+- **Closure-based eval** — the eval engine compiles to a closure tree once, then runs it per record; there is no bytecode VM. A compiled `Program` is reusable and concurrency-safe, so the model is compile once, match many. A bytecode compiler could squeeze more from the absolute hottest paths, but the closure tree already evaluates a typical predicate in tens of nanoseconds.
+- **Reflection in struct binding** — `CompileFor[T]` / `MatchStruct` use reflection to read struct fields. The per-type tag lookup is computed once and cached, so steady-state matching is a map lookup plus a field read (no tag parsing or map building per record). When fields are already in a `map[string]any`, `Match` avoids reflection entirely.
 
 ## Comparison with expr-lang/expr
 

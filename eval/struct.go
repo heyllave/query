@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"reflect"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/heyllave/query/validate"
@@ -67,8 +68,35 @@ func FieldsFromStruct(v any) []validate.FieldConfig {
 	return configs
 }
 
+// tagIndexCache memoizes the query-tag → field-index map per struct type. The
+// map depends only on the type, so it is computed once and reused across every
+// value of that type — the per-record hot path then does a map lookup and a
+// reflect field read, with no tag parsing.
+var tagIndexCache sync.Map // map[reflect.Type]map[string]int
+
+// tagIndex returns the query-tag → field-index map for struct type t, building
+// and caching it on first use.
+func tagIndex(t reflect.Type) map[string]int {
+	if cached, ok := tagIndexCache.Load(t); ok {
+		return cached.(map[string]int)
+	}
+	m := make(map[string]int, t.NumField())
+	for i := range t.NumField() {
+		tag := t.Field(i).Tag.Get("query")
+		if tag == "" || tag == "-" {
+			continue
+		}
+		name, _ := parseTag(tag)
+		m[name] = i
+	}
+	actual, _ := tagIndexCache.LoadOrStore(t, m)
+	return actual.(map[string]int)
+}
+
 // StructAccessor returns a field accessor function for a struct value,
-// resolving field names via `query` tags.
+// resolving field names via `query` tags. The tag→index map is cached per
+// struct type, so repeated calls for the same type allocate nothing beyond the
+// returned closure.
 func StructAccessor(v any) func(string) (any, bool) {
 	rv := reflect.ValueOf(v)
 	if rv.Kind() == reflect.Pointer {
@@ -78,17 +106,7 @@ func StructAccessor(v any) func(string) (any, bool) {
 		return func(string) (any, bool) { return nil, false }
 	}
 
-	// Build tag→index map
-	t := rv.Type()
-	tagMap := make(map[string]int, t.NumField())
-	for i := range t.NumField() {
-		tag := t.Field(i).Tag.Get("query")
-		if tag == "" || tag == "-" {
-			continue
-		}
-		name, _ := parseTag(tag)
-		tagMap[name] = i
-	}
+	tagMap := tagIndex(rv.Type())
 
 	return func(field string) (any, bool) {
 		idx, ok := tagMap[field]
