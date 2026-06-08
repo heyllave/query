@@ -161,7 +161,7 @@ func TestParse_SelectorAllRoundTrip(t *testing.T) {
 		"orders@all(status=shipped)",
 		"orders@any(status=shipped)",
 		"orders@none(status=cancelled)",
-		"orders@(status=shipped)", // anonymous EXISTS — unchanged
+		"orders@(status=shipped)", // anonymous EXISTS
 		"orders@first",
 		"orders@last",
 	}

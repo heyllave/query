@@ -11,7 +11,9 @@
 //   - [QualifierExpr] — field op value (e.g., state=draft)
 //   - [PresenceExpr] — field existence check (e.g., tire_size)
 //   - [GroupExpr]    — parenthesized expression
-//   - [SelectorExpr] — @first / @last / @(expr) (Phase 3)
+//   - [SelectorExpr] — @first / @last / @(expr)
+//   - [FuncCallExpr] — function call (field transform, value generator, or predicate)
+//   - [ValueExpr]    — a bare value root (the query computes a value, not a boolean)
 //
 // # Visitor Pattern
 //

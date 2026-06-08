@@ -42,7 +42,7 @@ query/
 │   ├── config.go       # FieldConfig, FieldValueType, Op, operator groups
 │   ├── validate.go     # Validator, New(), Validate()
 │   └── validate_test.go
-└── wasm/               # WASM build target (Phase 4)
+└── wasm/               # WASM build target
     ├── main.go
     └── Makefile
 ```

@@ -25,8 +25,9 @@ func Walk(expr Expression, fn func(Expression) bool) {
 				Walk(arg.Call, fn)
 			}
 		}
-	case *QualifierExpr, *PresenceExpr:
-		// leaf nodes
+	case *QualifierExpr, *PresenceExpr, *ValueExpr:
+		// leaf nodes — value-position function/arithmetic subtrees live in the
+		// Value layer, not as Expression children.
 	}
 }
 

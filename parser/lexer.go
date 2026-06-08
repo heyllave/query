@@ -34,6 +34,25 @@ func Lex(input string, maxLength int) ([]token.Token, error) {
 	return l.tokens, nil
 }
 
+// LexValue tokenizes input as a value expression, starting in value mode so a
+// leading literal, arithmetic expression, or function call lexes correctly at
+// position 0 (where the boolean grammar would expect a field name). It backs
+// [ParseValue].
+func LexValue(input string, maxLength int) ([]token.Token, error) {
+	if maxLength > 0 && len(input) > maxLength {
+		return nil, ErrorList{newError(ErrQueryTooLong, token.Position{},
+			"query length %d exceeds maximum of %d characters", len(input), maxLength)}
+	}
+
+	l := &lexer{input: input, afterOperator: true}
+	l.run()
+
+	if err := l.errors.errOrNil(); err != nil {
+		return nil, err
+	}
+	return l.tokens, nil
+}
+
 func (l *lexer) run() {
 	for l.pos < len(l.input) {
 		l.skipWhitespace()
@@ -168,7 +187,7 @@ func (l *lexer) lexIdentOrKeyword() {
 //	addDays(date, 7)            // integer literal
 //	IN(2020-01-01, 2020-12-31)  // date literals
 //	IN(1d, 1w)                  // duration literals
-//	year=2026                   // (still goes through lexValue — unchanged)
+//	year=2026                   // (an after-operator value; goes through lexValue)
 //
 // Wildcards, unquoted strings, and signed numbers are NOT recognized here —
 // they remain reserved for the after-operator value path.
@@ -407,7 +426,7 @@ func (l *lexer) beginsPrimary(i int) bool {
 	return false
 }
 
-// lexUnquotedStringValue lexes the legacy unquoted-string value form used for
+// lexUnquotedStringValue lexes the unquoted-string value form used for
 // bareword strings and wildcard patterns. Stops at whitespace, ')', or '..'.
 func (l *lexer) lexUnquotedStringValue() {
 	start := l.pos

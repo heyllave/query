@@ -182,6 +182,12 @@ func (v *Validator) validate(expr ast.Expression) {
 		v.validateQualifier(e)
 	case *ast.PresenceExpr:
 		v.validatePresence(e)
+	case *ast.ValueExpr:
+		// A value-domain root has no declared result type to check against —
+		// its type is resolved at match time, like any function/arithmetic
+		// value (see isDynamicValue). We only ensure embedded function field
+		// references are declared.
+		v.validateValueFuncs(&e.Value)
 	}
 }
 
