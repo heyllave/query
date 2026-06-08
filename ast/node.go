@@ -125,6 +125,29 @@ func (e *FuncCallExpr) Pos() token.Position { return e.Position }
 func (e *FuncCallExpr) node()               { _ = e }
 func (e *FuncCallExpr) expr()               { _ = e }
 
+// ValueExpr is a bare value in expression position: the query computes and
+// returns a value rather than evaluating to a boolean. Boolean is one result
+// domain of the language; a ValueExpr is a value-domain root.
+//
+//	now()-7d        // a timestamp
+//	(50000+1000)*1.1 // a number
+//	upper(name)     // a string
+//
+// It is produced only by [github.com/heyllave/query/parser.ParseValue] (and the
+// eval value-compile entrypoint), never by the boolean grammar — so the
+// predicate visitors and matchers never encounter it. Field references in value
+// position are only available through function arguments (e.g. upper(name)),
+// matching the arithmetic-operand rules.
+type ValueExpr struct {
+	Value    Value
+	Position token.Position
+}
+
+// Pos returns the position of the value expression.
+func (e *ValueExpr) Pos() token.Position { return e.Position }
+func (e *ValueExpr) node()               { _ = e }
+func (e *ValueExpr) expr()               { _ = e }
+
 // FuncArg is a function argument: a field reference, a literal value, or a nested call.
 type FuncArg struct {
 	Field *FieldPath    // field reference: name, labels.dev

@@ -34,8 +34,7 @@ func TestEval_QuotedStringValue(t *testing.T) {
 }
 
 func TestEval_QuotedStringWithSpecialChars(t *testing.T) {
-	// Values that previously could not be expressed: contain space, paren,
-	// or operator characters.
+	// Quoted values containing a space, paren, or operator character.
 	tests := []struct {
 		query string
 		value string

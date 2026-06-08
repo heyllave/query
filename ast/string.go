@@ -68,6 +68,8 @@ func writeExpr(buf *strings.Builder, expr Expression) {
 		}
 	case *FuncCallExpr:
 		writeFuncCall(buf, e)
+	case *ValueExpr:
+		writeValue(buf, &e.Value)
 	}
 }
 

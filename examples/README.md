@@ -18,6 +18,9 @@ go run ./examples/filter
 # Built-in and custom functions
 go run ./examples/functions
 
+# Value-returning queries (compute a number, string, time, duration, or list)
+go run ./examples/value
+
 # Struct binding with compile-time type safety
 go run ./examples/struct
 
@@ -42,6 +45,7 @@ go run ./examples/explain
 | [`json/`](json/) | JSON AST serialization for APIs and frontends |
 | [`filter/`](filter/) | In-memory filter functions with wildcard matching |
 | [`functions/`](functions/) | Built-in functions (lower, upper, len, year, etc.) and custom function registration |
+| [`value/`](value/) | `CompileValue` / `Eval` — value-returning queries: arithmetic, functions over fields, time values, lists, and `ErrNoValue` handling |
 | [`struct/`](struct/) | `CompileFor[T]` struct binding, `MatchStruct`, type safety |
 | [`restrictions/`](restrictions/) | `WithAllowedFields`, `WithAllowedOps`, `WithMaxDepth`, `WithMaxLength` |
 | [`selector/`](selector/) | `@first`, `@last`, `@(inner)` against map- and struct-backed list fields |
