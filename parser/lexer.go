@@ -187,7 +187,7 @@ func (l *lexer) lexIdentOrKeyword() {
 //	addDays(date, 7)            // integer literal
 //	IN(2020-01-01, 2020-12-31)  // date literals
 //	IN(1d, 1w)                  // duration literals
-//	year=2026                   // (still goes through lexValue — unchanged)
+//	year=2026                   // (an after-operator value; goes through lexValue)
 //
 // Wildcards, unquoted strings, and signed numbers are NOT recognized here —
 // they remain reserved for the after-operator value path.
@@ -426,7 +426,7 @@ func (l *lexer) beginsPrimary(i int) bool {
 	return false
 }
 
-// lexUnquotedStringValue lexes the legacy unquoted-string value form used for
+// lexUnquotedStringValue lexes the unquoted-string value form used for
 // bareword strings and wildcard patterns. Stops at whitespace, ')', or '..'.
 func (l *lexer) lexUnquotedStringValue() {
 	start := l.pos
