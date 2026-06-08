@@ -3,6 +3,8 @@ package eval
 import (
 	"testing"
 	"time"
+
+	"github.com/heyllave/query/validate"
 )
 
 // callFn looks up a built-in by name and invokes it with the given args.
@@ -168,6 +170,127 @@ func TestBuiltinDatetime(t *testing.T) {
 	})
 }
 
+func TestBuiltinBusinessDay(t *testing.T) {
+	// 2026-03-13 Fri, 03-14 Sat, 03-15 Sun, 03-16 Mon.
+	fri := time.Date(2026, 3, 13, 9, 0, 0, 0, time.UTC)
+	sat := time.Date(2026, 3, 14, 9, 0, 0, 0, time.UTC)
+	sun := time.Date(2026, 3, 15, 9, 0, 0, 0, time.UTC)
+	mon := time.Date(2026, 3, 16, 9, 0, 0, 0, time.UTC)
+
+	t.Run("isBusinessDay", func(t *testing.T) {
+		cases := []struct {
+			day  time.Time
+			want bool
+		}{{fri, true}, {sat, false}, {sun, false}, {mon, true}}
+		for _, c := range cases {
+			got, err := callFn(t, "isBusinessDay", c.day)
+			if err != nil {
+				t.Fatalf("isBusinessDay error: %v", err)
+			}
+			if got != c.want {
+				t.Errorf("isBusinessDay(%s) = %v, want %v", c.day.Format("Mon"), got, c.want)
+			}
+		}
+	})
+
+	t.Run("addBusinessDays skips the weekend", func(t *testing.T) {
+		// Friday + 1 business day is the following Monday.
+		got, err := callFn(t, "addBusinessDays", fri, int64(1))
+		if err != nil {
+			t.Fatalf("addBusinessDays error: %v", err)
+		}
+		want := time.Date(2026, 3, 16, 9, 0, 0, 0, time.UTC)
+		if gt := got.(time.Time); !gt.Equal(want) {
+			t.Errorf("addBusinessDays(Fri, 1) = %v, want Mon %v", gt, want)
+		}
+	})
+
+	t.Run("addBusinessDays across more than a week", func(t *testing.T) {
+		// Monday + 5 business days is the next Monday.
+		got, _ := callFn(t, "addBusinessDays", mon, int64(5))
+		want := time.Date(2026, 3, 23, 9, 0, 0, 0, time.UTC)
+		if gt := got.(time.Time); !gt.Equal(want) {
+			t.Errorf("addBusinessDays(Mon, 5) = %v, want %v", gt, want)
+		}
+	})
+
+	t.Run("addBusinessDays negative goes earlier", func(t *testing.T) {
+		// Monday - 1 business day is the previous Friday.
+		got, _ := callFn(t, "addBusinessDays", mon, int64(-1))
+		want := time.Date(2026, 3, 13, 9, 0, 0, 0, time.UTC)
+		if gt := got.(time.Time); !gt.Equal(want) {
+			t.Errorf("addBusinessDays(Mon, -1) = %v, want Fri %v", gt, want)
+		}
+	})
+
+	t.Run("addBusinessDays zero is unchanged", func(t *testing.T) {
+		got, _ := callFn(t, "addBusinessDays", sat, int64(0))
+		if gt := got.(time.Time); !gt.Equal(sat) {
+			t.Errorf("addBusinessDays(Sat, 0) = %v, want %v", gt, sat)
+		}
+	})
+
+	t.Run("isBusinessDay honors a holiday list", func(t *testing.T) {
+		holidays := []any{mon} // make the Monday a holiday
+		got, err := callFn(t, "isBusinessDay", mon, holidays)
+		if err != nil {
+			t.Fatalf("isBusinessDay error: %v", err)
+		}
+		if got != false {
+			t.Errorf("isBusinessDay(Mon, [Mon]) = %v, want false (holiday)", got)
+		}
+		// A non-holiday weekday is still a business day.
+		if got, _ := callFn(t, "isBusinessDay", fri, holidays); got != true {
+			t.Errorf("isBusinessDay(Fri, [Mon]) = %v, want true", got)
+		}
+	})
+
+	t.Run("addBusinessDays skips holidays", func(t *testing.T) {
+		// Friday + 1 business day would be Monday, but Monday is a holiday, so
+		// the result is the following Tuesday.
+		holidays := []any{mon}
+		got, err := callFn(t, "addBusinessDays", fri, int64(1), holidays)
+		if err != nil {
+			t.Fatalf("addBusinessDays error: %v", err)
+		}
+		want := time.Date(2026, 3, 17, 9, 0, 0, 0, time.UTC) // Tuesday
+		if gt := got.(time.Time); !gt.Equal(want) {
+			t.Errorf("addBusinessDays(Fri, 1, [Mon]) = %v, want Tue %v", gt, want)
+		}
+	})
+
+	t.Run("arity errors", func(t *testing.T) {
+		if _, err := callFn(t, "isBusinessDay"); err == nil {
+			t.Error("isBusinessDay() with no args: want error")
+		}
+		if _, err := callFn(t, "isBusinessDay", fri, []any{}, "extra"); err == nil {
+			t.Error("isBusinessDay() with 3 args: want error")
+		}
+		if _, err := callFn(t, "addBusinessDays", fri); err == nil {
+			t.Error("addBusinessDays(1 arg): want error")
+		}
+	})
+}
+
+// TestStringOfTimeMatchesTimeField guards that string(timeExpr) on the RHS
+// compares equal to a time-typed field, i.e. equalValues stringifies a
+// time.Time actual via the same RFC3339 form string() produces.
+func TestStringOfTimeMatchesTimeField(t *testing.T) {
+	fields := []validate.FieldConfig{
+		{Name: "created", Type: validate.TypeText, AllowedOps: validate.TextOps},
+	}
+	ts := time.Date(2026, 6, 8, 14, 30, 0, 0, time.UTC)
+	clock := WithFunctions(Func{Name: "clock", Call: func(...any) (any, error) { return ts, nil }})
+	prog, err := Compile("created=string(clock())", fields, clock)
+	if err != nil {
+		t.Fatalf("Compile error: %v", err)
+	}
+	// A time.Time field value must match string(clock())'s RFC3339 rendering.
+	if !prog.Match(map[string]any{"created": ts}) {
+		t.Error("created=string(clock()) over a time.Time field = false, want true")
+	}
+}
+
 func TestBuiltinList(t *testing.T) {
 	tests := []struct {
 		name string
@@ -215,14 +338,6 @@ func TestBuiltinList_NoValue(t *testing.T) {
 	}
 }
 
-func TestBuiltinList_SumAvgRequireList(t *testing.T) {
-	for _, fn := range []string{"sum", "avg"} {
-		if _, err := callFn(t, fn, "not a list"); err == nil {
-			t.Errorf("%s(scalar) error = nil, want list-required error", fn)
-		}
-	}
-}
-
 func TestBuiltinContains_ListMembership(t *testing.T) {
 	t.Run("list membership case-insensitive", func(t *testing.T) {
 		got, _ := callFn(t, "contains", []any{"x", "URGENT"}, "urgent")
@@ -236,7 +351,7 @@ func TestBuiltinContains_ListMembership(t *testing.T) {
 			t.Errorf("contains(list, urgent) = %v, want false", got)
 		}
 	})
-	t.Run("string substring fallback unchanged", func(t *testing.T) {
+	t.Run("string substring fallback", func(t *testing.T) {
 		got, _ := callFn(t, "contains", "hello world", "WORLD")
 		if got != true {
 			t.Errorf("contains(string, sub) = %v, want true", got)
@@ -284,16 +399,83 @@ func TestBuiltinTypeCoercion(t *testing.T) {
 }
 
 func TestBuiltinTypeCoercion_NoValue(t *testing.T) {
-	for _, fn := range []string{"int", "float"} {
-		t.Run(fn, func(t *testing.T) {
-			got, err := callFn(t, fn, "notanumber")
+	// Unparseable, non-finite, and out-of-range strings all resolve to no value
+	// so a coerced result is always a comparable, finite number.
+	cases := []struct {
+		fn  string
+		arg string
+	}{
+		{"int", "notanumber"},
+		{"float", "notanumber"},
+		{"float", "NaN"},
+		{"float", "inf"},
+		{"float", "infinity"},
+		{"int", "NaN"},
+		{"int", "inf"},
+		{"int", "1e400"}, // overflows float64 to +Inf
+		{"int", "1e30"},  // finite but out of int64 range
+	}
+	for _, c := range cases {
+		t.Run(c.fn+"("+c.arg+")", func(t *testing.T) {
+			got, err := callFn(t, c.fn, c.arg)
 			if err != nil {
-				t.Fatalf("%s() error: %v", fn, err)
+				t.Fatalf("%s() error: %v", c.fn, err)
 			}
 			if got != nil {
-				t.Errorf("%s(notanumber) = %v, want nil", fn, got)
+				t.Errorf("%s(%q) = %v, want nil", c.fn, c.arg, got)
 			}
 		})
+	}
+}
+
+// TestBuiltinReduce_Int64Precision guards that min/max/sum stay exact for
+// int64 values beyond 2^53, where adjacent integers share one float64.
+func TestBuiltinReduce_Int64Precision(t *testing.T) {
+	const a = int64(9007199254740992) // 2^53
+	const b = int64(9007199254740993) // 2^53 + 1 (same float64 as a)
+	checks := []struct {
+		fn   string
+		args []any
+		want int64
+	}{
+		{"min", []any{b, a}, a},
+		{"max", []any{a, b}, b},
+		{"sum", []any{[]any{a, b}}, a + b},
+	}
+	for _, c := range checks {
+		t.Run(c.fn, func(t *testing.T) {
+			got, err := callFn(t, c.fn, c.args...)
+			if err != nil {
+				t.Fatalf("%s error: %v", c.fn, err)
+			}
+			if got != c.want {
+				t.Errorf("%s = %v, want %v", c.fn, got, c.want)
+			}
+		})
+	}
+}
+
+// TestBuiltinReduce_RejectsNonNumeric guards that min/max error on a
+// non-numeric operand rather than coercing it to zero.
+func TestBuiltinReduce_RejectsNonNumeric(t *testing.T) {
+	for _, fn := range []string{"min", "max"} {
+		if _, err := callFn(t, fn, int64(5), "oops", int64(3)); err == nil {
+			t.Errorf("%s(5, \"oops\", 3) error = nil, want numeric-operand error", fn)
+		}
+	}
+}
+
+// TestBuiltinSumAvg_ScalarArg guards the graceful single-scalar handling that
+// matches count: a scalar is a one-element collection.
+func TestBuiltinSumAvg_ScalarArg(t *testing.T) {
+	if got, _ := callFn(t, "sum", int64(7)); got != int64(7) {
+		t.Errorf("sum(7) = %v, want 7", got)
+	}
+	if got, _ := callFn(t, "avg", 7.0); got != 7.0 {
+		t.Errorf("avg(7.0) = %v, want 7", got)
+	}
+	if got, _ := callFn(t, "sum", nil); got != int64(0) {
+		t.Errorf("sum(nil) = %v, want 0", got)
 	}
 }
 

@@ -63,8 +63,10 @@ func BuiltinFunctions() FuncRegistry {
 	r.Register(Func{Name: "minute", Call: fnMinute})
 	r.Register(Func{Name: "second", Call: fnSecond})
 	r.Register(Func{Name: "weekday", Call: fnWeekday})
+	r.Register(Func{Name: "isBusinessDay", Call: fnIsBusinessDay})
 	r.Register(Func{Name: "daysAgo", Call: fnDaysAgo})
 	r.Register(Func{Name: "addDays", Call: fnAddDays})
+	r.Register(Func{Name: "addBusinessDays", Call: fnAddBusinessDays})
 
 	// List aggregations — value-producing reductions over a slice.
 	r.Register(Func{Name: "count", Call: fnCount})
@@ -309,7 +311,9 @@ func fnMax(args ...any) (any, error) {
 }
 
 // reduceMinMax implements the shared min/max reduction. wantMin selects the
-// comparison direction.
+// comparison direction. All operands must be numeric; a non-numeric operand is
+// an error rather than a silent zero. When every operand is integer-kinded the
+// comparison and result are int64 (exact beyond 2^53); otherwise it is float64.
 func reduceMinMax(name string, args []any, wantMin bool) (any, error) {
 	if len(args) == 0 {
 		return nil, fmt.Errorf("%s() requires at least 1 argument, got 0", name)
@@ -324,27 +328,42 @@ func reduceMinMax(name string, args []any, wantMin bool) (any, error) {
 		}
 	}
 	allInt := true
-	best := numericFloatAny(operands[0])
-	bestIdx := 0
-	for i, op := range operands {
+	for _, op := range operands {
+		if !isNumericKind(op) {
+			return nil, fmt.Errorf("%s() requires numeric operands, got %T", name, op)
+		}
 		if !isIntKind(op) {
 			allInt = false
 		}
-		f := numericFloatAny(op)
-		if (wantMin && f < best) || (!wantMin && f > best) {
-			best = f
-			bestIdx = i
-		}
 	}
 	if allInt {
-		return toInt64(operands[bestIdx]), nil
+		best := toInt64(operands[0])
+		for _, op := range operands[1:] {
+			v := toInt64(op)
+			if (wantMin && v < best) || (!wantMin && v > best) {
+				best = v
+			}
+		}
+		return best, nil
+	}
+	best := toFloat64(operands[0])
+	for _, op := range operands[1:] {
+		v := toFloat64(op)
+		if (wantMin && v < best) || (!wantMin && v > best) {
+			best = v
+		}
 	}
 	return best, nil
 }
 
-// numericFloatAny coerces a raw argument value to float64 for numeric reduction.
-func numericFloatAny(v any) float64 {
-	return toFloat64(v)
+// isNumericKind reports whether v is an integer- or float-kinded Go value.
+func isNumericKind(v any) bool {
+	switch v.(type) {
+	case int, int32, int64, float32, float64:
+		return true
+	default:
+		return false
+	}
 }
 
 // --- Date/time functions ---
@@ -443,6 +462,87 @@ func fnAddDays(args ...any) (any, error) {
 	return toTime(args[0]).AddDate(0, 0, int(toInt64(args[1]))), nil
 }
 
+// fnIsBusinessDay reports whether a date is a working day: a weekday
+// (Monday–Friday) that is not a public holiday. An optional second argument is
+// the holiday calendar — a list of dates; any date matching one (by calendar
+// day) is not a business day. Holidays are calendar- and locale-specific, so
+// the caller supplies them rather than the library guessing:
+//
+//	isBusinessDay(due)                 // weekends only
+//	isBusinessDay(due, holidays())     // weekends + a supplied holiday list
+func fnIsBusinessDay(args ...any) (any, error) {
+	if len(args) < 1 || len(args) > 2 {
+		return nil, fmt.Errorf("isBusinessDay() requires 1 or 2 arguments, got %d", len(args))
+	}
+	var holidays map[string]bool
+	if len(args) == 2 {
+		holidays = holidaySet(args[1])
+	}
+	return isBusinessDay(toTime(args[0]), holidays), nil
+}
+
+// fnAddBusinessDays returns the date n business days after the given date,
+// skipping weekends and any supplied holidays (negative n moves earlier). With
+// n=0 the date is returned unchanged even if it is not a business day. An
+// optional third argument is the holiday calendar, as for isBusinessDay:
+//
+//	addBusinessDays(start, 3)              // skip weekends
+//	addBusinessDays(start, 3, holidays())  // skip weekends + holidays
+func fnAddBusinessDays(args ...any) (any, error) {
+	if len(args) < 2 || len(args) > 3 {
+		return nil, fmt.Errorf("addBusinessDays() requires 2 or 3 arguments, got %d", len(args))
+	}
+	var holidays map[string]bool
+	if len(args) == 3 {
+		holidays = holidaySet(args[2])
+	}
+	t := toTime(args[0])
+	n := int(toInt64(args[1]))
+	step := 1
+	if n < 0 {
+		step = -1
+		n = -n
+	}
+	for n > 0 {
+		t = t.AddDate(0, 0, step)
+		if isBusinessDay(t, holidays) {
+			n--
+		}
+	}
+	return t, nil
+}
+
+// isBusinessDay reports whether t is a weekday (Monday–Friday) that is not in
+// the holidays set. A nil holidays set means weekends only.
+func isBusinessDay(t time.Time, holidays map[string]bool) bool {
+	wd := t.Weekday()
+	if wd == time.Saturday || wd == time.Sunday {
+		return false
+	}
+	return !holidays[dayKey(t)]
+}
+
+// holidaySet builds a lookup of holiday calendar days from a list argument. Each
+// element is coerced to a date and keyed by its calendar day, so the time of day
+// and location do not affect matching. A non-list argument yields an empty set.
+func holidaySet(v any) map[string]bool {
+	elems, ok := toSlice(v)
+	if !ok {
+		return nil
+	}
+	set := make(map[string]bool, len(elems))
+	for _, e := range elems {
+		set[dayKey(toTime(e))] = true
+	}
+	return set
+}
+
+// dayKey is the calendar-day identity of t (YYYY-MM-DD), used to compare dates
+// while ignoring time of day.
+func dayKey(t time.Time) string {
+	return t.Format("2006-01-02")
+}
+
 // --- List aggregations ---
 
 // fnCount returns the number of elements in a list. A nil argument is 0; a
@@ -461,41 +561,41 @@ func fnCount(args ...any) (any, error) {
 	return int64(1), nil
 }
 
-// fnSum returns the numeric total of a list's elements. The result stays int64
-// only when every element is integer-kinded, else float64. An empty list sums
-// to 0 (the additive identity).
+// fnSum returns the numeric total of a list's elements. A non-list argument is
+// treated as a single-element collection (sum(7)=7). The result stays int64
+// only when every element is integer-kinded — accumulated in int64 so it is
+// exact beyond 2^53 — else float64. An empty or nil list sums to 0 (the
+// additive identity).
 func fnSum(args ...any) (any, error) {
 	if len(args) != 1 {
 		return nil, fmt.Errorf("sum() requires 1 argument, got %d", len(args))
 	}
-	elems, ok := toSlice(args[0])
-	if !ok {
-		return nil, fmt.Errorf("sum() requires a list argument")
-	}
+	elems := listElems(args[0])
 	allInt := true
-	var total float64
+	var intTotal int64
+	var floatTotal float64
 	for _, e := range elems {
-		if !isIntKind(e) {
+		if isIntKind(e) {
+			intTotal += toInt64(e)
+		} else {
 			allInt = false
 		}
-		total += toFloat64(e)
+		floatTotal += toFloat64(e)
 	}
 	if allInt {
-		return int64(total), nil
+		return intTotal, nil
 	}
-	return total, nil
+	return floatTotal, nil
 }
 
-// fnAvg returns the arithmetic mean of a list's elements as a float64. The mean
-// of an empty list is undefined and resolves to no value.
+// fnAvg returns the arithmetic mean of a list's elements as a float64. A
+// non-list argument is treated as a single-element collection. The mean of an
+// empty or nil list is undefined and resolves to no value.
 func fnAvg(args ...any) (any, error) {
 	if len(args) != 1 {
 		return nil, fmt.Errorf("avg() requires 1 argument, got %d", len(args))
 	}
-	elems, ok := toSlice(args[0])
-	if !ok {
-		return nil, fmt.Errorf("avg() requires a list argument")
-	}
+	elems := listElems(args[0])
 	if len(elems) == 0 {
 		return nil, nil
 	}
@@ -504,6 +604,20 @@ func fnAvg(args ...any) (any, error) {
 		total += toFloat64(e)
 	}
 	return total / float64(len(elems)), nil
+}
+
+// listElems normalizes an aggregation argument to a slice of elements: a list
+// is its elements, a nil argument is empty, and any other scalar is a
+// one-element collection. This keeps sum/avg consistent with count's graceful
+// handling of non-list arguments.
+func listElems(v any) []any {
+	if elems, ok := toSlice(v); ok {
+		return elems
+	}
+	if v == nil {
+		return nil
+	}
+	return []any{v}
 }
 
 // fnFirst returns the first element of a list, or no value if the list is empty.
@@ -551,10 +665,16 @@ func fnInt(args ...any) (any, error) {
 		}
 		return int64(0), nil
 	case string:
-		if n, err := strconv.ParseInt(strings.TrimSpace(v), 10, 64); err == nil {
+		s := strings.TrimSpace(v)
+		if n, err := strconv.ParseInt(s, 10, 64); err == nil {
 			return n, nil
 		}
-		if f, err := strconv.ParseFloat(strings.TrimSpace(v), 64); err == nil {
+		// Fall back to a float parse, but only a finite value in int64 range
+		// truncates to an integer; NaN/Inf/out-of-range resolve to no value.
+		if f, err := strconv.ParseFloat(s, 64); err == nil {
+			if math.IsNaN(f) || math.IsInf(f, 0) || f >= math.MaxInt64 || f <= math.MinInt64 {
+				return nil, nil
+			}
 			return int64(f), nil
 		}
 		return nil, nil
@@ -578,7 +698,12 @@ func fnFloat(args ...any) (any, error) {
 		}
 		return 0.0, nil
 	case string:
+		// A finite float parses; NaN and Inf strings resolve to no value so the
+		// result is always a comparable number.
 		if f, err := strconv.ParseFloat(strings.TrimSpace(v), 64); err == nil {
+			if math.IsNaN(f) || math.IsInf(f, 0) {
+				return nil, nil
+			}
 			return f, nil
 		}
 		return nil, nil
