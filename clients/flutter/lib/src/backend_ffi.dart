@@ -10,12 +10,30 @@ typedef _QueryDart = Pointer<Utf8> Function(Pointer<Utf8>);
 typedef _FreeNative = Void Function(Pointer<Utf8>);
 typedef _FreeDart = void Function(Pointer<Utf8>);
 
-/// Loads the native FFI backend backed by the `libquery` shared library built by
-/// `make -C clients/ffi build`. [libraryPath] overrides the default lookup;
+/// Loads the native FFI backend backed by the `libquery` cgo library.
+///
+/// How the library is resolved depends on the platform:
+///
+/// - An explicit [libraryPath] always wins — desktop bundling and the host
+///   tests pass it directly.
+/// - **iOS** links the cgo archive statically into the app executable, so there
+///   is no shared object to open; the symbols are looked up in the running
+///   process.
+/// - **Android** bundles a per-ABI `libquery.so` in the APK; opening it by its
+///   soname lets the loader pick the right ABI.
+/// - **Desktop** (Linux/macOS/Windows) opens `libquery.{so,dylib,dll}` from the
+///   default path next to the working directory.
+///
 /// [wasmUrl] is ignored on native.
 Future<Backend> openBackend({String? libraryPath, String? wasmUrl}) async {
-  final lib = DynamicLibrary.open(libraryPath ?? _defaultLibraryPath());
-  return _FfiBackend(lib);
+  return _FfiBackend(_open(libraryPath));
+}
+
+DynamicLibrary _open(String? libraryPath) {
+  if (libraryPath != null) return DynamicLibrary.open(libraryPath);
+  if (Platform.isIOS) return DynamicLibrary.process();
+  if (Platform.isAndroid) return DynamicLibrary.open('libquery.so');
+  return DynamicLibrary.open(_defaultLibraryPath());
 }
 
 String _defaultLibraryPath() {
