@@ -42,6 +42,9 @@ linters:
   exclusions:
     paths:
       - wasm
+      # clients/ffi is a cgo c-shared bridge behind the `cshared` build tag; it
+      # cannot be type-checked outside a CGO_ENABLED build, like wasm.
+      - clients
     rules:
       - path: _test\.go
         linters:
