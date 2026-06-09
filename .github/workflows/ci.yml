@@ -123,7 +123,7 @@ jobs:
           path: clients/npm/query.wasm
 
   dart:
-    name: Dart FFI client & conformance
+    name: Dart client & conformance (FFI + WASM)
     runs-on: self-hosted
     needs: [checks]
     steps:
@@ -145,11 +145,21 @@ jobs:
           CC: clang
         run: make -C clients/ffi build
 
+      # Build query.wasm + wasm_exec.js and stage them (with the corpus) into
+      # test/ so the browser test server can serve them.
+      - name: Build web assets
+        run: make -C clients/flutter web-assets
+
       - name: Install Dart deps
         run: cd clients/flutter && dart pub get
 
       - name: Analyze Dart client
         run: cd clients/flutter && dart analyze --fatal-infos
 
-      - name: Run Dart client & conformance tests
-        run: cd clients/flutter && dart test
+      # The native FFI backend runs the corpus on the Dart VM; the web
+      # (dart:js_interop) backend runs the same corpus against the WASM build in
+      # the runner's system Chrome.
+      - name: Run Dart conformance (VM/FFI + browser/WASM)
+        env:
+          CHROME_EXECUTABLE: /usr/bin/google-chrome-stable
+        run: cd clients/flutter && dart test -p vm,chrome
