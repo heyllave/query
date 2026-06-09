@@ -104,8 +104,11 @@ jobs:
       - name: Build WASM
         run: make -C wasm build
 
+      - name: Install npm deps
+        run: cd wasm/npm && npm install
+
       - name: Typecheck TypeScript bindings
-        run: npx --yes typescript@5 tsc --noEmit -p wasm/npm/tsconfig.json
+        run: cd wasm/npm && ./node_modules/.bin/tsc --noEmit -p tsconfig.json
 
       - name: Run JS WASM tests
         run: node --test wasm/npm/test/wasm.test.mjs
