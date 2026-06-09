@@ -29,10 +29,27 @@ clients/npm/src/wasm_exec.js
 # Generated FFI artifacts (built per platform, not committed)
 clients/ffi/libquery.*
 clients/flutter/native/libquery.*
+clients/flutter_plugin/android/src/main/jniLibs/
+clients/flutter_plugin/ios/Frameworks/
 
 # Dart
 clients/flutter/.dart_tool/
 clients/flutter/pubspec.lock
+
+# Flutter plugin (generated state + the example's flutter create shells)
+clients/flutter_plugin/.dart_tool/
+clients/flutter_plugin/pubspec.lock
+clients/flutter_plugin/example/.dart_tool/
+clients/flutter_plugin/example/pubspec.lock
+clients/flutter_plugin/example/build/
+clients/flutter_plugin/example/.flutter-plugins
+clients/flutter_plugin/example/.flutter-plugins-dependencies
+clients/flutter_plugin/example/android/
+clients/flutter_plugin/example/ios/
+clients/flutter_plugin/example/web/
+clients/flutter_plugin/example/linux/
+clients/flutter_plugin/example/macos/
+clients/flutter_plugin/example/windows/
 
 # Browser-test assets staged by `make -C clients/flutter web-assets`
 # (query.wasm is already covered by *.wasm above)

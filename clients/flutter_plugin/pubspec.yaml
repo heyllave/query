@@ -1,0 +1,32 @@
+name: trazo_query_flutter
+description: Flutter packaging for the Trazo query engine — bundles the prebuilt native libquery (Android .so per ABI, iOS xcframework) and re-exports the trazo_query API.
+version: 0.1.0
+publish_to: none
+
+environment:
+  sdk: ^3.5.0
+  flutter: ">=3.10.0"
+
+dependencies:
+  flutter:
+    sdk: flutter
+  # All query logic lives in the pure-Dart package; this plugin only adds the
+  # native binaries and re-exports its API.
+  trazo_query:
+    path: ../flutter
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^4.0.0
+
+# An FFI plugin: it ships native libraries but registers no platform channel.
+# ffiPlugin: true makes Flutter bundle the per-platform binaries (Android
+# jniLibs, iOS vendored xcframework) into the host app.
+flutter:
+  plugin:
+    platforms:
+      android:
+        ffiPlugin: true
+      ios:
+        ffiPlugin: true
