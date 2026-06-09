@@ -21,7 +21,7 @@ go get github.com/heyllave/query
 
 | Package | Purpose |
 |---------|---------|
-| `query` | Top-level API: `Parse()`, `Validate()`, `ParseAndValidate()` |
+| `query` | Top-level API: `Parse()`, `Validate()`, `ParseAndValidate()`, and one-shot `Match()` / `Eval()` |
 | `query/token` | Lexical token types and position tracking |
 | `query/ast` | AST nodes, `Visitor[T]` pattern, `Walk`, `String` |
 | `query/parser` | Lexer and recursive descent parser |
