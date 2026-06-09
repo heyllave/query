@@ -97,6 +97,20 @@ async function main() {
   console.log("  params:", params);
 
   // -----------------------------------------------------------------------
+  // 6b. Evaluate a predicate / value against a record
+  // -----------------------------------------------------------------------
+  console.log("\n=== Match / Eval ===");
+  const record = { state: "draft", total: 60000, base: 50000 };
+  const matched = q.match("state=draft AND total>50000", fieldConfigs, record);
+  console.log("  match state=draft AND total>50000 →", matched.result);
+
+  const crossField = q.match("total>[base]", fieldConfigs, record);
+  console.log("  match total>[base] (cross-field)  →", crossField.result);
+
+  const computed = q.eval("[base]*1.1", fieldConfigs, record);
+  console.log("  eval  [base]*1.1                  →", computed.result);
+
+  // -----------------------------------------------------------------------
   // 7. Parse error handling
   // -----------------------------------------------------------------------
   console.log("\n=== Error handling ===");

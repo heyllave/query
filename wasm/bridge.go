@@ -4,9 +4,11 @@ package main
 
 import (
 	"encoding/json"
+	"fmt"
 	"syscall/js"
 
 	"github.com/heyllave/query/ast"
+	"github.com/heyllave/query/eval"
 	"github.com/heyllave/query/parser"
 	"github.com/heyllave/query/validate"
 )
@@ -111,19 +113,83 @@ func jsParseAndValidate(_ js.Value, args []js.Value) any {
 	return jsResult(node, "")
 }
 
-// jsResult creates a {result, error} JS object.
+// jsMatch compiles a boolean predicate and evaluates it against a record.
+//
+// JS signature: queryMatch(query: string, fieldsJSON: string, recordJSON: string)
+//
+//	=> { result?: boolean, error?: string }
+func jsMatch(_ js.Value, args []js.Value) any {
+	if len(args) < 3 {
+		return jsResult(nil, "queryMatch requires query, fields, and record arguments")
+	}
+
+	fields, err := parseFields(args[1].String())
+	if err != nil {
+		return jsResult(nil, err.Error())
+	}
+	var record map[string]any
+	if err := json.Unmarshal([]byte(args[2].String()), &record); err != nil {
+		return jsResult(nil, "invalid record: "+err.Error())
+	}
+
+	prog, err := eval.Compile(args[0].String(), fields)
+	if err != nil {
+		return jsResult(nil, err.Error())
+	}
+	return jsResult(prog.Match(record), "")
+}
+
+// jsEval compiles a value expression and evaluates it against a record,
+// returning the computed value.
+//
+// JS signature: queryEval(query: string, fieldsJSON: string, recordJSON: string)
+//
+//	=> { result?: any, error?: string }
+func jsEval(_ js.Value, args []js.Value) any {
+	if len(args) < 3 {
+		return jsResult(nil, "queryEval requires query, fields, and record arguments")
+	}
+
+	fields, err := parseFields(args[1].String())
+	if err != nil {
+		return jsResult(nil, err.Error())
+	}
+	var record map[string]any
+	if err := json.Unmarshal([]byte(args[2].String()), &record); err != nil {
+		return jsResult(nil, "invalid record: "+err.Error())
+	}
+
+	prog, err := eval.CompileValue(args[0].String(), fields)
+	if err != nil {
+		return jsResult(nil, err.Error())
+	}
+	v, err := prog.Eval(record)
+	if err != nil {
+		return jsResult(nil, err.Error())
+	}
+	return jsResult(v, "")
+}
+
+// parseFields decodes a field-config JSON array shared by the eval bridges.
+func parseFields(fieldsJSON string) ([]validate.FieldConfig, error) {
+	var fields []validate.FieldConfig
+	if err := json.Unmarshal([]byte(fieldsJSON), &fields); err != nil {
+		return nil, fmt.Errorf("invalid fields config: %w", err)
+	}
+	return fields, nil
+}
+
+// jsResult creates a {result, error} JS object. The raw Go result is stored
+// directly so the single toJSValue marshal at the end serializes the whole
+// object once — wrapping it in a js.Value here would leave an opaque value that
+// re-marshals to {}.
 func jsResult(result any, errMsg string) any {
 	obj := map[string]any{}
 	if errMsg != "" {
 		obj["error"] = errMsg
 	}
 	if result != nil {
-		switch v := result.(type) {
-		case string:
-			obj["result"] = v
-		default:
-			obj["result"] = toJSValue(v)
-		}
+		obj["result"] = result
 	}
 	return toJSValue(obj)
 }

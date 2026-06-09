@@ -1,8 +1,8 @@
 //go:build wasm
 
 // Package main is the WASM entry point for the query library.
-// It exposes parse, validate, and stringify functions to JavaScript
-// via syscall/js.
+// It exposes parse, validate, stringify, match, and eval functions to
+// JavaScript via syscall/js.
 //
 // Build:
 //
@@ -17,6 +17,8 @@
 //	const ast = queryParse("state=draft AND total>50000");
 //	const errors = queryValidate(ast, fieldsJSON);
 //	const str = queryStringify(ast);
+//	const ok = queryMatch("total>50000", fieldsJSON, recordJSON);
+//	const v  = queryEval("[base]*1.1", fieldsJSON, recordJSON);
 package main
 
 import (
@@ -28,6 +30,8 @@ func main() {
 	js.Global().Set("queryValidate", js.FuncOf(jsValidate))
 	js.Global().Set("queryStringify", js.FuncOf(jsStringify))
 	js.Global().Set("queryParseAndValidate", js.FuncOf(jsParseAndValidate))
+	js.Global().Set("queryMatch", js.FuncOf(jsMatch))
+	js.Global().Set("queryEval", js.FuncOf(jsEval))
 
 	// Block forever so the WASM module stays alive
 	select {}
