@@ -30,7 +30,7 @@ void main() {
 
   late TrazoQuery q;
 
-  setUpAll(() async => q = await TrazoQuery.load());
+  setUpAll(() async => q = await loadTrazoQuery());
 
   test('loads the native engine and parses', () async {
     final r = await q.parse('state=draft AND total>50000');

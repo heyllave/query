@@ -1,8 +1,9 @@
 # trazo_query_flutter
 
 Flutter packaging for the Trazo query engine. This package bundles the **prebuilt
-native `libquery`** (Android `.so` per ABI, iOS xcframework) so a Flutter app has
-a library for the FFI backend to load on a device, and re-exports the
+engine for every target** — Android `.so` per ABI, iOS xcframework, the desktop
+shared library (Linux/macOS/Windows), and the WASM module on web — so a Flutter
+app always has something for the FFI/WASM backend to load. It re-exports the
 [`trazo_query`](../flutter) API.
 
 It contains **no query logic** — that all lives in the pure-Dart `trazo_query`
@@ -22,31 +23,54 @@ dependencies:
 ```dart
 import 'package:trazo_query_flutter/trazo_query_flutter.dart';
 
-final q = await TrazoQuery.load();
+final q = await loadTrazoQuery();   // resolves the engine for the current platform
 final m = await q.match('state=draft AND total>50000', fields, record);
 ```
 
-`TrazoQuery.load()` resolves the native library per platform: Android opens the
-bundled `libquery.so` by soname; iOS looks the statically-linked symbols up in
-the process; desktop opens `libquery.{so,dylib,dll}`.
+Prefer `loadTrazoQuery()` over `TrazoQuery.load()` in a Flutter app: it points
+the web backend at the WASM asset this package bundles, and on native it loads
+the bundled library. Per platform: Android/desktop open `libquery` by name
+(`.so`/`.dll`/`.dylib`); iOS looks the statically-linked symbols up in the
+process; web fetches `query.wasm` from the package's asset bundle.
 
-## Building the native binaries
+## Building the bundled engine
 
-The binaries are **not committed** (they are platform-specific build artifacts,
-like the desktop `libquery`). Produce them before building the app:
+The binaries are **not committed** (they are platform-specific build artifacts).
+Produce the ones for the targets you ship before building the app:
 
 ```bash
 # Android: one libquery.so per ABI into android/src/main/jniLibs/<abi>/
-ANDROID_NDK_HOME=~/Android/Sdk/ndk/28.1.13356709 make -C ../ffi android
+ANDROID_NDK_HOME=~/Android/Sdk/ndk/<version> make -C ../ffi android
 
 # iOS: device + simulator slices into ios/Frameworks/libquery.xcframework
-make -C ../ffi ios        # macOS + Xcode only
+make -C ../ffi ios            # macOS + Xcode only
+
+# Desktop (host OS): stages the shared library into linux/ | macos/ | windows/
+make -C ../ffi desktop-plugin
+
+# Web: build the WASM engine and copy it into your app's web/ directory
+make -C ../ffi web-assets WEB=path/to/your_app/web
 ```
 
+On web, `query.wasm` + `wasm_exec.js` are served from the page root (your app's
+`web/` dir) — they are intentionally not Flutter assets, which would bundle the
+4 MB module into every native build too.
+
 Android needs NDK r27c/r28+ (r28+ aligns to 16 KB pages by default, which Google
-Play requires). iOS must be built on macOS with Xcode. The default ABIs are
+Play requires). iOS must be built on macOS with Xcode; the desktop library is
+built for the host OS you run `desktop-plugin` on. The default Android ABIs are
 `arm64-v8a armeabi-v7a x86_64`; override with `ANDROID_ABIS="…"` (add `x86` for
 old emulators).
+
+## Platform support
+
+| Target | Mechanism | Verified |
+|--------|-----------|----------|
+| Android | per-ABI `.so` in jniLibs | ✅ on emulator (CI) |
+| Linux desktop | bundled `.so` (CMake) | ✅ on-device integration test |
+| Web | WASM asset + `dart:js_interop` | ✅ build + asset serving + engine-in-Chrome |
+| macOS / Windows desktop | bundled `.dylib`/`.dll` | ⚠️ authored; needs that host |
+| iOS | vendored xcframework | ⚠️ authored; needs macOS |
 
 ## Example
 
