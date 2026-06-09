@@ -24,7 +24,7 @@ import type {
   StringifyResult,
   MatchResult,
   EvalResult,
-  Record,
+  QueryRecord,
 } from "./types.js";
 
 export type {
@@ -41,7 +41,7 @@ export type {
   StringifyResult,
   MatchResult,
   EvalResult,
-  Record,
+  QueryRecord,
   Visitor,
 } from "./types.js";
 
@@ -92,13 +92,13 @@ export interface QueryAPI {
    * Compile a boolean predicate and evaluate it against a record in one call.
    * For repeated evaluation, prefer compiling once on the Go side.
    */
-  match(q: string, fields: FieldConfig[], record: Record): MatchResult;
+  match(q: string, fields: FieldConfig[], record: QueryRecord): MatchResult;
 
   /**
    * Compile a value expression and evaluate it against a record, returning the
    * computed value (number, string, boolean, or list).
    */
-  eval(q: string, fields: FieldConfig[], record: Record): EvalResult;
+  eval(q: string, fields: FieldConfig[], record: QueryRecord): EvalResult;
 }
 
 /**
@@ -144,11 +144,11 @@ export async function loadQuery(wasmPath = "./query.wasm"): Promise<QueryAPI> {
       return queryParseAndValidate(q, JSON.stringify(fields));
     },
 
-    match(q: string, fields: FieldConfig[], record: Record): MatchResult {
+    match(q: string, fields: FieldConfig[], record: QueryRecord): MatchResult {
       return queryMatch(q, JSON.stringify(fields), JSON.stringify(record));
     },
 
-    eval(q: string, fields: FieldConfig[], record: Record): EvalResult {
+    eval(q: string, fields: FieldConfig[], record: QueryRecord): EvalResult {
       return queryEval(q, JSON.stringify(fields), JSON.stringify(record));
     },
   };

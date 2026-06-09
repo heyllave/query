@@ -85,7 +85,7 @@ jobs:
           path: coverage.out
 
   wasm:
-    name: WASM build
+    name: WASM build & JS tests
     runs-on: self-hosted
     needs: [checks]
     steps:
@@ -95,10 +95,20 @@ jobs:
         with:
           go-version: ${{ env.GO_VERSION }}
 
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      # make build compiles query.wasm and copies Go's wasm_exec.js into
+      # npm/src, both of which the JavaScript tests load.
       - name: Build WASM
-        run: |
-          cd wasm
-          GOOS=js GOARCH=wasm go build -o query.wasm .
+        run: make -C wasm build
+
+      - name: Typecheck TypeScript bindings
+        run: npx --yes typescript@5 tsc --noEmit -p wasm/npm/tsconfig.json
+
+      - name: Run JS WASM tests
+        run: node --test wasm/npm/test/wasm.test.mjs
 
       - name: Upload WASM artifact
         uses: actions/upload-artifact@v4

@@ -133,7 +133,7 @@ export interface EvalResult {
 }
 
 /** A record of field values to evaluate a query against. */
-export type Record = { [field: string]: unknown };
+export type QueryRecord = { [field: string]: unknown };
 
 // -------------------------------------------------------------------------
 // Visitor pattern (mirrors Go's ast.Visitor[T])
