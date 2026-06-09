@@ -4,11 +4,11 @@ package main
 
 import (
 	"encoding/json"
-	"fmt"
 	"syscall/js"
 
 	"github.com/heyllave/query/ast"
 	"github.com/heyllave/query/eval"
+	"github.com/heyllave/query/internal/bridgejson"
 	"github.com/heyllave/query/parser"
 	"github.com/heyllave/query/validate"
 )
@@ -123,7 +123,7 @@ func jsMatch(_ js.Value, args []js.Value) any {
 		return jsResult(nil, "queryMatch requires query, fields, and record arguments")
 	}
 
-	fields, err := parseFields(args[1].String())
+	fields, err := bridgejson.ParseFields(args[1].String())
 	if err != nil {
 		return jsResult(nil, err.Error())
 	}
@@ -150,7 +150,7 @@ func jsEval(_ js.Value, args []js.Value) any {
 		return jsResult(nil, "queryEval requires query, fields, and record arguments")
 	}
 
-	fields, err := parseFields(args[1].String())
+	fields, err := bridgejson.ParseFields(args[1].String())
 	if err != nil {
 		return jsResult(nil, err.Error())
 	}
@@ -168,15 +168,6 @@ func jsEval(_ js.Value, args []js.Value) any {
 		return jsResult(nil, err.Error())
 	}
 	return jsResult(v, "")
-}
-
-// parseFields decodes a field-config JSON array shared by the eval bridges.
-func parseFields(fieldsJSON string) ([]validate.FieldConfig, error) {
-	var fields []validate.FieldConfig
-	if err := json.Unmarshal([]byte(fieldsJSON), &fields); err != nil {
-		return nil, fmt.Errorf("invalid fields config: %w", err)
-	}
-	return fields, nil
 }
 
 // jsResult creates a {result, error} JS object. The raw Go result is stored
