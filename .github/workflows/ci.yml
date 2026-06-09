@@ -49,7 +49,7 @@ jobs:
       - name: Run golangci-lint
         # wasm/ is excluded — it uses syscall/js which can't be type-checked
         # outside of GOOS=js/GOARCH=wasm builds.
-        run: golangci-lint run ./token/... ./ast/... ./parser/... ./validate/... ./eval/... ./examples/... .
+        run: golangci-lint run ./token/... ./ast/... ./parser/... ./validate/... ./eval/... ./examples/... ./internal/... ./conformance/... .
 
   test:
     name: Unit tests
@@ -73,7 +73,7 @@ jobs:
           go test -race -count=1 \
             -coverprofile=coverage.out -covermode=atomic \
             -coverpkg=./token/...,./ast/...,./parser/...,./validate/...,./eval/...,./ \
-            ./token/... ./ast/... ./parser/... ./validate/... ./eval/... .
+            ./token/... ./ast/... ./parser/... ./validate/... ./eval/... ./conformance/... .
 
       - name: Print coverage summary
         run: go tool cover -func=coverage.out | tail -1
@@ -100,21 +100,56 @@ jobs:
           node-version: "22"
 
       # make build compiles query.wasm and copies Go's wasm_exec.js into
-      # npm/src, both of which the JavaScript tests load.
+      # clients/npm, both of which the JavaScript tests load.
       - name: Build WASM
         run: make -C wasm build
 
       - name: Install npm deps
-        run: cd wasm/npm && npm install
+        run: cd clients/npm && npm install
 
       - name: Typecheck TypeScript bindings
-        run: cd wasm/npm && ./node_modules/.bin/tsc --noEmit -p tsconfig.json
+        run: cd clients/npm && ./node_modules/.bin/tsc --noEmit -p tsconfig.json
 
       - name: Run JS WASM tests
-        run: node --test wasm/npm/test/wasm.test.mjs
+        run: node --test clients/npm/test/wasm.test.mjs
+
+      - name: Run JS conformance tests
+        run: node --test clients/npm/test/conformance.test.mjs
 
       - name: Upload WASM artifact
         uses: actions/upload-artifact@v4
         with:
           name: query-wasm
-          path: wasm/query.wasm
+          path: clients/npm/query.wasm
+
+  dart:
+    name: Dart FFI client & conformance
+    runs-on: self-hosted
+    needs: [checks]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+
+      - uses: dart-lang/setup-dart@v1
+        with:
+          sdk: "3.5"
+
+      # Build the cgo c-shared library the Dart FFI backend loads. clang is used
+      # because the self-hosted runner has no gcc (cgo's default compiler).
+      - name: Build native libquery
+        env:
+          CGO_ENABLED: "1"
+          CC: clang
+        run: make -C clients/ffi build
+
+      - name: Install Dart deps
+        run: cd clients/flutter && dart pub get
+
+      - name: Analyze Dart client
+        run: cd clients/flutter && dart analyze --fatal-infos
+
+      - name: Run Dart client & conformance tests
+        run: cd clients/flutter && dart test

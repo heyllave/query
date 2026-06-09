@@ -1,8 +1,8 @@
 // End-to-end tests for the query WASM bridge, exercised through the Go binary
 // from JavaScript. Run with the project's zero-dependency Node test runner:
 //
-//   cd wasm && make build      # produces query.wasm + npm/src/wasm_exec.js
-//   cd npm && node --test
+//   make -C wasm build   # produces clients/npm/query.wasm + src/wasm_exec.js
+//   node --test
 //
 // These prove the JS <-> WASM round-trip for every exported function, including
 // the match/eval bridges, not just the Go-side unit tests.
@@ -14,7 +14,7 @@ import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 
 const here = dirname(fileURLToPath(import.meta.url));
-const wasmPath = join(here, "..", "..", "query.wasm");
+const wasmPath = join(here, "..", "query.wasm");
 const wasmExecPath = join(here, "..", "src", "wasm_exec.js");
 
 // Load Go's wasm_exec.js shim (defines globalThis.Go) and instantiate the

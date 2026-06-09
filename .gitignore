@@ -23,5 +23,13 @@ trazo.yaml
 
 # Node
 node_modules/
-wasm/npm/dist/
-wasm/npm/src/wasm_exec.js
+clients/npm/dist/
+clients/npm/src/wasm_exec.js
+
+# Generated FFI artifacts (built per platform, not committed)
+clients/ffi/libquery.*
+clients/flutter/native/libquery.*
+
+# Dart
+clients/flutter/.dart_tool/
+clients/flutter/pubspec.lock

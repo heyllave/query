@@ -427,6 +427,8 @@ Codegen via `Visitor[T]` is the consumer's responsibility — the library does n
 - **Struct binding** — `query:"field_name"` tags on Go structs auto-generate field configs.
 - **Round-trip fidelity** — `ast.String(ast.Parse(q)) == q` for all normalized queries.
 - **TypeScript package** — full type definitions, visitor pattern, and WASM loader for browser/Node.js.
+- **Dart & Flutter client** — runs the Go engine over `dart:ffi` on native targets and WASM on the web, so Dart results match the Go and JS clients.
+- **Cross-language conformance** — Go, JS/WASM, and Dart clients run one shared corpus in CI, so grammar drift between implementations fails the build.
 
 ## Scope
 
