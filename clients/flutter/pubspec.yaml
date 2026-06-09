@@ -1,0 +1,15 @@
+name: trazo_query
+description: Trazo query language for Dart and Flutter — parse, validate, match, and evaluate queries via the Go engine (FFI on native, WASM on web).
+version: 0.1.0
+publish_to: none
+
+environment:
+  sdk: ^3.5.0
+
+dependencies:
+  ffi: ^2.1.0
+  web: ^1.1.0
+
+dev_dependencies:
+  test: ^1.25.0
+  lints: ^4.0.0
