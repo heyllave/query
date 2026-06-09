@@ -1,0 +1,42 @@
+{
+  "version": 1,
+  "description": "Cross-language conformance corpus for the query language. Every client (Go, JS/WASM, Dart/FFI) runs these cases against the real engine so grammar drift becomes a failing build. Numeric expectations use tolerance; error checks are non-empty/substring (wording may change).",
+  "fieldSets": {
+    "default": [
+      { "Name": "state", "Type": 0, "AllowedOps": ["=", "!=", "*", "?"] },
+      { "Name": "total", "Type": 2, "AllowedOps": ["=", "!=", ">", ">=", "<", "<=", ".."] },
+      { "Name": "base", "Type": 2, "AllowedOps": ["=", "!=", ">", ">=", "<", "<=", ".."] },
+      { "Name": "cpu", "Type": 1, "AllowedOps": ["=", "!=", ">", ">=", "<", "<="] },
+      { "Name": "cpu_limit", "Type": 1, "AllowedOps": ["=", "!=", ">", ">=", "<", "<="] }
+    ]
+  },
+  "cases": [
+    { "id": "parse-binary", "desc": "AND parses to a binary node", "op": "parse", "query": "state=draft AND total>50000", "expectAst": "binary" },
+    { "id": "parse-error", "desc": "leading = is a parse error", "op": "parse", "query": "=invalid", "expectError": true },
+    { "id": "pav-qualifier", "desc": "parseAndValidate a simple qualifier", "op": "parseAndValidate", "query": "state=draft", "fieldSet": "default", "expectAst": "qualifier" },
+    { "id": "pav-unknown-field", "desc": "unknown field fails validation", "op": "parseAndValidate", "query": "nope=x", "fieldSet": "default", "expectError": true },
+    { "id": "stringify-roundtrip", "desc": "round-trips a compound query", "op": "stringify", "query": "state=draft AND total>50000", "expectString": "state=draft AND total>50000" },
+
+    { "id": "match-and-true", "desc": "AND both sides true", "op": "match", "query": "state=draft AND total>50000", "fieldSet": "default", "record": { "state": "draft", "total": 60000 }, "expectMatch": true },
+    { "id": "match-and-false", "desc": "threshold not met", "op": "match", "query": "total>100000", "fieldSet": "default", "record": { "state": "draft", "total": 60000 }, "expectMatch": false },
+    { "id": "match-crossfield-true", "desc": "cross-field total>[base]", "op": "match", "query": "total>[base]", "fieldSet": "default", "record": { "total": 100, "base": 50 }, "expectMatch": true },
+    { "id": "match-arith-eq", "desc": "field arithmetic on RHS, equal", "op": "match", "query": "total>=[base]*2", "fieldSet": "default", "record": { "total": 200, "base": 100 }, "expectMatch": true },
+    { "id": "match-arith-below", "desc": "field arithmetic on RHS, below", "op": "match", "query": "total>=[base]*2", "fieldSet": "default", "record": { "total": 150, "base": 100 }, "expectMatch": false },
+    { "id": "match-arith-missing", "desc": "missing operand field is false", "op": "match", "query": "total>=[base]*2", "fieldSet": "default", "record": { "total": 200 }, "expectMatch": false },
+    { "id": "match-cpu-gt", "desc": "cross-field cpu>[cpu_limit] true", "op": "match", "query": "cpu>[cpu_limit]", "fieldSet": "default", "record": { "cpu": 90, "cpu_limit": 80 }, "expectMatch": true },
+    { "id": "match-cpu-le", "desc": "cross-field cpu>[cpu_limit] false", "op": "match", "query": "cpu>[cpu_limit]", "fieldSet": "default", "record": { "cpu": 50, "cpu_limit": 80 }, "expectMatch": false },
+    { "id": "match-cpu-missing", "desc": "missing RHS field is false", "op": "match", "query": "cpu>[cpu_limit]", "fieldSet": "default", "record": { "cpu": 90 }, "expectMatch": false },
+    { "id": "match-cpu-nil", "desc": "present-but-nil RHS is false", "op": "match", "query": "cpu>[cpu_limit]", "fieldSet": "default", "record": { "cpu": 90, "cpu_limit": null }, "expectMatch": false },
+    { "id": "match-compile-error", "desc": "unknown field is a compile error", "op": "match", "query": "unknown_field=x", "fieldSet": "default", "record": {}, "expectError": true },
+
+    { "id": "eval-literal-int", "desc": "integer literal", "op": "eval", "query": "42", "fieldSet": "default", "record": {}, "expectValue": 42 },
+    { "id": "eval-literal-float", "desc": "float literal", "op": "eval", "query": "3.14", "fieldSet": "default", "record": {}, "expectValue": 3.14 },
+    { "id": "eval-mul", "desc": "integer multiply", "op": "eval", "query": "6*7", "fieldSet": "default", "record": {}, "expectValue": 42 },
+    { "id": "eval-group", "desc": "grouped arithmetic", "op": "eval", "query": "(50000+1000)*1.1", "fieldSet": "default", "record": {}, "expectValue": 56100, "tolerance": 0.001 },
+    { "id": "eval-div-float", "desc": "division promotes to float", "op": "eval", "query": "9/2", "fieldSet": "default", "record": {}, "expectValue": 4.5 },
+    { "id": "eval-field-arith", "desc": "arithmetic over a field ref", "op": "eval", "query": "[base]*2", "fieldSet": "default", "record": { "base": 21 }, "expectValue": 42 },
+    { "id": "eval-field-bare", "desc": "bare field ref value", "op": "eval", "query": "[base]", "fieldSet": "default", "record": { "base": 5 }, "expectValue": 5 },
+    { "id": "eval-missing-field", "desc": "missing field does not resolve", "op": "eval", "query": "[base]", "fieldSet": "default", "record": {}, "expectError": true },
+    { "id": "eval-div-zero", "desc": "division by zero does not resolve", "op": "eval", "query": "5/0", "fieldSet": "default", "record": {}, "expectError": true }
+  ]
+}
