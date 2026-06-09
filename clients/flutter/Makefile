@@ -1,8 +1,16 @@
-.PHONY: native web-assets test test-web test-all analyze clean
+.PHONY: native android ios web-assets test test-web test-all analyze clean
 
 # Build the cgo c-shared library the native FFI backend loads (into native/).
 native:
 	$(MAKE) -C ../ffi build
+
+# Cross-compile the mobile binaries the Flutter plugin bundles (see
+# ../flutter_plugin). android needs the Android NDK; ios needs macOS + Xcode.
+android:
+	$(MAKE) -C ../ffi android
+
+ios:
+	$(MAKE) -C ../ffi ios
 
 # Stage the assets the browser test server serves: the WASM build, Go's JS glue,
 # and a copy of the shared corpus. test/ is where package:test resolves the
