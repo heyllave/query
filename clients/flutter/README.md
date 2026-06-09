@@ -81,14 +81,25 @@ Serve `query.wasm` and `wasm_exec.js` next to your page (or pass
 
 ## Tests
 
+Both backends run the shared conformance corpus. The `Makefile` builds the
+artifacts each backend needs and runs the tests:
+
 ```bash
-make -C clients/ffi build         # the native lib the tests load
-cd clients/flutter
-dart pub get
-dart analyze --fatal-infos
-dart test                         # client + conformance, on the Dart VM (FFI)
+make test       # native FFI backend on the Dart VM (builds libquery)
+make test-web   # web/WASM backend in Chrome (builds query.wasm, stages assets)
+make test-all   # both, on -p vm,chrome
 ```
 
-`dart test` exercises the native FFI backend. Running the web/WASM backend needs
-a browser (`dart test -p chrome`) with `query.wasm` + `wasm_exec.js` served; that
-is a follow-up.
+`make test-web` stages `query.wasm`, `wasm_exec.js`, and a copy of the corpus
+into `test/` (where the browser test server serves them) and needs Chrome
+(`CHROME_EXECUTABLE` or Chrome on `PATH`). The raw commands, if you prefer:
+
+```bash
+make -C clients/ffi build && make -C clients/flutter web-assets
+cd clients/flutter && dart pub get && dart analyze --fatal-infos
+dart test -p vm,chrome
+```
+
+Both backends are gated in CI: the FFI backend on the Dart VM and the web
+backend against the WASM build in the runner's Chrome, running the identical
+corpus.

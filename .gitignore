@@ -33,3 +33,8 @@ clients/flutter/native/libquery.*
 # Dart
 clients/flutter/.dart_tool/
 clients/flutter/pubspec.lock
+
+# Browser-test assets staged by `make -C clients/flutter web-assets`
+# (query.wasm is already covered by *.wasm above)
+clients/flutter/test/wasm_exec.js
+clients/flutter/test/corpus.json
