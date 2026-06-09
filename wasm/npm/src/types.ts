@@ -120,6 +120,21 @@ export interface StringifyResult {
   error?: string;
 }
 
+/** Result from match operations: a boolean predicate evaluated against a record. */
+export interface MatchResult {
+  result?: boolean;
+  error?: string;
+}
+
+/** Result from eval operations: a value expression evaluated against a record. */
+export interface EvalResult {
+  result?: string | number | boolean | unknown[];
+  error?: string;
+}
+
+/** A record of field values to evaluate a query against. */
+export type Record = { [field: string]: unknown };
+
 // -------------------------------------------------------------------------
 // Visitor pattern (mirrors Go's ast.Visitor[T])
 // -------------------------------------------------------------------------

@@ -1,7 +1,7 @@
 {
   "name": "@trazo/query",
   "version": "0.1.0",
-  "description": "Trazo query language parser and validator (WASM)",
+  "description": "Trazo query language for the browser/Node — parse, validate, match, and evaluate (WASM)",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "files": [
@@ -12,7 +12,8 @@
     "build:wasm": "cd .. && make build",
     "build:ts": "tsc",
     "build": "npm run build:wasm && npm run build:ts",
-    "example": "npx tsx examples/basic.ts"
+    "example": "npx tsx examples/basic.ts",
+    "test": "npm run build:wasm && node --test test/wasm.test.mjs"
   },
   "keywords": [
     "trazo",

@@ -1,8 +1,9 @@
 /**
- * @trazo/query — Trazo query language parser and validator (WASM).
+ * @trazo/query — Trazo query language for the browser and Node (WASM).
  *
- * This package loads the Go WASM binary and exposes a typed TypeScript API
- * for parsing, validating, and stringifying Trazo query expressions.
+ * This package loads the Go WASM binary and exposes a typed TypeScript API for
+ * parsing, validating, stringifying, matching, and evaluating Trazo query
+ * expressions.
  *
  * @example
  * ```ts
@@ -21,6 +22,9 @@ import type {
   ParseResult,
   ValidateResult,
   StringifyResult,
+  MatchResult,
+  EvalResult,
+  Record,
 } from "./types.js";
 
 export type {
@@ -35,6 +39,9 @@ export type {
   ParseResult,
   ValidateResult,
   StringifyResult,
+  MatchResult,
+  EvalResult,
+  Record,
   Visitor,
 } from "./types.js";
 
@@ -49,6 +56,16 @@ declare global {
     q: string,
     fieldsJSON: string
   ): ParseResult;
+  function queryMatch(
+    q: string,
+    fieldsJSON: string,
+    recordJSON: string
+  ): MatchResult;
+  function queryEval(
+    q: string,
+    fieldsJSON: string,
+    recordJSON: string
+  ): EvalResult;
 
   // Go's wasm_exec.js provides this constructor.
   class Go {
@@ -70,6 +87,18 @@ export interface QueryAPI {
 
   /** Parse and validate in one call. */
   parseAndValidate(q: string, fields: FieldConfig[]): ParseResult;
+
+  /**
+   * Compile a boolean predicate and evaluate it against a record in one call.
+   * For repeated evaluation, prefer compiling once on the Go side.
+   */
+  match(q: string, fields: FieldConfig[], record: Record): MatchResult;
+
+  /**
+   * Compile a value expression and evaluate it against a record, returning the
+   * computed value (number, string, boolean, or list).
+   */
+  eval(q: string, fields: FieldConfig[], record: Record): EvalResult;
 }
 
 /**
@@ -113,6 +142,14 @@ export async function loadQuery(wasmPath = "./query.wasm"): Promise<QueryAPI> {
 
     parseAndValidate(q: string, fields: FieldConfig[]): ParseResult {
       return queryParseAndValidate(q, JSON.stringify(fields));
+    },
+
+    match(q: string, fields: FieldConfig[], record: Record): MatchResult {
+      return queryMatch(q, JSON.stringify(fields), JSON.stringify(record));
+    },
+
+    eval(q: string, fields: FieldConfig[], record: Record): EvalResult {
+      return queryEval(q, JSON.stringify(fields), JSON.stringify(record));
     },
   };
 }

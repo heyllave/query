@@ -179,19 +179,17 @@ func parseFields(fieldsJSON string) ([]validate.FieldConfig, error) {
 	return fields, nil
 }
 
-// jsResult creates a {result, error} JS object.
+// jsResult creates a {result, error} JS object. The raw Go result is stored
+// directly so the single toJSValue marshal at the end serializes the whole
+// object once — wrapping it in a js.Value here would leave an opaque value that
+// re-marshals to {}.
 func jsResult(result any, errMsg string) any {
 	obj := map[string]any{}
 	if errMsg != "" {
 		obj["error"] = errMsg
 	}
 	if result != nil {
-		switch v := result.(type) {
-		case string:
-			obj["result"] = v
-		default:
-			obj["result"] = toJSValue(v)
-		}
+		obj["result"] = result
 	}
 	return toJSValue(obj)
 }
