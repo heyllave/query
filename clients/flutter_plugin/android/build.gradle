@@ -1,0 +1,42 @@
+// Gradle build for the trazo_query_flutter FFI plugin. It compiles no native
+// code: it only bundles the prebuilt per-ABI libquery.so under src/main/jniLibs
+// (produced by `make -C clients/ffi android`), which Gradle packages into the
+// host app's APK/AAB. There is deliberately no externalNativeBuild/CMake block.
+group = "com.trazo.trazo_query_flutter"
+version = "0.1.0"
+
+buildscript {
+    repositories {
+        google()
+        mavenCentral()
+    }
+    dependencies {
+        classpath("com.android.tools.build:gradle:8.1.0")
+    }
+}
+
+rootProject.allprojects {
+    repositories {
+        google()
+        mavenCentral()
+    }
+}
+
+apply plugin: "com.android.library"
+
+android {
+    namespace = "com.trazo.trazo_query_flutter"
+    compileSdk = 34
+
+    defaultConfig {
+        // Matches the minimum Android API the cgo c-shared library targets
+        // (see ANDROID_API in clients/ffi/Makefile).
+        minSdk = 21
+    }
+
+    sourceSets {
+        main {
+            jniLibs.srcDirs = ["src/main/jniLibs"]
+        }
+    }
+}

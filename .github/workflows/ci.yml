@@ -123,7 +123,7 @@ jobs:
           path: clients/npm/query.wasm
 
   dart:
-    name: Dart FFI client & conformance
+    name: Dart client & conformance (FFI + WASM)
     runs-on: self-hosted
     needs: [checks]
     steps:
@@ -145,11 +145,100 @@ jobs:
           CC: clang
         run: make -C clients/ffi build
 
+      # Build query.wasm + wasm_exec.js and stage them (with the corpus) into
+      # test/ so the browser test server can serve them.
+      - name: Build web assets
+        run: make -C clients/flutter web-assets
+
       - name: Install Dart deps
         run: cd clients/flutter && dart pub get
 
       - name: Analyze Dart client
         run: cd clients/flutter && dart analyze --fatal-infos
 
-      - name: Run Dart client & conformance tests
-        run: cd clients/flutter && dart test
+      # The native FFI backend runs the corpus on the Dart VM; the web
+      # (dart:js_interop) backend runs the same corpus against the WASM build in
+      # the runner's system Chrome.
+      - name: Run Dart conformance (VM/FFI + browser/WASM)
+        env:
+          CHROME_EXECUTABLE: /usr/bin/google-chrome-stable
+        run: cd clients/flutter && dart test -p vm,chrome
+
+  android:
+    name: Android (build + emulator)
+    runs-on: self-hosted
+    needs: [checks]
+    timeout-minutes: 30
+    # The self-hosted box has one AVD shared across its concurrent runners;
+    # serialize so two emulator runs never contend for it (queue, don't cancel).
+    concurrency:
+      group: android-emulator
+      cancel-in-progress: false
+    env:
+      ANDROID_HOME: /home/davixcky/development/android
+      ANDROID_SDK_ROOT: /home/davixcky/development/android
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+
+      # Cross-compile one libquery.so per ABI with the runner's NDK.
+      - name: Build per-ABI libquery.so
+        run: |
+          export ANDROID_NDK_HOME="$(ls -d "$ANDROID_HOME"/ndk/* | sort -V | tail -1)"
+          echo "using NDK: $ANDROID_NDK_HOME"
+          make -C clients/ffi android
+
+      # Assert each .so is a real Android object for the right arch, 16KB
+      # page-aligned (Google Play mandate), with the FFI exports present.
+      - name: Assert ELF arch, 16KB alignment, and FFI exports
+        run: |
+          ndk="$(ls -d "$ANDROID_HOME"/ndk/* | sort -V | tail -1)"
+          bin="$ndk/toolchains/llvm/prebuilt/linux-x86_64/bin"
+          jni=clients/flutter_plugin/android/src/main/jniLibs
+          fail=0
+          check() { # <abi> <arch-substring>
+            so="$jni/$1/libquery.so"
+            echo "== $1 =="
+            file "$so" | grep -q "$2" || { echo "  FAIL: wrong arch ($2)"; fail=1; }
+            aligned=$("$bin/llvm-objdump" -p "$so" | grep -A1 LOAD | grep align | grep -v '2\*\*14' || true)
+            [ -z "$aligned" ] || { echo "  FAIL: not 16KB-aligned:"; echo "$aligned"; fail=1; }
+            "$bin/llvm-nm" -D "$so" | grep -q "T QueryParse" || { echo "  FAIL: QueryParse not exported"; fail=1; }
+            [ "$fail" = 0 ] && echo "  ok: arch, 16KB alignment, exports"
+          }
+          check arm64-v8a   "ARM aarch64"
+          check armeabi-v7a "ARM, EABI5"
+          check x86_64      "x86-64"
+          exit $fail
+
+      # The real proof: build an APK that bundles the x86_64 libquery.so, install
+      # it on the emulator, and run the integration test — TrazoQuery.load() must
+      # open the bundled .so, resolve the FFI symbols, and run the Go engine.
+      - name: Run on-device integration test
+        run: |
+          export PATH="$PATH:$ANDROID_HOME/platform-tools:$ANDROID_HOME/emulator:/home/davixcky/development/flutter/bin"
+          cd clients/flutter_plugin/example
+          flutter create --platforms=android --project-name trazo_query_flutter_example .
+          flutter pub get
+          # Start from a clean emulator state.
+          pkill -f "emulator -avd admin_test" || true
+          adb kill-server || true; adb start-server
+          nohup "$ANDROID_HOME/emulator/emulator" -avd admin_test \
+            -no-window -no-audio -no-boot-anim -no-snapshot -gpu swiftshader_indirect \
+            > /tmp/emu-ci.log 2>&1 &
+          adb wait-for-device
+          for i in $(seq 1 60); do
+            [ "$(adb shell getprop sys.boot_completed 2>/dev/null | tr -d '\r')" = "1" ] && break
+            sleep 5
+          done
+          [ "$(adb shell getprop sys.boot_completed 2>/dev/null | tr -d '\r')" = "1" ] || \
+            { echo "emulator failed to boot"; cat /tmp/emu-ci.log; exit 1; }
+          flutter test integration_test/load_test.dart -d emulator-5554
+
+      - name: Shut down emulator
+        if: always()
+        run: |
+          export PATH="$PATH:$ANDROID_HOME/platform-tools"
+          adb -s emulator-5554 emu kill 2>/dev/null || pkill -f "emulator -avd admin_test" || true
