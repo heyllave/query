@@ -9,7 +9,7 @@
     "query.wasm"
   ],
   "scripts": {
-    "build:wasm": "cd .. && make build",
+    "build:wasm": "make -C ../../wasm build",
     "build:ts": "tsc",
     "build": "npm run build:wasm && npm run build:ts",
     "example": "npx tsx examples/basic.ts",
