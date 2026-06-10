@@ -1,4 +1,4 @@
-.PHONY: build clean android ios
+.PHONY: build clean android ios desktop-plugin web-assets
 
 # Host shared-library extension. Override for cross builds.
 UNAME_S := $(shell uname -s)
@@ -36,6 +36,34 @@ build:
 		-o libquery.$(EXT) .
 	mkdir -p ../flutter/native
 	cp libquery.$(EXT) libquery.h ../flutter/native/
+
+# Stage the desktop shared library into the Flutter plugin's platform folder so
+# `flutter build <linux|macos|windows>` bundles it next to the app executable.
+desktop-plugin: build
+	@case "$(UNAME_S)" in \
+	  Linux)  dest=../flutter_plugin/linux ;; \
+	  Darwin) dest=../flutter_plugin/macos ;; \
+	  *)      dest=../flutter_plugin/windows ;; \
+	esac; \
+	mkdir -p "$$dest"; \
+	cp libquery.$(EXT) "$$dest/"; \
+	echo "staged libquery.$(EXT) -> $$dest"
+
+# Build the WASM engine + glue. Pass WEB=<absolute path to an app's web/ dir> to
+# copy them there, where the web backend fetches them from the page root (they
+# are deliberately not pubspec assets — see clients/flutter_plugin/pubspec.yaml).
+# WEB must be absolute: this recipe runs from clients/ffi, so a relative path
+# would resolve against the wrong directory.
+web-assets:
+	$(MAKE) -C ../../wasm build
+	@if [ -n "$(WEB)" ]; then \
+		mkdir -p "$(WEB)"; \
+		cp ../npm/query.wasm "$(WEB)/query.wasm"; \
+		cp ../npm/src/wasm_exec.js "$(WEB)/wasm_exec.js"; \
+		echo "staged web engine -> $(WEB)"; \
+	else \
+		echo "built query.wasm + wasm_exec.js under ../npm; pass WEB=<app>/web to stage them"; \
+	fi
 
 # Cross-compile one libquery.so per Android ABI. Host CGO_* flags are cleared so
 # a desktop '-arch' does not leak into the NDK clang (golang/go#74410); the 16KB
@@ -110,3 +138,7 @@ clean:
 	rm -f libquery.so libquery.dylib libquery.dll libquery.h
 	rm -f ../flutter/native/libquery.*
 	rm -rf $(JNILIBS) $(XCFRAMEWORK)
+	rm -f ../flutter_plugin/linux/libquery.so \
+		../flutter_plugin/macos/libquery.dylib \
+		../flutter_plugin/windows/libquery.dll
+	rm -rf ../flutter_plugin/assets

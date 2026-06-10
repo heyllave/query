@@ -31,6 +31,9 @@ clients/ffi/libquery.*
 clients/flutter/native/libquery.*
 clients/flutter_plugin/android/src/main/jniLibs/
 clients/flutter_plugin/ios/Frameworks/
+clients/flutter_plugin/linux/libquery.so
+clients/flutter_plugin/macos/libquery.dylib
+clients/flutter_plugin/windows/libquery.dll
 
 # Dart
 clients/flutter/.dart_tool/

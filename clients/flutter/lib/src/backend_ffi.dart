@@ -21,8 +21,10 @@ typedef _FreeDart = void Function(Pointer<Utf8>);
 ///   process.
 /// - **Android** bundles a per-ABI `libquery.so` in the APK; opening it by its
 ///   soname lets the loader pick the right ABI.
-/// - **Desktop** (Linux/macOS/Windows) opens `libquery.{so,dylib,dll}` from the
-///   default path next to the working directory.
+/// - **Desktop** (Linux/macOS/Windows): a Flutter app bundles `libquery` next to
+///   its executable, so it is opened by soname; a standalone `dart` program
+///   loads it from `native/` (where `make -C clients/ffi build` puts it). Both
+///   are tried.
 ///
 /// [wasmUrl] is ignored on native.
 Future<Backend> openBackend({String? libraryPath, String? wasmUrl}) async {
@@ -33,14 +35,30 @@ DynamicLibrary _open(String? libraryPath) {
   if (libraryPath != null) return DynamicLibrary.open(libraryPath);
   if (Platform.isIOS) return DynamicLibrary.process();
   if (Platform.isAndroid) return DynamicLibrary.open('libquery.so');
-  return DynamicLibrary.open(_defaultLibraryPath());
+  return _openDesktop();
 }
 
-String _defaultLibraryPath() {
-  final base = 'native/libquery';
-  if (Platform.isMacOS) return '$base.dylib';
-  if (Platform.isWindows) return '$base.dll';
-  return '$base.so';
+DynamicLibrary _openDesktop() {
+  final ext = Platform.isMacOS
+      ? 'dylib'
+      : Platform.isWindows
+          ? 'dll'
+          : 'so';
+  // Soname first (the lib bundled next to a Flutter desktop executable), then
+  // the dev path used by a standalone `dart` run.
+  final candidates = ['libquery.$ext', 'native/libquery.$ext'];
+  Object? lastError;
+  for (final path in candidates) {
+    try {
+      return DynamicLibrary.open(path);
+    } catch (e) {
+      lastError = e;
+    }
+  }
+  throw ArgumentError(
+    'could not load libquery (tried ${candidates.join(", ")}); build it with '
+    '`make -C clients/ffi build` or pass libraryPath. Last error: $lastError',
+  );
 }
 
 /// Calls the Go engine through cgo c-shared exports. Each call passes a JSON

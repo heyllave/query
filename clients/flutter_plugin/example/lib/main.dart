@@ -42,7 +42,7 @@ class _HomePageState extends State<HomePage> {
 
   Future<void> _run() async {
     try {
-      final q = await TrazoQuery.load();
+      final q = await loadTrazoQuery();
       final m = await q.match(
         'state=draft AND total>50000',
         _fields,

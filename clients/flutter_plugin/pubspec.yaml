@@ -22,11 +22,24 @@ dev_dependencies:
 
 # An FFI plugin: it ships native libraries but registers no platform channel.
 # ffiPlugin: true makes Flutter bundle the per-platform binaries (Android
-# jniLibs, iOS vendored xcframework) into the host app.
+# jniLibs, iOS xcframework, desktop shared library) into the host app.
+#
+# Web has no native code — the engine runs as WASM. query.wasm + wasm_exec.js
+# are NOT declared as package assets on purpose: a pubspec asset would be bundled
+# into every native app (4 MB of dead weight) and would have to exist for every
+# build. Instead a web app copies them into its own web/ directory
+# (`make -C clients/ffi web-assets WEB=<app>/web`), where the backend fetches
+# them from the page root.
 flutter:
   plugin:
     platforms:
       android:
         ffiPlugin: true
       ios:
+        ffiPlugin: true
+      linux:
+        ffiPlugin: true
+      macos:
+        ffiPlugin: true
+      windows:
         ffiPlugin: true

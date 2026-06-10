@@ -60,7 +60,12 @@ Future<Backend> openBackend({String? libraryPath, String? wasmUrl}) async {
 
 Future<void> _ensureStarted(String wasmUrl) async {
   if (_started) return;
-  await _injectScript('wasm_exec.js');
+  // wasm_exec.js sits next to query.wasm — derive its URL from the wasm's
+  // directory so a bundled-asset path (Flutter web) and a page-root path
+  // (standalone) both resolve the glue correctly.
+  final slash = wasmUrl.lastIndexOf('/');
+  final dir = slash >= 0 ? wasmUrl.substring(0, slash + 1) : '';
+  await _injectScript('${dir}wasm_exec.js');
   final go = _Go();
   final resp = await web.window.fetch(wasmUrl.toJS).toDart;
   final bytes = await resp.arrayBuffer().toDart;
