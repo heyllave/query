@@ -34,11 +34,12 @@ type testCase struct {
 	ExpectError  *bool                  `json:"expectError"`
 	ExpectAst    string                 `json:"expectAst"`
 	ExpectString string                 `json:"expectString"`
+	ExpectCode   string                 `json:"expectCode"`
 	Tolerance    float64                `json:"tolerance"`
 }
 
 // expectedCaseCount guards against a stale/truncated corpus silently passing.
-const expectedCaseCount = 25
+const expectedCaseCount = 41
 
 func loadCorpus(t *testing.T) corpus {
 	t.Helper()
@@ -78,6 +79,7 @@ func runCase(t *testing.T, c corpus, tc testCase) {
 	case "parse":
 		expr, err := parser.Parse(tc.Query, 256)
 		checkErr(t, tc, err)
+		checkCode(t, tc, err)
 		if err == nil && tc.ExpectAst != "" {
 			// AST type is asserted loosely (presence + no error); the JS/Dart
 			// runners do the structural type check against the JSON shape.
@@ -148,6 +150,22 @@ func checkErr(t *testing.T, tc testCase, err error) bool {
 	}
 	expectNoErr(t, tc)
 	return false
+}
+
+// checkCode asserts the first parse failure's stable code, when the case names one.
+func checkCode(t *testing.T, tc testCase, err error) {
+	t.Helper()
+	if tc.ExpectCode == "" {
+		return
+	}
+	errs := parser.Errors(err)
+	if len(errs) == 0 {
+		t.Errorf("expected failure code %q, got no parse error", tc.ExpectCode)
+		return
+	}
+	if got := string(errs[0].Code); got != tc.ExpectCode {
+		t.Errorf("failure code = %q, want %q", got, tc.ExpectCode)
+	}
 }
 
 // expectErr asserts that an error here was expected.
