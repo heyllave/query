@@ -130,6 +130,9 @@ jobs:
       - name: Run JS conformance tests
         run: node --test clients/npm/test/conformance.test.mjs
 
+      - name: Build the package and load it from each source kind
+        run: cd clients/npm && npm run build:ts && node --test test/load.test.mjs
+
       - name: Upload WASM artifact
         uses: actions/upload-artifact@v4
         with:

@@ -34,8 +34,15 @@ export type {
   QualifierExpr,
   PresenceExpr,
   GroupExpr,
+  SelectorExpr,
   Value,
+  ValueType,
+  Operator,
   FieldConfig,
+  ParseError,
+  ParseErrorCode,
+  ValidationError,
+  ValidationErrorCode,
   ParseResult,
   ValidateResult,
   StringifyResult,
@@ -102,30 +109,74 @@ export interface QueryAPI {
 }
 
 /**
+ * Where the engine's bytes come from: a path or URL to query.wasm (read from
+ * disk under Node, fetched elsewhere), the bytes themselves, or a fetch
+ * `Response` (or a promise of one), which a browser compiles while it streams.
+ */
+export type WasmSource =
+  | string
+  | URL
+  | BufferSource
+  | Response
+  | PromiseLike<Response>;
+
+const isResponseLike = (source: unknown): source is Response | PromiseLike<Response> =>
+  (typeof Response !== "undefined" && source instanceof Response) ||
+  (typeof source === "object" && source !== null && "then" in source);
+
+async function instantiate(
+  source: WasmSource,
+  imports: WebAssembly.Imports
+): Promise<WebAssembly.Instance> {
+  if (source instanceof ArrayBuffer || ArrayBuffer.isView(source)) {
+    return (await WebAssembly.instantiate(source, imports)).instance;
+  }
+  if (isResponseLike(source)) {
+    const response = await source;
+    if (!response.ok) throw new Error(`query.wasm: HTTP ${response.status}`);
+    // A server that does not label the file application/wasm makes streaming
+    // compilation throw; the bytes are still good, so fall back to them.
+    if (typeof WebAssembly.instantiateStreaming === "function") {
+      try {
+        return (await WebAssembly.instantiateStreaming(response.clone(), imports)).instance;
+      } catch {
+        // fall through to the buffered path
+      }
+    }
+    return (await WebAssembly.instantiate(await response.arrayBuffer(), imports)).instance;
+  }
+  const path = source.toString();
+  if (typeof process !== "undefined" && process.versions?.node) {
+    const fs = (await nodeModule("node:fs")) as typeof import("fs");
+    const url = (await nodeModule("node:url")) as typeof import("url");
+    const bytes = fs.readFileSync(path.startsWith("file:") ? url.fileURLToPath(path) : path);
+    return (await WebAssembly.instantiate(bytes, imports)).instance;
+  }
+  return instantiate(fetch(path), imports);
+}
+
+// A computed specifier keeps a browser bundler from resolving Node's modules:
+// the path branch that needs them only runs under Node.
+const nodeModule = (name: string): Promise<unknown> =>
+  import(/* @vite-ignore */ /* webpackIgnore: true */ name);
+
+/**
  * Load the WASM module and return the query API.
  *
- * @param wasmPath - Path or URL to the query.wasm file.
- *                   Defaults to "./query.wasm".
+ * Go's `wasm_exec.js` runtime ships in this package and is loaded by it, so
+ * a page or bundle has nothing to include beforehand.
+ *
+ * @param source - Where to read query.wasm from (see {@link WasmSource}).
+ *                 Defaults to "./query.wasm".
  */
-export async function loadQuery(wasmPath = "./query.wasm"): Promise<QueryAPI> {
-  // Load Go's wasm_exec.js runtime (must be included in the page/bundle).
+export async function loadQuery(source: WasmSource = "./query.wasm"): Promise<QueryAPI> {
+  await import("./wasm_exec.js");
   const go = new Go();
-
-  let wasmBytes: BufferSource;
-
-  // Node.js
-  if (typeof process !== "undefined" && process.versions?.node) {
-    const fs = await import("fs");
-    wasmBytes = fs.readFileSync(wasmPath);
-  } else {
-    // Browser / Deno
-    const resp = await fetch(wasmPath);
-    wasmBytes = await resp.arrayBuffer();
-  }
-
-  const result = await WebAssembly.instantiate(wasmBytes, go.importObject);
-  // Don't await go.run() — it blocks forever (the Go main uses select{}).
-  void go.run(result.instance);
+  const instance = await instantiate(source, go.importObject);
+  // Don't await go.run() — it blocks forever (the Go main uses select{}). The
+  // bridge functions are registered before main blocks, so they exist once
+  // run() has been called.
+  void go.run(instance);
 
   return {
     parse(q: string, maxLength?: number): ParseResult {

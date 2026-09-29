@@ -13,7 +13,7 @@ const wasmPath = join(here, "..", "query.wasm");
 const wasmExecPath = join(here, "..", "src", "wasm_exec.js");
 const corpusPath = join(here, "..", "..", "..", "conformance", "corpus.json");
 
-const EXPECTED_CASES = 25;
+const EXPECTED_CASES = 41;
 
 async function loadWasm() {
   await import(wasmExecPath);
@@ -44,6 +44,7 @@ for (const tc of corpus.cases) {
       case "parse": {
         const r = w.queryParse(tc.query);
         checkErr(r, wantErr);
+        if (tc.expectCode) assert.equal(r.errors?.[0]?.code, tc.expectCode);
         if (!wantErr && tc.expectAst) assert.equal(r.result.type, tc.expectAst);
         break;
       }

@@ -22,9 +22,23 @@ export type ValueType =
 /** A typed value in a qualifier expression. */
 export interface Value {
   type: ValueType;
+  /**
+   * The value's source text; for a string, its content with the quotes and
+   * escapes removed.
+   */
   raw: string;
-  value: string | number | boolean;
+  /**
+   * The typed value the engine read. A node a client builds may omit it: the
+   * bridge reads `raw` back through the parser, so the text is what counts.
+   */
+  value?: string | number | boolean | null;
   wildcard?: boolean;
+  /**
+   * True when a string was written as a quoted literal. A built node may omit
+   * it: a string whose bare text would not read back as itself is quoted on
+   * the way back regardless.
+   */
+  quoted?: boolean;
 }
 
 /** Base interface for all AST nodes. */
@@ -170,6 +184,30 @@ export interface ParseError {
   length: number;
 }
 
+/** A stable machine identifier for a validation failure, matching Go's ErrorKind.Code. */
+export type ValidationErrorCode =
+  | "fieldNotFound"
+  | "operatorNotAllowed"
+  | "typeMismatch"
+  | "customRule";
+
+/**
+ * One validation failure: a query that parsed but names a field the config
+ * does not declare, an operator the field does not allow, or a value its type
+ * cannot hold.
+ */
+export interface ValidationError {
+  code: ValidationErrorCode;
+  /** English, for logs. */
+  message: string;
+  offset: number;
+  length: number;
+  /** The dotted field path the failure is about; empty when it is about none. */
+  field: string;
+  /** The refused operator for `operatorNotAllowed` ("?" for a presence check). */
+  op: string;
+}
+
 /** Result from parse operations. */
 export interface ParseResult {
   result?: Expression;
@@ -177,12 +215,16 @@ export interface ParseResult {
   error?: string;
   /** Each failure, coded and positioned. Absent when the failure is not a parse error. */
   errors?: ParseError[];
+  /** From parseAndValidate: each validation failure, coded. Absent on a parse error. */
+  validationErrors?: ValidationError[];
 }
 
 /** Result from validate operations. */
 export interface ValidateResult {
   valid: boolean;
   errors?: string[];
+  /** Each failure, coded, when the query is invalid. */
+  validationErrors?: ValidationError[];
 }
 
 /** Result from stringify operations. */
