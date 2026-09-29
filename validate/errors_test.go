@@ -81,3 +81,17 @@ func TestFieldValueType_String(t *testing.T) {
 		})
 	}
 }
+
+func TestErrorKind_Code(t *testing.T) {
+	cases := map[ErrorKind]string{
+		ErrFieldNotFound:      "fieldNotFound",
+		ErrOperatorNotAllowed: "operatorNotAllowed",
+		ErrTypeMismatch:       "typeMismatch",
+		ErrCustomRule:         "customRule",
+	}
+	for kind, want := range cases {
+		if got := kind.Code(); got != want {
+			t.Errorf("ErrorKind(%d).Code() = %q, want %q", kind, got, want)
+		}
+	}
+}

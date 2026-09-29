@@ -20,6 +20,21 @@ const (
 	ErrCustomRule                          // error raised by a custom [AstValidator]
 )
 
+// Code is the stable machine identifier for a kind, the counterpart of the
+// parser's failure codes: clients render their own wording from it.
+func (k ErrorKind) Code() string {
+	switch k {
+	case ErrFieldNotFound:
+		return "fieldNotFound"
+	case ErrOperatorNotAllowed:
+		return "operatorNotAllowed"
+	case ErrTypeMismatch:
+		return "typeMismatch"
+	default:
+		return "customRule"
+	}
+}
+
 // Error is a structured validation error.
 //
 //nolint:revive // Error is the canonical name for this package
@@ -27,6 +42,11 @@ type Error struct {
 	Message  string
 	Position token.Position
 	Kind     ErrorKind
+	// Field is the dotted path the failure is about, when it is about one.
+	Field string
+	// Op is the refused operator for [ErrOperatorNotAllowed] ("?" for a
+	// presence check).
+	Op string
 }
 
 // Error implements the error interface.
@@ -211,12 +231,12 @@ func (v *Validator) validateQualifier(q *ast.QualifierExpr) {
 	fieldName := q.Field.String()
 	cfg, ok := v.resolveField(fieldName)
 	if !ok {
-		v.addError(ErrFieldNotFound, q.Position, "unknown field %q", fieldName)
+		v.addError(ErrFieldNotFound, q.Position, fieldName, "", "unknown field %q", fieldName)
 		return
 	}
 	op := tokenTypeToOp(q.Operator, q.Value.Wildcard)
 	if !cfg.AllowsOp(op) {
-		v.addError(ErrOperatorNotAllowed, q.Position,
+		v.addError(ErrOperatorNotAllowed, q.Position, fieldName, string(op),
 			"operator %q is not allowed for field %q (type %s)", string(op), fieldName, cfg.Type)
 		return
 	}
@@ -225,12 +245,12 @@ func (v *Validator) validateQualifier(q *ast.QualifierExpr) {
 	// engine coerces at match time; mismatches there fall back to the
 	// comparison's default-false path.
 	if !isDynamicValue(q.Value) && !typeCompatible(cfg.Type, q.Value) {
-		v.addError(ErrTypeMismatch, q.Position,
+		v.addError(ErrTypeMismatch, q.Position, fieldName, "",
 			"value type %s is not compatible with field %q (type %s)", q.Value.Type, fieldName, cfg.Type)
 	}
 	if q.EndValue != nil && !isDynamicValue(*q.EndValue) {
 		if !typeCompatible(cfg.Type, *q.EndValue) {
-			v.addError(ErrTypeMismatch, q.Position,
+			v.addError(ErrTypeMismatch, q.Position, fieldName, "",
 				"range end value type %s is not compatible with field %q (type %s)", q.EndValue.Type, fieldName, cfg.Type)
 		}
 	}
@@ -254,7 +274,7 @@ func (v *Validator) validateValueFuncs(val *ast.Value, pos token.Position) {
 	if val.Type == ast.ValueFieldRef {
 		fieldName := val.Field.String()
 		if _, ok := v.resolveField(fieldName); !ok {
-			v.addError(ErrFieldNotFound, pos, "unknown field %q", fieldName)
+			v.addError(ErrFieldNotFound, pos, fieldName, "", "unknown field %q", fieldName)
 		}
 	}
 	if val.Func != nil {
@@ -272,7 +292,7 @@ func (v *Validator) validateFuncCallFields(fc *ast.FuncCallExpr) {
 		if arg.Field != nil {
 			fieldName := arg.Field.String()
 			if _, ok := v.resolveField(fieldName); !ok {
-				v.addError(ErrFieldNotFound, fc.Position, "unknown field %q in function %s()", fieldName, fc.Name)
+				v.addError(ErrFieldNotFound, fc.Position, fieldName, "", "unknown field %q in function %s()", fieldName, fc.Name)
 			}
 		}
 		if arg.Call != nil {
@@ -289,7 +309,7 @@ func (v *Validator) validateSelector(s *ast.SelectorExpr) {
 	case *ast.PresenceExpr:
 		fieldName := b.Field.String()
 		if _, ok := v.resolveField(fieldName); !ok {
-			v.addError(ErrFieldNotFound, b.Position, "unknown field %q", fieldName)
+			v.addError(ErrFieldNotFound, b.Position, fieldName, "", "unknown field %q", fieldName)
 		}
 	case *ast.QualifierExpr:
 		v.validateQualifier(b)
@@ -305,11 +325,11 @@ func (v *Validator) validatePresence(p *ast.PresenceExpr) {
 	fieldName := p.Field.String()
 	cfg, ok := v.resolveField(fieldName)
 	if !ok {
-		v.addError(ErrFieldNotFound, p.Position, "unknown field %q", fieldName)
+		v.addError(ErrFieldNotFound, p.Position, fieldName, "", "unknown field %q", fieldName)
 		return
 	}
 	if !cfg.AllowsOp(OpPresence) {
-		v.addError(ErrOperatorNotAllowed, p.Position,
+		v.addError(ErrOperatorNotAllowed, p.Position, fieldName, string(OpPresence),
 			"presence check is not allowed for field %q", fieldName)
 	}
 }
@@ -340,11 +360,13 @@ func (v *Validator) resolveField(name string) (FieldConfig, bool) {
 	return FieldConfig{}, false
 }
 
-func (v *Validator) addError(kind ErrorKind, pos token.Position, format string, args ...any) {
+func (v *Validator) addError(kind ErrorKind, pos token.Position, field, op, format string, args ...any) {
 	v.errors = append(v.errors, &Error{
 		Message:  fmt.Sprintf(format, args...),
 		Position: pos,
 		Kind:     kind,
+		Field:    field,
+		Op:       op,
 	})
 }
 

@@ -108,6 +108,27 @@ test("a validation failure carries no parse errors array", () => {
   assert.equal(errors, undefined);
 });
 
+test("a validation failure is coded with its field and operator", () => {
+  const { validationErrors } = w.queryParseAndValidate(
+    "color=red AND state>draft",
+    JSON.stringify(fields)
+  );
+  assert.deepEqual(
+    validationErrors.map(({ code, field, op }) => ({ code, field, op })),
+    [
+      { code: "fieldNotFound", field: "color", op: "" },
+      { code: "operatorNotAllowed", field: "state", op: ">" },
+    ]
+  );
+});
+
+test("queryValidate codes its failures too", () => {
+  const { result: ast } = w.queryParse("state=draft");
+  const v = w.queryValidate(JSON.stringify(ast), JSON.stringify([]));
+  assert.equal(v.validationErrors[0].code, "fieldNotFound");
+  assert.equal(v.validationErrors[0].field, "state");
+});
+
 test("queryParseAndValidate accepts a valid query", () => {
   const { result, error } = w.queryParseAndValidate(
     "state=draft",
@@ -185,4 +206,44 @@ test("queryMatch surfaces a compile error", () => {
     JSON.stringify({})
   );
   assert.ok(r.error, "expected a validate/compile error");
+});
+
+// A client that builds a node (a filter form) has no source text to keep the
+// quotes of; the bridge must still print text that reads back as that node.
+test("queryStringify quotes a built string that would not read back bare", () => {
+  const node = {
+    type: "binary",
+    op: "AND",
+    left: { type: "qualifier", op: "=", field: ["cliente", "nombre"], value: { type: "string", raw: "Ana Pérez" } },
+    right: { type: "qualifier", op: "=", field: ["code"], value: { type: "string", raw: "500" } },
+  };
+  const { result: str, error } = w.queryStringify(JSON.stringify(node));
+  assert.equal(error, undefined);
+  assert.equal(str, 'cliente.nombre="Ana Pérez" AND code="500"');
+  assert.deepEqual(w.queryParse(str).result.left.value.raw, "Ana Pérez");
+});
+
+test("queryStringify keeps what the parser read quoted, quoted", () => {
+  const { result: ast } = w.queryParse('state="needs review" OR state="42"');
+  assert.equal(ast.left.value.quoted, true);
+  const { result: str } = w.queryStringify(JSON.stringify(ast));
+  assert.equal(str, 'state="needs review" OR state="42"');
+});
+
+test("queryStringify prints a selector", () => {
+  const { result: ast } = w.queryParse("items@any(total>5) AND items@first");
+  const { result: str, error } = w.queryStringify(JSON.stringify(ast));
+  assert.equal(error, undefined);
+  assert.equal(str, "items@any(total>5) AND items@first");
+});
+
+test("queryStringify builds a range from its end value", () => {
+  const node = {
+    type: "qualifier",
+    op: "..",
+    field: ["total"],
+    value: { type: "integer", raw: "100" },
+    endValue: { type: "integer", raw: "500" },
+  };
+  assert.equal(w.queryStringify(JSON.stringify(node)).result, "total:100..500");
 });

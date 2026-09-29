@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "description": "Cross-language conformance corpus for the query language. Every client (Go, JS/WASM, Dart/FFI) runs these cases against the real engine so grammar drift becomes a failing build. Numeric expectations use tolerance; error checks are non-empty/substring (wording may change).",
+  "description": "Cross-language conformance corpus for the query language. Every client (Go, JS/WASM, Dart/FFI) runs these cases against the real engine so grammar drift becomes a failing build. Numeric expectations use tolerance; error checks are non-empty/substring (wording may change); expectCode names the parser failure code, which never changes once shipped.",
   "fieldSets": {
     "default": [
       { "Name": "state", "Type": 0, "AllowedOps": ["=", "!=", "*", "?"] },
@@ -16,6 +16,25 @@
     { "id": "pav-qualifier", "desc": "parseAndValidate a simple qualifier", "op": "parseAndValidate", "query": "state=draft", "fieldSet": "default", "expectAst": "qualifier" },
     { "id": "pav-unknown-field", "desc": "unknown field fails validation", "op": "parseAndValidate", "query": "nope=x", "fieldSet": "default", "expectError": true },
     { "id": "stringify-roundtrip", "desc": "round-trips a compound query", "op": "stringify", "query": "state=draft AND total>50000", "expectString": "state=draft AND total>50000" },
+
+    { "id": "parse-range-colon", "desc": "a range is field:low..high, one qualifier", "op": "parse", "query": "total:100..500", "expectAst": "qualifier" },
+    { "id": "parse-range-eq", "desc": "= does not introduce a range", "op": "parse", "query": "total=100..500", "expectError": true, "expectCode": "unexpected" },
+    { "id": "parse-colon-needs-range", "desc": "a colon is the range introducer, not contains", "op": "parse", "query": "state:draft", "expectError": true, "expectCode": "expectedRange" },
+    { "id": "parse-in-lowered", "desc": "IN lowers to an OR chain of equalities", "op": "parse", "query": "state IN (draft, sent)", "expectAst": "binary" },
+    { "id": "parse-negated-lowered", "desc": "a negated comparison lowers to NOT", "op": "parse", "query": "total!>500", "expectAst": "not" },
+    { "id": "parse-unclosed-string", "desc": "an unclosed quote is coded and placed", "op": "parse", "query": "state=\"draft", "expectError": true, "expectCode": "unclosedString" },
+    { "id": "pav-range", "desc": "a range validates on a field that allows ..", "op": "parseAndValidate", "query": "total:100..500", "fieldSet": "default", "expectAst": "qualifier" },
+    { "id": "pav-op-not-allowed", "desc": "an operator the field does not allow fails validation", "op": "parseAndValidate", "query": "state>draft", "fieldSet": "default", "expectError": true },
+    { "id": "stringify-quoted", "desc": "a quoted string stays quoted", "op": "stringify", "query": "state=\"needs review\"", "expectString": "state=\"needs review\"" },
+    { "id": "stringify-quoted-word", "desc": "a quoted number-looking string stays a string", "op": "stringify", "query": "state=\"42\"", "expectString": "state=\"42\"" },
+    { "id": "stringify-range", "desc": "a range prints with its colon", "op": "stringify", "query": "total:100..500", "expectString": "total:100..500" },
+    { "id": "stringify-in-lowered", "desc": "IN prints as the OR chain it lowered to", "op": "stringify", "query": "state IN (draft, sent)", "expectString": "state=draft OR state=sent" },
+    { "id": "stringify-negated-lowered", "desc": "a negated comparison prints as NOT", "op": "stringify", "query": "total!>500", "expectString": "NOT total>500" },
+    { "id": "stringify-in-under-and", "desc": "a lowered IN keeps its parentheses inside an AND", "op": "stringify", "query": "state IN (draft, sent) AND total>5", "expectString": "(state=draft OR state=sent) AND total>5" },
+    { "id": "stringify-not-in", "desc": "a negated IN keeps the negation over the whole chain", "op": "stringify", "query": "NOT state IN (draft, sent)", "expectString": "NOT (state=draft OR state=sent)" },
+    { "id": "stringify-selector", "desc": "a selector round-trips", "op": "stringify", "query": "items@any(total>5)", "expectString": "items@any(total>5)" },
+    { "id": "stringify-function", "desc": "a function value round-trips", "op": "stringify", "query": "created>now()-7d", "expectString": "created>now()-7d" },
+    { "id": "stringify-wildcard", "desc": "a pattern stays a pattern", "op": "stringify", "query": "state=dra*", "expectString": "state=dra*" },
 
     { "id": "match-and-true", "desc": "AND both sides true", "op": "match", "query": "state=draft AND total>50000", "fieldSet": "default", "record": { "state": "draft", "total": 60000 }, "expectMatch": true },
     { "id": "match-and-false", "desc": "threshold not met", "op": "match", "query": "total>100000", "fieldSet": "default", "record": { "state": "draft", "total": 60000 }, "expectMatch": false },

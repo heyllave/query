@@ -10,10 +10,11 @@ package bridgejson
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
-	"time"
 
 	"github.com/heyllave/query/ast"
+	"github.com/heyllave/query/parser"
 	"github.com/heyllave/query/token"
 	"github.com/heyllave/query/validate"
 )
@@ -39,6 +40,10 @@ type Val struct {
 	Raw      string `json:"raw"`
 	Value    any    `json:"value"`
 	Wildcard bool   `json:"wildcard,omitempty"`
+	// Quoted records that a string was written as a "..." literal. A client
+	// building a node may omit it: a string that would not read back as itself
+	// unquoted is quoted on the way back regardless.
+	Quoted bool `json:"quoted,omitempty"`
 }
 
 // AstToJSON converts an [ast.Expression] into a JSON-serializable structure.
@@ -102,6 +107,7 @@ func valueToJSON(v *ast.Value) *Val {
 		Raw:      v.Raw,
 		Value:    v.Any(),
 		Wildcard: v.Wildcard,
+		Quoted:   v.Quoted,
 	}
 }
 
@@ -166,44 +172,96 @@ func nodeToAST(n *AST) (ast.Expression, error) {
 			return nil, err
 		}
 		return &ast.GroupExpr{Expr: inner}, nil
+	case "selector":
+		sel := &ast.SelectorExpr{Selector: n.Selector}
+		if n.Base != nil {
+			base, err := nodeToAST(n.Base)
+			if err != nil {
+				return nil, err
+			}
+			sel.Base = base
+		}
+		if n.Inner != nil {
+			inner, err := nodeToAST(n.Inner)
+			if err != nil {
+				return nil, err
+			}
+			sel.Inner = inner
+		}
+		return sel, nil
 	default:
 		return nil, fmt.Errorf("unknown node type %q", n.Type)
 	}
 }
 
+// jsonToValue rebuilds a value from its JSON form by reading its source text
+// back through the parser, so the node carries everything the engine would
+// have produced for it (a function call, an arithmetic tree, a field ref) and
+// printing it writes text that parses to the same value.
+//
+// A string is the one type whose text is not its source: `raw` is the
+// unescaped content. It stays bare only when the parser reads the bare text
+// back as this very string (same content, same wildcard flag); anything else —
+// a space, a keyword, a number-looking or boolean-looking word, a `*` that is
+// meant literally — is quoted.
 func jsonToValue(v *Val) (*ast.Value, error) {
 	if v == nil {
 		return nil, fmt.Errorf("nil value")
 	}
-	val := &ast.Value{Raw: v.Raw, Wildcard: v.Wildcard}
-	switch v.Type {
-	case "string":
-		val.Type = ast.ValueString
-		val.Str = v.Raw
-	case "integer":
-		val.Type = ast.ValueInteger
-		if f, ok := v.Value.(float64); ok {
-			val.Int = int64(f)
-		}
-	case "float":
-		val.Type = ast.ValueFloat
-		if f, ok := v.Value.(float64); ok {
-			val.Float = f
-		}
-	case "boolean":
-		val.Type = ast.ValueBoolean
-		if b, ok := v.Value.(bool); ok {
-			val.Bool = b
-		}
-	case "date":
-		val.Type = ast.ValueDate
-		if d, err := time.Parse("2006-01-02", v.Raw); err == nil {
-			val.Date = d
-		}
-	case "duration":
-		val.Type = ast.ValueDuration
+	if v.Type == "string" {
+		return stringValue(v), nil
 	}
-	return val, nil
+	if v.Type == "list" {
+		// A list is produced at match time, never by the parser; there is no
+		// source text to read back, so it keeps its raw form.
+		return &ast.Value{Type: ast.ValueList, Raw: v.Raw}, nil
+	}
+	parsed := readValue(v.Raw)
+	if parsed == nil || !sameValueType(parsed.Type.String(), v.Type) {
+		return nil, fmt.Errorf("value %q does not read back as %s", v.Raw, v.Type)
+	}
+	return parsed, nil
+}
+
+// stringValue is the string node for v, quoted unless its bare text reads back
+// as the same string.
+func stringValue(v *Val) *ast.Value {
+	if !v.Quoted {
+		if bare := readValue(v.Raw); bare != nil && bare.Type == ast.ValueString &&
+			!bare.Quoted && bare.Str == v.Raw && bare.Wildcard == v.Wildcard {
+			return bare
+		}
+	}
+	// A quoted literal is never a pattern: a `*` inside quotes is a character.
+	return &ast.Value{Type: ast.ValueString, Raw: v.Raw, Str: v.Raw, Quoted: true}
+}
+
+// readValue parses text in value position, or returns nil when it does not
+// read as exactly one value.
+func readValue(text string) *ast.Value {
+	if text == "" {
+		return nil
+	}
+	expr, err := parser.Parse("v="+text, len(text)+2)
+	if err != nil {
+		return nil
+	}
+	q, ok := expr.(*ast.QualifierExpr)
+	if !ok || q.EndValue != nil {
+		return nil
+	}
+	return &q.Value
+}
+
+// sameValueType reports whether the parsed type satisfies the declared one.
+// The numeric types are one family: a client that declares 100 a float gets
+// the integer the text says.
+func sameValueType(parsed, declared string) bool {
+	if parsed == declared {
+		return true
+	}
+	numeric := func(t string) bool { return t == "integer" || t == "float" }
+	return numeric(parsed) && numeric(declared)
 }
 
 func symbolToToken(op string) token.Type {
@@ -235,4 +293,31 @@ func ParseFields(fieldsJSON string) ([]validate.FieldConfig, error) {
 		return nil, fmt.Errorf("invalid fields config: %w", err)
 	}
 	return fields, nil
+}
+
+// ValidationErrors lists each validation failure inside err as
+// {code, message, offset, length, field, op}: the stable code a client renders
+// its own wording from, the span to underline, and the field and operator the
+// failure is about. It is empty when err carries no validation failure.
+func ValidationErrors(err error) []map[string]any {
+	var list validate.ErrorList
+	if !errors.As(err, &list) {
+		var single *validate.Error
+		if !errors.As(err, &single) {
+			return nil
+		}
+		list = validate.ErrorList{single}
+	}
+	out := make([]map[string]any, len(list))
+	for i, e := range list {
+		out[i] = map[string]any{
+			"code":    e.Kind.Code(),
+			"message": e.Message,
+			"offset":  e.Position.Offset,
+			"length":  e.Position.Length,
+			"field":   e.Field,
+			"op":      e.Op,
+		}
+	}
+	return out
 }
