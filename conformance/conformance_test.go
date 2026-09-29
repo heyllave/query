@@ -39,7 +39,7 @@ type testCase struct {
 }
 
 // expectedCaseCount guards against a stale/truncated corpus silently passing.
-const expectedCaseCount = 41
+const expectedCaseCount = 43
 
 func loadCorpus(t *testing.T) corpus {
 	t.Helper()

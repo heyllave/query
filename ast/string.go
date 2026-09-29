@@ -20,16 +20,19 @@ func String(expr Expression) string {
 func writeExpr(buf *strings.Builder, expr Expression) {
 	switch e := expr.(type) {
 	case *BinaryExpr:
-		writeExpr(buf, e.Left)
+		writeOperand(buf, e.Left, e.Op == token.And)
 		if e.Op == token.And {
 			buf.WriteString(" AND ")
 		} else {
 			buf.WriteString(" OR ")
 		}
-		writeExpr(buf, e.Right)
+		writeOperand(buf, e.Right, e.Op == token.And)
 	case *UnaryExpr:
 		buf.WriteString("NOT ")
-		writeExpr(buf, e.Expr)
+		// NOT binds tighter than either connective, so a bare binary operand
+		// would print as `NOT a=1 OR b=2` — the negation of `a=1` alone.
+		_, binary := e.Expr.(*BinaryExpr)
+		writeGrouped(buf, e.Expr, binary)
 	case *QualifierExpr:
 		buf.WriteString(e.Field.String())
 		if e.EndValue != nil {
@@ -70,6 +73,26 @@ func writeExpr(buf *strings.Builder, expr Expression) {
 		writeFuncCall(buf, e)
 	case *ValueExpr:
 		writeValue(buf, &e.Value)
+	}
+}
+
+// writeOperand writes one side of a connective. An OR under an AND needs its
+// parentheses back: the tree only has that shape when the source grouped it —
+// or when the parser lowered `f IN (a, b)` to `f=a OR f=b` — and printed bare
+// it would read as `x AND f=a OR f=b`, which is a different query.
+func writeOperand(buf *strings.Builder, operand Expression, underAnd bool) {
+	child, ok := operand.(*BinaryExpr)
+	writeGrouped(buf, operand, underAnd && ok && child.Op == token.Or)
+}
+
+// writeGrouped writes expr, inside parentheses when grouped is set.
+func writeGrouped(buf *strings.Builder, expr Expression, grouped bool) {
+	if grouped {
+		buf.WriteByte('(')
+	}
+	writeExpr(buf, expr)
+	if grouped {
+		buf.WriteByte(')')
 	}
 }
 

@@ -30,6 +30,8 @@
     { "id": "stringify-range", "desc": "a range prints with its colon", "op": "stringify", "query": "total:100..500", "expectString": "total:100..500" },
     { "id": "stringify-in-lowered", "desc": "IN prints as the OR chain it lowered to", "op": "stringify", "query": "state IN (draft, sent)", "expectString": "state=draft OR state=sent" },
     { "id": "stringify-negated-lowered", "desc": "a negated comparison prints as NOT", "op": "stringify", "query": "total!>500", "expectString": "NOT total>500" },
+    { "id": "stringify-in-under-and", "desc": "a lowered IN keeps its parentheses inside an AND", "op": "stringify", "query": "state IN (draft, sent) AND total>5", "expectString": "(state=draft OR state=sent) AND total>5" },
+    { "id": "stringify-not-in", "desc": "a negated IN keeps the negation over the whole chain", "op": "stringify", "query": "NOT state IN (draft, sent)", "expectString": "NOT (state=draft OR state=sent)" },
     { "id": "stringify-selector", "desc": "a selector round-trips", "op": "stringify", "query": "items@any(total>5)", "expectString": "items@any(total>5)" },
     { "id": "stringify-function", "desc": "a function value round-trips", "op": "stringify", "query": "created>now()-7d", "expectString": "created>now()-7d" },
     { "id": "stringify-wildcard", "desc": "a pattern stays a pattern", "op": "stringify", "query": "state=dra*", "expectString": "state=dra*" },
