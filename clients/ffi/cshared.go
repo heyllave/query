@@ -116,7 +116,11 @@ func QueryValidate(req *C.char) *C.char {
 	}
 	v := validate.New(fields)
 	if err := v.Validate(expr); err != nil {
-		return respond(map[string]any{"valid": false, "errors": []string{err.Error()}})
+		out := map[string]any{"valid": false, "errors": []string{err.Error()}}
+		if list := bridgejson.ValidationErrors(err); len(list) > 0 {
+			out["validationErrors"] = list
+		}
+		return respond(out)
 	}
 	return respond(map[string]any{"valid": true})
 }
@@ -149,7 +153,11 @@ func QueryParseAndValidate(req *C.char) *C.char {
 		return errResp(err.Error())
 	}
 	if err := validate.New(fields).Validate(expr); err != nil {
-		return errResp(err.Error())
+		out := map[string]any{"error": err.Error()}
+		if list := bridgejson.ValidationErrors(err); len(list) > 0 {
+			out["validationErrors"] = list
+		}
+		return respond(out)
 	}
 	return respond(map[string]any{"result": bridgejson.AstToJSON(expr)})
 }

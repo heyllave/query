@@ -62,6 +62,9 @@ func jsValidate(_ js.Value, args []js.Value) any {
 			"valid":  false,
 			"errors": []string{err.Error()},
 		}
+		if list := bridgejson.ValidationErrors(err); len(list) > 0 {
+			result["validationErrors"] = list
+		}
 		return toJSValue(result)
 	}
 	return toJSValue(map[string]any{"valid": true})
@@ -85,7 +88,9 @@ func jsStringify(_ js.Value, args []js.Value) any {
 
 // jsParseAndValidate parses and validates in one call.
 //
-// JS signature: queryParseAndValidate(query: string, fieldsJSON: string) => { ast?: object, error?: string }
+// JS signature: queryParseAndValidate(query: string, fieldsJSON: string)
+//
+//	=> { result?: object, error?: string, errors?: ParseError[], validationErrors?: ValidationError[] }
 func jsParseAndValidate(_ js.Value, args []js.Value) any {
 	if len(args) < 2 {
 		return jsResult(nil, "queryParseAndValidate requires query and fields arguments")
@@ -106,7 +111,7 @@ func jsParseAndValidate(_ js.Value, args []js.Value) any {
 
 	v := validate.New(fields)
 	if err := v.Validate(expr); err != nil {
-		return jsResult(nil, err.Error())
+		return jsValidationResult(err)
 	}
 
 	node := astToJSON(expr)
@@ -207,6 +212,17 @@ func jsParseResult(err error) any {
 		}
 	}
 	obj["errors"] = list
+	return toJSValue(obj)
+}
+
+// jsValidationResult creates a {error, validationErrors} JS object for a query
+// that parsed but failed validation: `error` stays the joined English message,
+// `validationErrors` carries each failure's code, span, field and operator.
+func jsValidationResult(err error) any {
+	obj := map[string]any{"error": err.Error()}
+	if list := bridgejson.ValidationErrors(err); len(list) > 0 {
+		obj["validationErrors"] = list
+	}
 	return toJSValue(obj)
 }
 
