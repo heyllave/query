@@ -278,8 +278,6 @@ jobs:
           target: google_apis
           emulator-options: -no-window -no-audio -no-snapshot -no-boot-anim -gpu swiftshader_indirect -accel on
           disable-animations: true
-          script: |
-            cd clients/flutter_plugin/example
-            flutter create --platforms=android --project-name trazo_query_flutter_example .
-            flutter pub get
-            flutter test integration_test/load_test.dart -d emulator-5554
+          # The action runs each script line in its own `sh -c`, so a `cd` on a
+          # line of its own would not carry to the next: one chained line.
+          script: cd clients/flutter_plugin/example && flutter create --platforms=android --project-name trazo_query_flutter_example . && flutter pub get && flutter test integration_test/load_test.dart -d emulator-5554
