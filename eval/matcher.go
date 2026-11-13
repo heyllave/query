@@ -1,11 +1,15 @@
 package eval
 
 import (
+	"errors"
 	"fmt"
+	"math"
+	"reflect"
 	"strings"
 	"time"
 
 	"github.com/heyllave/query/ast"
+	"github.com/heyllave/query/parser"
 	"github.com/heyllave/query/token"
 )
 
@@ -40,10 +44,12 @@ func compileMatcher(expr ast.Expression, funcs FuncRegistry) matcher {
 		return compileQualifier(e, funcs)
 
 	case *ast.PresenceExpr:
+		// Presence means the field exists and is non-empty: nil, an empty
+		// string, and an empty list or map all count as absent.
 		field := e.Field.String()
 		return func(get func(string) (any, bool)) bool {
-			_, ok := get(field)
-			return ok
+			v, ok := get(field)
+			return ok && !isEmpty(v)
 		}
 
 	case *ast.FuncCallExpr:
@@ -64,15 +70,10 @@ func compileQualifier(e *ast.QualifierExpr, funcs FuncRegistry) matcher {
 	// resolve the field value through the function first.
 	var fieldResolver func(get func(string) (any, bool)) (any, bool)
 	if e.HasFieldFunc() {
-		argResolver := compileArgResolvers(e.FieldFunc.Args, funcs)
-		fn, hasFn := funcs.Get(e.FieldFunc.Name)
+		call := compileCall(e.FieldFunc, funcs)
 		fieldResolver = func(get func(string) (any, bool)) (any, bool) {
-			if !hasFn {
-				return nil, false
-			}
-			args := resolveArgs(argResolver, get)
-			result, err := fn.Call(args...)
-			if err != nil {
+			result, err := call(get)
+			if err != nil || result == nil {
 				return nil, false
 			}
 			return result, true
@@ -94,9 +95,10 @@ func compileQualifier(e *ast.QualifierExpr, funcs FuncRegistry) matcher {
 		return compileRangeWithResolver(fieldResolver, valueResolver, endResolver)
 	}
 
-	// Wildcard: pattern matching
+	// Wildcard: pattern matching; `field!=pat*` is its negation on a present
+	// field (a missing field is false either way, as for every comparison).
 	if e.IsWildcard() {
-		return compileWildcardWithResolver(fieldResolver, e.Value.Str)
+		return compileWildcardWithResolver(fieldResolver, e.Value.Str, e.Operator == token.Neq)
 	}
 
 	// Standard comparison
@@ -117,14 +119,9 @@ func compileValueResolver(v *ast.Value, funcs FuncRegistry) valueResolver {
 		if v.Func == nil {
 			return func(func(string) (any, bool)) *ast.Value { return nil }
 		}
-		argResolvers := compileArgResolvers(v.Func.Args, funcs)
-		fn, hasFn := funcs.Get(v.Func.Name)
+		call := compileCall(v.Func, funcs)
 		return func(get func(string) (any, bool)) *ast.Value {
-			if !hasFn {
-				return nil
-			}
-			args := resolveArgs(argResolvers, get)
-			result, err := fn.Call(args...)
+			result, err := call(get)
 			if err != nil {
 				return nil
 			}
@@ -223,11 +220,20 @@ func applyArith(left, right *ast.Value, op ast.ArithOp) *ast.Value {
 			a, b := left.Int, right.Int
 			switch op {
 			case ast.ArithAdd:
-				return valueFromAny(a + b)
+				if r, ok := addInt64(a, b); ok {
+					return valueFromAny(r)
+				}
+				return valueFromAny(float64(a) + float64(b)) // overflow promotes to float
 			case ast.ArithSub:
-				return valueFromAny(a - b)
+				if r, ok := addInt64(a, -b); ok && b != math.MinInt64 {
+					return valueFromAny(r)
+				}
+				return valueFromAny(float64(a) - float64(b))
 			case ast.ArithMul:
-				return valueFromAny(a * b)
+				if r, ok := mulInt64(a, b); ok {
+					return valueFromAny(r)
+				}
+				return valueFromAny(float64(a) * float64(b))
 			case ast.ArithMod:
 				if b == 0 {
 					return nil
@@ -271,6 +277,29 @@ func isNumericValue(v *ast.Value) bool {
 	return v != nil && (v.Type == ast.ValueInteger || v.Type == ast.ValueFloat)
 }
 
+// addInt64 adds with overflow detection; ok is false when the sum wraps.
+func addInt64(a, b int64) (int64, bool) {
+	r := a + b
+	// Overflow iff both operands share a sign that the result does not.
+	if (a >= 0) == (b >= 0) && (r >= 0) != (a >= 0) {
+		return 0, false
+	}
+	return r, true
+}
+
+// mulInt64 multiplies with overflow detection; ok is false when the product
+// wraps.
+func mulInt64(a, b int64) (int64, bool) {
+	if a == 0 || b == 0 {
+		return 0, true
+	}
+	r := a * b
+	if r/b != a || (a == -1 && b == math.MinInt64) || (b == -1 && a == math.MinInt64) {
+		return 0, false
+	}
+	return r, true
+}
+
 func numericFloat(v *ast.Value) float64 {
 	if v.Type == ast.ValueInteger {
 		return float64(v.Int)
@@ -288,16 +317,6 @@ func valueFromAny(v any) *ast.Value {
 		return &ast.Value{Type: ast.ValueString, Raw: x, Str: x}
 	case bool:
 		return &ast.Value{Type: ast.ValueBoolean, Raw: fmt.Sprint(x), Bool: x}
-	case int:
-		return &ast.Value{Type: ast.ValueInteger, Raw: fmt.Sprint(x), Int: int64(x)}
-	case int32:
-		return &ast.Value{Type: ast.ValueInteger, Raw: fmt.Sprint(x), Int: int64(x)}
-	case int64:
-		return &ast.Value{Type: ast.ValueInteger, Raw: fmt.Sprint(x), Int: x}
-	case float32:
-		return &ast.Value{Type: ast.ValueFloat, Raw: fmt.Sprint(x), Float: float64(x)}
-	case float64:
-		return &ast.Value{Type: ast.ValueFloat, Raw: fmt.Sprint(x), Float: x}
 	case time.Time:
 		return &ast.Value{Type: ast.ValueDate, Raw: x.Format(time.RFC3339), Date: x}
 	case time.Duration:
@@ -307,6 +326,12 @@ func valueFromAny(v any) *ast.Value {
 	case nil:
 		return nil
 	default:
+		if i, f, isInt, ok := numberOf(x); ok {
+			if isInt {
+				return &ast.Value{Type: ast.ValueInteger, Raw: fmt.Sprint(i), Int: i}
+			}
+			return &ast.Value{Type: ast.ValueFloat, Raw: fmt.Sprint(f), Float: f}
+		}
 		// Typed slices ([]string, []int, …) are preserved as lists so value
 		// expressions can return collections; everything else stringifies.
 		if elems, ok := toSlice(x); ok {
@@ -320,15 +345,9 @@ func valueFromAny(v any) *ast.Value {
 // compileFuncCallBool compiles a standalone function call as a boolean predicate.
 // e.g., contains(tags, "urgent")
 func compileFuncCallBool(e *ast.FuncCallExpr, funcs FuncRegistry) matcher {
-	fn, hasFn := funcs.Get(e.Name)
-	if !hasFn {
-		return func(func(string) (any, bool)) bool { return false }
-	}
-	argResolvers := compileArgResolvers(e.Args, funcs)
-
+	call := compileCall(e, funcs)
 	return func(get func(string) (any, bool)) bool {
-		args := resolveArgs(argResolvers, get)
-		result, err := fn.Call(args...)
+		result, err := call(get)
 		if err != nil {
 			return false
 		}
@@ -336,7 +355,37 @@ func compileFuncCallBool(e *ast.FuncCallExpr, funcs FuncRegistry) matcher {
 	}
 }
 
-type argResolver func(get func(string) (any, bool)) any
+// errUnknownFunc is the runtime error for a call to a function the registry
+// does not hold. Compile reports it earlier (see checkCalls); this guards
+// registries assembled without going through Compile.
+var errUnknownFunc = errors.New("unknown function")
+
+// call evaluates a compiled function call against a record. An error means
+// the call did not resolve: the function is unknown, an argument's nested
+// call failed, or the function itself returned an error.
+type call func(get func(string) (any, bool)) (any, error)
+
+// compileCall compiles a function call, including its arguments, into a
+// closure. Errors from nested calls propagate instead of being replaced by a
+// nil argument, so len(lower()) is unresolved rather than len("<nil>").
+func compileCall(fc *ast.FuncCallExpr, funcs FuncRegistry) call {
+	fn, hasFn := funcs.Get(fc.Name)
+	if !hasFn {
+		return func(func(string) (any, bool)) (any, error) {
+			return nil, fmt.Errorf("%w %q", errUnknownFunc, fc.Name)
+		}
+	}
+	argResolvers := compileArgResolvers(fc.Args, funcs)
+	return func(get func(string) (any, bool)) (any, error) {
+		args, err := resolveArgs(argResolvers, get)
+		if err != nil {
+			return nil, err
+		}
+		return fn.Call(args...)
+	}
+}
+
+type argResolver func(get func(string) (any, bool)) (any, error)
 
 func compileArgResolvers(args []ast.FuncArg, funcs FuncRegistry) []argResolver {
 	resolvers := make([]argResolver, len(args))
@@ -344,39 +393,38 @@ func compileArgResolvers(args []ast.FuncArg, funcs FuncRegistry) []argResolver {
 		switch {
 		case arg.Field != nil:
 			field := arg.Field.String()
-			resolvers[i] = func(get func(string) (any, bool)) any {
+			resolvers[i] = func(get func(string) (any, bool)) (any, error) {
 				v, _ := get(field)
-				return v
+				return v, nil
 			}
 		case arg.Value != nil:
-			val := arg.Value.Any()
-			resolvers[i] = func(func(string) (any, bool)) any {
-				return val
+			resolver := compileValueResolver(arg.Value, funcs)
+			resolvers[i] = func(get func(string) (any, bool)) (any, error) {
+				v := resolver(get)
+				if v == nil {
+					return nil, nil
+				}
+				return v.Any(), nil
 			}
 		case arg.Call != nil:
-			fn, hasFn := funcs.Get(arg.Call.Name)
-			innerResolvers := compileArgResolvers(arg.Call.Args, funcs)
-			resolvers[i] = func(get func(string) (any, bool)) any {
-				if !hasFn {
-					return nil
-				}
-				innerArgs := resolveArgs(innerResolvers, get)
-				result, _ := fn.Call(innerArgs...)
-				return result
-			}
+			resolvers[i] = argResolver(compileCall(arg.Call, funcs))
 		default:
-			resolvers[i] = func(func(string) (any, bool)) any { return nil }
+			resolvers[i] = func(func(string) (any, bool)) (any, error) { return nil, nil }
 		}
 	}
 	return resolvers
 }
 
-func resolveArgs(resolvers []argResolver, get func(string) (any, bool)) []any {
+func resolveArgs(resolvers []argResolver, get func(string) (any, bool)) ([]any, error) {
 	args := make([]any, len(resolvers))
 	for i, r := range resolvers {
-		args[i] = r(get)
+		v, err := r(get)
+		if err != nil {
+			return nil, err
+		}
+		args[i] = v
 	}
-	return args
+	return args, nil
 }
 
 func compileRangeWithResolver(resolve func(func(string) (any, bool)) (any, bool), start, end valueResolver) matcher {
@@ -397,28 +445,41 @@ func compileRangeWithResolver(resolve func(func(string) (any, bool)) (any, bool)
 	}
 }
 
-func compileWildcardWithResolver(resolve func(func(string) (any, bool)) (any, bool), pattern string) matcher {
+func compileWildcardWithResolver(resolve func(func(string) (any, bool)) (any, bool), pattern string, negate bool) matcher {
+	// An escaped star in the pattern is a literal star (see the lexer); the
+	// wildcard stars are the unescaped ones at either end.
 	prefix := strings.HasPrefix(pattern, "*")
-	suffix := strings.HasSuffix(pattern, "*")
-	inner := strings.Trim(pattern, "*")
+	suffix := len(pattern) > 1 && strings.HasSuffix(pattern, "*") && !strings.HasSuffix(pattern, `\*`)
+	inner := pattern
+	if prefix {
+		inner = inner[1:]
+	}
+	if suffix {
+		inner = inner[:len(inner)-1]
+	}
+	if pattern == "*" {
+		suffix = true // a lone star matches any present value
+	}
+	lowerInner := strings.ToLower(strings.ReplaceAll(inner, `\*`, "*"))
 
 	return func(get func(string) (any, bool)) bool {
 		raw, ok := resolve(get)
 		if !ok {
 			return false
 		}
-		s := strings.ToLower(fmt.Sprint(raw))
-		lowerInner := strings.ToLower(inner)
+		s := strings.ToLower(stringifyActual(raw))
+		var matched bool
 		switch {
 		case prefix && suffix:
-			return strings.Contains(s, lowerInner)
+			matched = strings.Contains(s, lowerInner)
 		case prefix:
-			return strings.HasSuffix(s, lowerInner)
+			matched = strings.HasSuffix(s, lowerInner)
 		case suffix:
-			return strings.HasPrefix(s, lowerInner)
+			matched = strings.HasPrefix(s, lowerInner)
 		default:
-			return s == lowerInner
+			matched = s == lowerInner
 		}
+		return matched != negate
 	}
 }
 
@@ -436,7 +497,11 @@ func compileComparisonWithResolver(resolve func(func(string) (any, bool)) (any, 
 		case token.Eq:
 			return equalValues(raw, ev)
 		case token.Neq:
-			return !equalValues(raw, ev)
+			// A record value that cannot be read as the literal's type is
+			// unequal in the sense of "not comparable", and the comparison is
+			// false like every other operator, so `n!=0` does not match a
+			// record whose n is "abc" any more than `n=0` does.
+			return readableAs(raw, ev) && !equalValues(raw, ev)
 		default:
 			return compareValues(raw, ev, op)
 		}
@@ -459,20 +524,38 @@ func stringifyActual(v any) string {
 	}
 }
 
+// equalValues reports whether a record value equals an expected literal. A
+// record value that cannot be read as the literal's type (a string where a
+// number is expected, an unparseable date) is unequal: it never compares as
+// zero, so `n=0` does not match a record whose n is "abc", and `n!=0` does.
 func equalValues(actual any, expected *ast.Value) bool {
 	switch expected.Type {
 	case ast.ValueString:
+		if actual == nil {
+			return false
+		}
 		return strings.EqualFold(stringifyActual(actual), expected.Str)
-	case ast.ValueInteger:
-		return toInt64(actual) == expected.Int
-	case ast.ValueFloat:
-		return toFloat64(actual) == expected.Float
+	case ast.ValueInteger, ast.ValueFloat:
+		return compareNumbers(actual, expected, token.Eq)
 	case ast.ValueBoolean:
-		return toBool(actual) == expected.Bool
+		b, ok := actual.(bool)
+		if !ok {
+			s, isStr := actual.(string)
+			if !isStr {
+				return false
+			}
+			b, ok = parseBool(s)
+			if !ok {
+				return false
+			}
+		}
+		return b == expected.Bool
 	case ast.ValueDate:
-		return toTime(actual).Equal(expected.Date)
+		t, ok := toTime(actual)
+		return ok && t.Equal(expected.Date)
 	case ast.ValueDuration:
-		return toDuration(actual) == expected.Duration
+		d, ok := toDuration(actual)
+		return ok && d == expected.Duration
 	case ast.ValueList:
 		// A list-valued operand that reaches a scalar comparison is matched on
 		// its string form, case-insensitively — the same semantics every other
@@ -483,18 +566,18 @@ func equalValues(actual any, expected *ast.Value) bool {
 	}
 }
 
+// compareValues applies a relational operator between a record value and an
+// expected literal. A record value that cannot be read as the literal's type
+// makes the comparison false, whatever the operator.
 func compareValues(actual any, expected *ast.Value, op token.Type) bool {
 	switch expected.Type {
-	case ast.ValueInteger:
-		a := toInt64(actual)
-		b := expected.Int
-		return compareOrdered(a, b, op)
-	case ast.ValueFloat:
-		a := toFloat64(actual)
-		b := expected.Float
-		return compareOrdered(a, b, op)
+	case ast.ValueInteger, ast.ValueFloat:
+		return compareNumbers(actual, expected, op)
 	case ast.ValueDate:
-		a := toTime(actual)
+		a, ok := toTime(actual)
+		if !ok {
+			return false
+		}
 		b := expected.Date
 		switch op { //nolint:exhaustive // only relational
 		case token.Gt:
@@ -505,18 +588,76 @@ func compareValues(actual any, expected *ast.Value, op token.Type) bool {
 			return a.Before(b)
 		case token.Lte:
 			return !a.After(b)
+		case token.Neq:
+			return !a.Equal(b)
 		default:
 			return a.Equal(b)
 		}
 	case ast.ValueDuration:
-		a := int64(toDuration(actual))
-		b := int64(expected.Duration)
-		return compareOrdered(a, b, op)
+		a, ok := toDuration(actual)
+		if !ok {
+			return false
+		}
+		return compareOrdered(int64(a), int64(expected.Duration), op)
 	default:
+		if actual == nil {
+			return false
+		}
 		a := stringifyActual(actual)
 		b := expected.Raw
 		return compareOrdered(a, b, op)
 	}
+}
+
+// readableAs reports whether a record value can be read as the literal's
+// type at all: a number for a numeric literal, a date for a date literal, and
+// so on. Strings and lists accept any non-nil value.
+func readableAs(actual any, expected *ast.Value) bool {
+	if actual == nil {
+		return false
+	}
+	switch expected.Type { //nolint:exhaustive // other literal types read as text
+	case ast.ValueInteger, ast.ValueFloat:
+		_, _, _, ok := numberOf(actual)
+		return ok
+	case ast.ValueBoolean:
+		if _, ok := actual.(bool); ok {
+			return true
+		}
+		s, ok := actual.(string)
+		if !ok {
+			return false
+		}
+		_, ok = parseBool(s)
+		return ok
+	case ast.ValueDate:
+		_, ok := toTime(actual)
+		return ok
+	case ast.ValueDuration:
+		_, ok := toDuration(actual)
+		return ok
+	default:
+		return true
+	}
+}
+
+// compareNumbers compares a record value with a numeric literal. The
+// comparison is exact in int64 when both sides are integers and in float64
+// otherwise, so `price>3` against 3.5 is true (nothing is truncated) and
+// `price=3` against 3.9 is false.
+func compareNumbers(actual any, expected *ast.Value, op token.Type) bool {
+	ai, af, aIsInt, ok := numberOf(actual)
+	if !ok {
+		return false
+	}
+	if aIsInt && expected.Type == ast.ValueInteger {
+		return compareOrdered(ai, expected.Int, op)
+	}
+	ef := expected.Float
+	if expected.Type == ast.ValueInteger {
+		ef = float64(expected.Int)
+	}
+	return compareOrdered(af, ef, op)
 }
 
 type ordered interface {
@@ -544,38 +685,80 @@ func compareOrdered[T ordered](a, b T, op token.Type) bool {
 
 // Type coercion helpers
 
-func toInt64(v any) int64 {
+// numberOf reads v as a number. Every Go integer kind (signed and unsigned,
+// any width) reports isInt with its int64 value (and the same value as a
+// float); float32 and float64 report their float64 value. Named numeric
+// types (type Cents int64) are read through reflection. Anything else is not
+// a number. A uint64 above math.MaxInt64 is read as a float, since it has no
+// exact int64 form.
+func numberOf(v any) (i int64, f float64, isInt, ok bool) {
 	switch n := v.(type) {
 	case int:
-		return int64(n)
-	case int32:
-		return int64(n)
+		return int64(n), float64(n), true, true
 	case int64:
-		return n
-	case float32:
-		return int64(n)
+		return n, float64(n), true, true
+	case int32:
+		return int64(n), float64(n), true, true
+	case int16:
+		return int64(n), float64(n), true, true
+	case int8:
+		return int64(n), float64(n), true, true
+	case uint:
+		return uintNumber(uint64(n))
+	case uint64:
+		return uintNumber(n)
+	case uint32:
+		return int64(n), float64(n), true, true
+	case uint16:
+		return int64(n), float64(n), true, true
+	case uint8:
+		return int64(n), float64(n), true, true
 	case float64:
-		return int64(n)
+		return int64(n), n, false, true
+	case float32:
+		return int64(n), float64(n), false, true
+	case time.Duration:
+		// A Duration is an int64 of nanoseconds; comparing it with a number
+		// literal is not meaningful, so it is not a number here. Duration
+		// literals compare through toDuration.
+		return 0, 0, false, false
+	case nil:
+		return 0, 0, false, false
+	}
+	rv := reflect.ValueOf(v)
+	switch rv.Kind() { //nolint:exhaustive // only numeric kinds
+	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
+		n := rv.Int()
+		return n, float64(n), true, true
+	case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64, reflect.Uintptr:
+		return uintNumber(rv.Uint())
+	case reflect.Float32, reflect.Float64:
+		n := rv.Float()
+		return int64(n), n, false, true
 	default:
-		return 0
+		return 0, 0, false, false
 	}
 }
 
-func toFloat64(v any) float64 {
-	switch n := v.(type) {
-	case int:
-		return float64(n)
-	case int32:
-		return float64(n)
-	case int64:
-		return float64(n)
-	case float32:
-		return float64(n)
-	case float64:
-		return n
-	default:
-		return 0
+func uintNumber(n uint64) (int64, float64, bool, bool) {
+	if n > math.MaxInt64 {
+		return 0, float64(n), false, true
 	}
+	return int64(n), float64(n), true, true
+}
+
+// toInt64 reads v as an int64, truncating floats toward zero; a non-number is
+// 0. Comparisons do not use it (they use numberOf, which distinguishes a
+// non-number from zero); it serves the builtins that take a count argument.
+func toInt64(v any) int64 {
+	i, _, _, _ := numberOf(v)
+	return i
+}
+
+// toFloat64 reads v as a float64; a non-number is 0. See toInt64.
+func toFloat64(v any) float64 {
+	_, f, _, _ := numberOf(v)
+	return f
 }
 
 func toBool(v any) bool {
@@ -583,35 +766,81 @@ func toBool(v any) bool {
 	case bool:
 		return b
 	case string:
-		return strings.EqualFold(b, "true")
+		r, _ := parseBool(b)
+		return r
 	default:
 		return false
 	}
 }
 
-func toTime(v any) time.Time {
-	switch t := v.(type) {
-	case time.Time:
-		return t
-	case string:
-		if parsed, err := time.Parse("2006-01-02", t); err == nil {
-			return parsed
-		}
-		if parsed, err := time.Parse(time.RFC3339, t); err == nil {
-			return parsed
-		}
+// parseBool reads the strings true/false (any case) as booleans.
+func parseBool(s string) (bool, bool) {
+	switch strings.ToLower(s) {
+	case "true":
+		return true, true
+	case "false":
+		return false, true
+	default:
+		return false, false
 	}
-	return time.Time{}
 }
 
-func toDuration(v any) time.Duration {
+// toTime reads v as a time: a time.Time, or a string in one of the date
+// literal layouts (2026-01-01, RFC 3339, 2026-01-01T10:00:00,
+// 2026-01-01 10:00:00). ok is false for anything else, including an
+// unparseable string, so a comparison never silently uses the zero time.
+func toTime(v any) (time.Time, bool) {
+	switch t := v.(type) {
+	case time.Time:
+		return t, true
+	case *time.Time:
+		if t == nil {
+			return time.Time{}, false
+		}
+		return *t, true
+	case string:
+		parsed, err := parser.ParseDateLiteral(t)
+		if err != nil {
+			return time.Time{}, false
+		}
+		return parsed, true
+	}
+	return time.Time{}, false
+}
+
+// toDuration reads v as a duration: a time.Duration, or a string in Go's
+// duration syntax (1h30m) or the query literal syntax (2d, 1w).
+func toDuration(v any) (time.Duration, bool) {
 	switch d := v.(type) {
 	case time.Duration:
-		return d
+		return d, true
 	case string:
 		if parsed, err := time.ParseDuration(d); err == nil {
-			return parsed
+			return parsed, true
+		}
+		if parsed, err := parser.ParseDuration(d); err == nil {
+			return parsed, true
 		}
 	}
-	return 0
+	return 0, false
+}
+
+// isEmpty reports whether a present value should count as absent for a
+// presence check: nil, an empty string, or an empty slice, array or map.
+func isEmpty(v any) bool {
+	switch x := v.(type) {
+	case nil:
+		return true
+	case string:
+		return x == ""
+	}
+	rv := reflect.ValueOf(v)
+	switch rv.Kind() { //nolint:exhaustive // only container and pointer kinds
+	case reflect.Slice, reflect.Array, reflect.Map:
+		return rv.Len() == 0
+	case reflect.Pointer, reflect.Interface:
+		return rv.IsNil()
+	default:
+		return false
+	}
 }

@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/heyllave/query/ast"
+	"github.com/heyllave/query/parser"
 	"github.com/heyllave/query/token"
 )
 
@@ -102,12 +103,42 @@ func WithCustomValidator(cv AstValidator) Option {
 	return func(v *Validator) { v.custom = cv }
 }
 
-// Validator validates a parsed AST against field configurations.
+// WithAllowedFields restricts queries to the named fields. The restriction is
+// enforced after field resolution, so it also applies to fields a custom
+// [AstValidator] resolves, and to fields referenced inside function arguments
+// and value-position field references.
+func WithAllowedFields(fields ...string) Option {
+	return func(v *Validator) {
+		v.allowedFields = make(map[string]bool, len(fields))
+		for _, f := range fields {
+			v.allowedFields[f] = true
+		}
+	}
+}
+
+// WithAllowedOps restricts every comparison in the query to the given
+// operators, on top of each field's own AllowedOps. Unlike the per-field list
+// it also governs comparisons whose left side is a function (lower(name)=x),
+// so it is the option to use for sandboxing.
+func WithAllowedOps(ops ...Op) Option {
+	return func(v *Validator) {
+		v.allowedOps = make(map[Op]bool, len(ops))
+		for _, op := range ops {
+			v.allowedOps[op] = true
+		}
+	}
+}
+
+// Validator validates a parsed AST against field configurations. A Validator
+// is safe for concurrent use; each call to [Validator.Validate] collects its
+// errors privately.
 type Validator struct {
-	fields map[string]FieldConfig
-	nested map[string]FieldConfig
-	custom AstValidator
-	errors ErrorList
+	fields        map[string]FieldConfig
+	nested        map[string]FieldConfig
+	custom        AstValidator
+	allowedFields map[string]bool
+	allowedOps    map[Op]bool
+	errors        ErrorList
 }
 
 // New creates a validator with the given field configs and options.
@@ -135,18 +166,26 @@ func New(fields []FieldConfig, opts ...Option) *Validator {
 // [AstValidator.ValidateCustomRules] method is called once on the root
 // expression after built-in checks complete. Returned errors are merged into
 // the resulting [ErrorList].
+//
+// Validation also normalizes literals to the declared field type where the
+// lexer's guess was narrower than the field: `zip=90210` on a text field keeps
+// the integer-looking literal as the string "90210", and a quoted RFC 3339
+// string on a date field becomes a date value. The expression is updated in
+// place so evaluation compares with the field's type.
 func (v *Validator) Validate(expr ast.Expression) error {
-	v.errors = nil
-	v.validate(expr)
-	if v.custom != nil && expr != nil {
-		if err := v.custom.ValidateCustomRules(expr); err != nil {
-			v.appendCustomErr(expr, err)
+	// Work on a copy so concurrent Validate calls do not share the error list.
+	w := *v
+	w.errors = nil
+	w.validate(expr)
+	if w.custom != nil && expr != nil {
+		if err := w.custom.ValidateCustomRules(expr); err != nil {
+			w.appendCustomErr(expr, err)
 		}
 	}
-	if len(v.errors) == 0 {
+	if len(w.errors) == 0 {
 		return nil
 	}
-	return v.errors
+	return w.errors
 }
 
 // appendCustomErr merges an error returned by [AstValidator.ValidateCustomRules]
@@ -212,19 +251,32 @@ func (v *Validator) validate(expr ast.Expression) {
 }
 
 func (v *Validator) validateQualifier(q *ast.QualifierExpr) {
-	// If the qualifier has a field transform function (e.g., lower(name)=john),
-	// validate the field references inside the function args instead.
-	if q.HasFieldFunc() {
-		v.validateFuncCallFields(q.FieldFunc)
-	}
-
 	// Validate functions appearing in value position (e.g., created_at>=now()).
 	// Their return type is opaque to the validator, so we only ensure the
 	// field references inside the function are declared.
 	v.validateValueFuncs(&q.Value, q.Position)
 	v.validateValueFuncs(q.EndValue, q.Position)
 
+	op := tokenTypeToOp(q.Operator, q.Value.Wildcard)
+
+	// A function-wrapped qualifier (lower(name)=john) compares the function's
+	// result, whose type is unknown here, so the value is not type-checked.
+	// The operator is still policed: against the global allowed set, and
+	// against each argument field's own operators where that is meaningful.
 	if q.HasFieldFunc() {
+		fields := v.validateFuncCallFields(q.FieldFunc)
+		if !v.opGloballyAllowed(op) {
+			v.addError(ErrOperatorNotAllowed, q.Position, "", string(op),
+				"operator %q is not allowed", string(op))
+			return
+		}
+		for _, f := range fields {
+			if !allowsOpThroughFunc(f.cfg, op) {
+				v.addError(ErrOperatorNotAllowed, q.Position, f.name, string(op),
+					"operator %q is not allowed for field %q (type %s), including through %s()",
+					string(op), f.name, f.cfg.Type, q.FieldFunc.Name)
+			}
+		}
 		return
 	}
 
@@ -234,25 +286,61 @@ func (v *Validator) validateQualifier(q *ast.QualifierExpr) {
 		v.addError(ErrFieldNotFound, q.Position, fieldName, "", "unknown field %q", fieldName)
 		return
 	}
-	op := tokenTypeToOp(q.Operator, q.Value.Wildcard)
-	if !cfg.AllowsOp(op) {
+	if !v.opGloballyAllowed(op) || !cfg.AllowsOp(op) {
 		v.addError(ErrOperatorNotAllowed, q.Position, fieldName, string(op),
 			"operator %q is not allowed for field %q (type %s)", string(op), fieldName, cfg.Type)
 		return
 	}
-	// Skip type-compatibility checks for function- and arithmetic-valued
-	// operands — we can't know the return type at parse time. The eval
-	// engine coerces at match time; mismatches there fall back to the
-	// comparison's default-false path.
-	if !isDynamicValue(q.Value) && !typeCompatible(cfg.Type, q.Value) {
-		v.addError(ErrTypeMismatch, q.Position, fieldName, "",
-			"value type %s is not compatible with field %q (type %s)", q.Value.Type, fieldName, cfg.Type)
+	v.checkValue(cfg, &q.Value, q.Position, fieldName, "value")
+	if q.EndValue != nil {
+		v.checkValue(cfg, q.EndValue, q.Position, fieldName, "range end value")
 	}
-	if q.EndValue != nil && !isDynamicValue(*q.EndValue) {
-		if !typeCompatible(cfg.Type, *q.EndValue) {
-			v.addError(ErrTypeMismatch, q.Position, fieldName, "",
-				"range end value type %s is not compatible with field %q (type %s)", q.EndValue.Type, fieldName, cfg.Type)
+}
+
+// checkValue type-checks one literal operand against the field, coercing it
+// to the field's type first when the lexer guessed a narrower one (see
+// coerceLiteral). Function- and field-valued operands are resolved at match
+// time and skipped; arithmetic is checked for fields it can never produce.
+func (v *Validator) checkValue(cfg FieldConfig, val *ast.Value, pos token.Position, fieldName, what string) {
+	coerceLiteral(cfg.Type, val)
+	if isDynamicValue(*val) {
+		if val.Type == ast.ValueArith && (cfg.Type == TypeText || cfg.Type == TypeBoolean) {
+			v.addError(ErrTypeMismatch, pos, fieldName, "",
+				"%s is arithmetic (%s), which cannot produce a %s for field %q; quote it to compare as text",
+				what, val.Raw, cfg.Type, fieldName)
 		}
+		return
+	}
+	if !typeCompatible(cfg.Type, *val) {
+		v.addError(ErrTypeMismatch, pos, fieldName, "",
+			"%s type %s is not compatible with field %q (type %s)", what, val.Type, fieldName, cfg.Type)
+	}
+}
+
+// opGloballyAllowed reports whether op passes the WithAllowedOps restriction
+// (always true when none is configured).
+func (v *Validator) opGloballyAllowed(op Op) bool {
+	return v.allowedOps == nil || v.allowedOps[op]
+}
+
+// allowsOpThroughFunc reports whether op may be applied to the result of a
+// function over field cfg. Equality, inequality, wildcard and presence follow
+// the field's own list: a field that forbids wildcards forbids
+// trim(field)=a* too. Ordering and range operators follow the field's list
+// when the field is ordered (numeric, date, duration); on a text or boolean
+// field a function is the only way to obtain something orderable
+// (len(name)>5), so those operators are permitted there.
+func allowsOpThroughFunc(cfg FieldConfig, op Op) bool {
+	switch op {
+	case OpEq, OpNeq, OpWildcard, OpPresence:
+		return cfg.AllowsOp(op)
+	case OpGt, OpGte, OpLt, OpLte, OpRange:
+		if cfg.Type == TypeText || cfg.Type == TypeBoolean {
+			return true
+		}
+		return cfg.AllowsOp(op)
+	default:
+		return cfg.AllowsOp(op)
 	}
 }
 
@@ -261,6 +349,28 @@ func (v *Validator) validateQualifier(q *ast.QualifierExpr) {
 // type-checked against the field's declared type.
 func isDynamicValue(v ast.Value) bool {
 	return v.Type == ast.ValueFunc || v.Type == ast.ValueArith || v.Type == ast.ValueFieldRef
+}
+
+// coerceLiteral rewrites a literal to the field's type when the lexer's guess
+// was narrower: any scalar literal on a text field is the text it was written
+// as (zip=90210 compares the string "90210"), and a quoted string on a date
+// or datetime field that parses as a date literal becomes that date.
+func coerceLiteral(ft FieldValueType, val *ast.Value) {
+	switch ft {
+	case TypeText:
+		switch val.Type { //nolint:exhaustive // only scalar literals coerce
+		case ast.ValueInteger, ast.ValueFloat, ast.ValueBoolean, ast.ValueDate, ast.ValueDuration:
+			*val = ast.Value{Type: ast.ValueString, Raw: val.Raw, Str: val.Raw}
+		}
+	case TypeDate, TypeDatetime:
+		if val.Type == ast.ValueString && !val.Wildcard {
+			if t, err := parser.ParseDateLiteral(val.Str); err == nil {
+				*val = ast.Value{Type: ast.ValueDate, Raw: val.Raw, Date: t, Quoted: val.Quoted}
+			}
+		}
+	case TypeInteger, TypeDecimal, TypeBoolean, TypeDuration:
+		// No coercion: a text literal on these fields is a genuine mismatch.
+	}
 }
 
 // validateValueFuncs walks a value's function/arithmetic subtree and validates
@@ -286,19 +396,34 @@ func (v *Validator) validateValueFuncs(val *ast.Value, pos token.Position) {
 	}
 }
 
-// validateFuncCallFields validates field references inside function arguments.
-func (v *Validator) validateFuncCallFields(fc *ast.FuncCallExpr) {
+// resolvedField pairs a field name with its configuration.
+type resolvedField struct {
+	name string
+	cfg  FieldConfig
+}
+
+// validateFuncCallFields validates field references inside function
+// arguments, recursing into nested calls and value-position operands, and
+// returns the fields that resolved.
+func (v *Validator) validateFuncCallFields(fc *ast.FuncCallExpr) []resolvedField {
+	var fields []resolvedField
 	for _, arg := range fc.Args {
-		if arg.Field != nil {
+		switch {
+		case arg.Field != nil:
 			fieldName := arg.Field.String()
-			if _, ok := v.resolveField(fieldName); !ok {
+			cfg, ok := v.resolveField(fieldName)
+			if !ok {
 				v.addError(ErrFieldNotFound, fc.Position, fieldName, "", "unknown field %q in function %s()", fieldName, fc.Name)
+				continue
 			}
-		}
-		if arg.Call != nil {
-			v.validateFuncCallFields(arg.Call)
+			fields = append(fields, resolvedField{fieldName, cfg})
+		case arg.Call != nil:
+			fields = append(fields, v.validateFuncCallFields(arg.Call)...)
+		case arg.Value != nil:
+			v.validateValueFuncs(arg.Value, fc.Position)
 		}
 	}
+	return fields
 }
 
 // validateSelector checks that the selector's base field is declared and
@@ -335,6 +460,23 @@ func (v *Validator) validatePresence(p *ast.PresenceExpr) {
 }
 
 func (v *Validator) resolveField(name string) (FieldConfig, bool) {
+	cfg, ok := v.lookupField(name)
+	if !ok {
+		return FieldConfig{}, false
+	}
+	// WithAllowedFields is a restriction over whatever source resolved the
+	// field, so it is applied here rather than by filtering the static list.
+	// A nested path is allowed when its top-level segment is.
+	if v.allowedFields != nil && !v.allowedFields[name] {
+		idx := strings.IndexByte(name, '.')
+		if idx <= 0 || !cfg.Nested || !v.allowedFields[name[:idx]] {
+			return FieldConfig{}, false
+		}
+	}
+	return cfg, true
+}
+
+func (v *Validator) lookupField(name string) (FieldConfig, bool) {
 	if v.custom != nil {
 		if cfg, ok := v.custom.GetFieldConfig(name); ok {
 			return cfg, true

@@ -75,7 +75,7 @@ type Value struct {
 	Bool     bool          // for boolean values
 	Date     time.Time     // for date values
 	Duration time.Duration // for duration values
-	Wildcard bool          // true if the value contains wildcards
+	Wildcard bool          // true if the value contains wildcards; Str then keeps an escaped literal star as `\*`
 	Quoted   bool          // true if the string value came from a "..."-quoted literal
 	Func     *FuncCallExpr // for ValueFunc: function call resolved at match time
 	Arith    *ArithExpr    // for ValueArith: arithmetic expression resolved at match time

@@ -27,11 +27,14 @@ type AST struct {
 	Value    *Val     `json:"value,omitempty"`
 	EndValue *Val     `json:"endValue,omitempty"`
 	Selector string   `json:"selector,omitempty"`
-	Left     *AST     `json:"left,omitempty"`
-	Right    *AST     `json:"right,omitempty"`
-	Expr     *AST     `json:"expr,omitempty"`
-	Inner    *AST     `json:"inner,omitempty"`
-	Base     *AST     `json:"base,omitempty"`
+	// FieldFunc is the source form of the function a qualifier compares
+	// (lower(name) in lower(name)=john); Field is empty for such a node.
+	FieldFunc string `json:"fieldFunc,omitempty"`
+	Left      *AST   `json:"left,omitempty"`
+	Right     *AST   `json:"right,omitempty"`
+	Expr      *AST   `json:"expr,omitempty"`
+	Inner     *AST   `json:"inner,omitempty"`
+	Base      *AST   `json:"base,omitempty"`
 }
 
 // Val is the JSON-serializable representation of a value.
@@ -77,6 +80,9 @@ func AstToJSON(expr ast.Expression) *AST {
 		}
 		if e.EndValue != nil {
 			n.EndValue = valueToJSON(e.EndValue)
+		}
+		if e.FieldFunc != nil {
+			n.FieldFunc = ast.String(e.FieldFunc)
 		}
 		return n
 	case *ast.PresenceExpr:
@@ -155,6 +161,20 @@ func nodeToAST(n *AST) (ast.Expression, error) {
 			Operator: symbolToToken(n.Op),
 			Value:    *val,
 		}
+		if n.FieldFunc != "" {
+			// The compared function is carried as its source text; read it
+			// back through the parser as a standalone call.
+			expr, err := parser.Parse(n.FieldFunc, 0)
+			if err != nil {
+				return nil, fmt.Errorf("fieldFunc %q: %w", n.FieldFunc, err)
+			}
+			fc, ok := expr.(*ast.FuncCallExpr)
+			if !ok {
+				return nil, fmt.Errorf("fieldFunc %q is not a function call", n.FieldFunc)
+			}
+			q.FieldFunc = fc
+			q.Field = nil
+		}
 		if n.EndValue != nil {
 			ev, err := jsonToValue(n.EndValue)
 			if err != nil {
@@ -226,14 +246,20 @@ func jsonToValue(v *Val) (*ast.Value, error) {
 // stringValue is the string node for v, quoted unless its bare text reads back
 // as the same string.
 func stringValue(v *Val) *ast.Value {
+	// `value` is the decoded content; `raw` may be its escaped source form
+	// (a\(b), which is what the bare text must read back to.
+	content := v.Raw
+	if s, ok := v.Value.(string); ok {
+		content = s
+	}
 	if !v.Quoted {
 		if bare := readValue(v.Raw); bare != nil && bare.Type == ast.ValueString &&
-			!bare.Quoted && bare.Str == v.Raw && bare.Wildcard == v.Wildcard {
+			!bare.Quoted && bare.Str == content && bare.Wildcard == v.Wildcard {
 			return bare
 		}
 	}
 	// A quoted literal is never a pattern: a `*` inside quotes is a character.
-	return &ast.Value{Type: ast.ValueString, Raw: v.Raw, Str: v.Raw, Quoted: true}
+	return &ast.Value{Type: ast.ValueString, Raw: content, Str: content, Quoted: true}
 }
 
 // readValue parses text in value position, or returns nil when it does not

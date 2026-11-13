@@ -184,7 +184,7 @@ func TestCompileArgResolvers_MissingFunc(t *testing.T) {
 			},
 		}),
 	)
-	if err != nil {
-		t.Fatalf("compile: %v", err)
+	if !errors.Is(err, ErrUnknownFunction) {
+		t.Fatalf("compile error = %v, want ErrUnknownFunction", err)
 	}
 }

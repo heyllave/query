@@ -75,11 +75,33 @@ func TestParseValue_FieldRefErrors(t *testing.T) {
 	}
 }
 
-// TestParse_FieldRefOnLeftRejected confirms a bracket cannot start a boolean
-// predicate: brackets are a value-position sigil only.
-func TestParse_FieldRefOnLeftRejected(t *testing.T) {
-	if _, err := Parse("[cpu]>5", 256); err == nil {
-		t.Error("Parse(\"[cpu]>5\") error = nil, want error (LHS bracket unsupported)")
+// TestParse_FieldRefOnLeft confirms a bracketed name can start a predicate,
+// naming a field the identifier alphabet cannot: ["foo bar"]=1, [labels.dev]=x.
+func TestParse_FieldRefOnLeft(t *testing.T) {
+	for q, want := range map[string]string{
+		"[cpu]>5":                   "cpu",
+		`["foo bar"]=1`:             "foo bar",
+		`"foo bar"=1`:               "foo bar",
+		"[labels.dev]=x":            "labels.dev",
+		`["a.b/c"]`:                 "a.b/c",
+		"labels.example.com/team=x": "labels.example.com/team",
+	} {
+		t.Run(q, func(t *testing.T) {
+			expr, err := Parse(q, 256)
+			if err != nil {
+				t.Fatalf("Parse(%q) error: %v", q, err)
+			}
+			var got string
+			switch e := expr.(type) {
+			case *ast.QualifierExpr:
+				got = e.Field.String()
+			case *ast.PresenceExpr:
+				got = e.Field.String()
+			}
+			if got != want {
+				t.Errorf("Parse(%q) field = %q, want %q", q, got, want)
+			}
+		})
 	}
 }
 

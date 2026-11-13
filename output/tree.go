@@ -97,7 +97,7 @@ func (v *treeVisitor) VisitQualifier(e *ast.QualifierExpr) *treeNode {
 
 	if e.HasFieldFunc() {
 		node.Children = append(node.Children, &treeNode{
-			Label:    fmt.Sprintf("FieldFunc: %s(%s)", e.FieldFunc.Name, e.Field.String()),
+			Label:    "FieldFunc: " + ast.String(e.FieldFunc),
 			Position: v.pos(e.FieldFunc.Position),
 		})
 	} else {

@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
-	"time"
 
 	"github.com/heyllave/query/ast"
 	"github.com/heyllave/query/token"
@@ -135,11 +134,41 @@ func (p *parser) parseLogicalAnd() ast.Expression {
 // between adjacent terms separated only by whitespace.
 func (p *parser) canStartTerm(t token.Type) bool {
 	switch t { //nolint:exhaustive // only term-starters matter
-	case token.Ident, token.LParen, token.Not:
+	case token.Ident, token.LParen, token.Not, token.FieldRef, token.String, token.Boolean, token.In:
 		return true
 	default:
 		return false
 	}
+}
+
+// isFieldToken reports whether the current token can name a field in field
+// position: a bare identifier, a bracketed name ([labels.x/y] or ["with
+// space"]), a quoted name ("with space"), or a reserved word used as a name.
+// true, false and in are accepted as bare terms; and/or (and not, see
+// keywordIsField) only when an operator follows, so `AND foo` stays an error.
+func (p *parser) isFieldToken() bool {
+	tok := p.peek()
+	switch tok.Type { //nolint:exhaustive // only field-name tokens
+	case token.Ident, token.FieldRef, token.Boolean, token.In:
+		return true
+	case token.String:
+		return tok.Quoted
+	case token.And, token.Or:
+		next := p.peekAt(1).Type
+		return next.IsOperator() || next == token.Dot || next == token.In
+	case token.Not:
+		return p.keywordIsField()
+	default:
+		return false
+	}
+}
+
+// keywordIsField reports whether a NOT keyword at the current position is a
+// field name rather than a negation: `not=1`, `not`, `(not)`, `not@first`.
+func (p *parser) keywordIsField() bool {
+	next := p.peekAt(1).Type
+	return next.IsOperator() || next == token.EOF || next == token.RParen ||
+		next == token.Dot || next == token.At || next == token.In || next == token.And || next == token.Or
 }
 
 // parseChainExpr parses a term optionally followed by one or more selector
@@ -212,7 +241,7 @@ func (p *parser) parseSelector(base ast.Expression, pos token.Position) ast.Expr
 }
 
 func (p *parser) parseTerm() ast.Expression {
-	if p.peek().Type == token.Not {
+	if p.peek().Type == token.Not && !p.keywordIsField() {
 		op := p.advance()
 		// Use parseChainExpr so selectors bind tighter than NOT:
 		//   NOT items@(x=y) → NOT (items@(x=y))
@@ -243,7 +272,7 @@ func (p *parser) parseTerm() ast.Expression {
 }
 
 func (p *parser) parseQualifier() ast.Expression {
-	if p.peek().Type != token.Ident {
+	if !p.isFieldToken() {
 		tok := p.peek()
 		if tok.Type == token.EOF {
 			p.errors.add(newError(CodeExpectedField, ErrUnexpectedEOF, tok.Pos, "unexpected end of query, expected field name"))
@@ -254,17 +283,22 @@ func (p *parser) parseQualifier() ast.Expression {
 	}
 
 	// Check if this is a function call: identifier followed by '('
-	if p.peekAt(1).Type == token.LParen {
+	if p.peek().Type != token.FieldRef && p.peek().Type != token.String && p.peekAt(1).Type == token.LParen {
 		return p.parseFuncCallOrQualifier()
 	}
 
 	startPos := p.peek().Pos
+	if first := p.peek(); first.Type == token.String && first.Value == "" {
+		p.errors.add(newError(CodeEmptyFieldRef, ErrSyntax, first.Pos, "empty field name"))
+		p.advance()
+		return nil
+	}
 	field := p.parseFieldName()
 	tok := p.peek()
 
 	if tok.Type == token.Colon {
 		p.advance()
-		return p.parseRangeExpr(field, startPos)
+		return p.parseRangeExpr(field, nil, startPos)
 	}
 	if tok.Type == token.In {
 		p.advance()
@@ -276,35 +310,36 @@ func (p *parser) parseQualifier() ast.Expression {
 		if val == nil {
 			return nil
 		}
-		// Desugar negated comparisons (field !> val) into NOT (field > val).
-		// Missing-field semantics in eval — see compileComparisonWithResolver —
-		// make a plain operator flip incorrect: a missing field makes both
-		// `field>val` and `field<=val` return false, so `NOT (field>val)` is
-		// the only logically consistent rewrite.
-		if tok.Type.IsNegatedOperator() {
-			inner := &ast.QualifierExpr{
-				Field:    field,
-				Operator: token.NegateOperator(tok.Type),
-				Value:    *val,
-				Position: startPos,
-			}
-			return &ast.UnaryExpr{
-				Op:       token.Not,
-				Expr:     inner,
-				Position: startPos,
-			}
-		}
-		return &ast.QualifierExpr{
-			Field:    field,
-			Operator: tok.Type,
-			Value:    *val,
-			Position: startPos,
-		}
+		return comparison(field, nil, tok.Type, *val, startPos)
 	}
 	return &ast.PresenceExpr{
 		Field:    field,
 		Position: startPos,
 	}
+}
+
+// comparison builds the qualifier for `field op value` (or `fn(...) op value`
+// when fieldFunc is set), desugaring a negated operator (field !> val) into
+// NOT (field > val). Missing-field semantics in eval — see
+// compileComparisonWithResolver — make a plain operator flip incorrect: a
+// missing field makes both `field>val` and `field<=val` return false, so
+// `NOT (field>val)` is the only logically consistent rewrite.
+func comparison(field ast.FieldPath, fieldFunc *ast.FuncCallExpr, op token.Type, val ast.Value, pos token.Position) ast.Expression {
+	q := &ast.QualifierExpr{
+		Field:     field,
+		FieldFunc: fieldFunc,
+		Operator:  token.NegateOperator(op),
+		Value:     val,
+		Position:  pos,
+	}
+	if op.IsNegatedOperator() {
+		return &ast.UnaryExpr{
+			Op:       token.Not,
+			Expr:     q,
+			Position: pos,
+		}
+	}
+	return q
 }
 
 // parseInExpr parses the right-hand side of `field IN (...)` and lowers it to
@@ -368,7 +403,7 @@ func (p *parser) parseInExpr(field ast.FieldPath, startPos token.Position) ast.E
 	return expr
 }
 
-func (p *parser) parseRangeExpr(field ast.FieldPath, startPos token.Position) ast.Expression {
+func (p *parser) parseRangeExpr(field ast.FieldPath, fieldFunc *ast.FuncCallExpr, startPos token.Position) ast.Expression {
 	startVal := p.parseValue()
 	if startVal == nil {
 		return nil
@@ -384,17 +419,27 @@ func (p *parser) parseRangeExpr(field ast.FieldPath, startPos token.Position) as
 		return nil
 	}
 	return &ast.QualifierExpr{
-		Field:    field,
-		Operator: token.Range,
-		Value:    *startVal,
-		EndValue: endVal,
-		Position: startPos,
+		Field:     field,
+		FieldFunc: fieldFunc,
+		Operator:  token.Range,
+		Value:     *startVal,
+		EndValue:  endVal,
+		Position:  startPos,
 	}
 }
 
 func (p *parser) parseFieldName() ast.FieldPath {
+	first := p.advance()
+	switch {
+	case first.Type == token.FieldRef && !first.Quoted:
+		// [labels.dev] — a dotted path over the identifier alphabet.
+		return ast.FieldPath(strings.Split(first.Value, "."))
+	case first.Type == token.FieldRef || first.Type == token.String:
+		// ["weird.name"] or "weird name" — one segment, dots included.
+		return ast.FieldPath{first.Value}
+	}
 	var parts []string
-	parts = append(parts, p.advance().Value)
+	parts = append(parts, first.Value)
 	for p.peek().Type == token.Dot {
 		p.advance()
 		if p.peek().Type != token.Ident {
@@ -508,7 +553,7 @@ func (p *parser) parseValuePrimary() *ast.Value {
 		}
 	case token.String:
 		p.advance()
-		return &ast.Value{Type: ast.ValueString, Raw: tok.Value, Str: tok.Value, Quoted: tok.Quoted}
+		return &ast.Value{Type: ast.ValueString, Raw: rawOf(tok), Str: tok.Value, Quoted: tok.Quoted}
 	case token.Integer:
 		p.advance()
 		n, err := strconv.ParseInt(tok.Value, 10, 64)
@@ -530,7 +575,7 @@ func (p *parser) parseValuePrimary() *ast.Value {
 		return &ast.Value{Type: ast.ValueBoolean, Raw: tok.Value, Bool: tok.Value == "true"}
 	case token.Date:
 		p.advance()
-		d, err := time.Parse("2006-01-02", tok.Value)
+		d, err := ParseDateLiteral(tok.Value)
 		if err != nil {
 			p.errors.add(newError(CodeInvalidDate, ErrInvalidDate, tok.Pos, "invalid date %q", tok.Value))
 			return nil
@@ -546,7 +591,7 @@ func (p *parser) parseValuePrimary() *ast.Value {
 		return &ast.Value{Type: ast.ValueDuration, Raw: tok.Value, Duration: dur}
 	case token.Wildcard:
 		p.advance()
-		return &ast.Value{Type: ast.ValueString, Raw: tok.Value, Str: tok.Value, Wildcard: true}
+		return &ast.Value{Type: ast.ValueString, Raw: rawOf(tok), Str: tok.Value, Wildcard: true}
 	case token.EOF:
 		p.errors.add(newError(CodeExpectedValue, ErrUnexpectedEOF, tok.Pos, "expected value, got end of query"))
 		return nil
@@ -555,6 +600,16 @@ func (p *parser) parseValuePrimary() *ast.Value {
 		p.advance()
 		return nil
 	}
+}
+
+// rawOf returns the source text of an unquoted value token: the escaped form
+// when the lexer decoded escapes, else the value itself. Keeping the escaped
+// form in Value.Raw lets ast.String re-emit `a\(b` instead of `a(b`.
+func rawOf(tok token.Token) string {
+	if tok.Raw != "" {
+		return tok.Raw
+	}
+	return tok.Value
 }
 
 // mkArithValue wraps two operands and an arithmetic operator into a Value of
@@ -601,21 +656,21 @@ func (p *parser) parseFuncCallOrQualifier() ast.Expression {
 	}
 
 	// If followed by an operator, this is a field-transform qualifier:
-	// lower(name)=john* → qualifier where the "field" is the function result
+	// lower(name)=john* → qualifier where the "field" is the function result.
+	// Field is left empty: the function is the field, and consumers that read
+	// Field would otherwise mistake the function name for a field name.
 	tok := p.peek()
+	if tok.Type == token.Colon {
+		p.advance()
+		return p.parseRangeExpr(nil, fc, fc.Position)
+	}
 	if tok.Type.IsOperator() {
 		p.advance()
 		val := p.parseValue()
 		if val == nil {
 			return nil
 		}
-		return &ast.QualifierExpr{
-			Field:     ast.FieldPath{fc.Name}, // use func name as field for round-trip
-			Operator:  tok.Type,
-			Value:     *val,
-			FieldFunc: fc,
-			Position:  fc.Position,
-		}
+		return comparison(nil, fc, tok.Type, *val, fc.Position)
 	}
 
 	// Standalone function call (boolean predicate)
@@ -671,8 +726,10 @@ func (p *parser) parseFuncArg() *ast.FuncArg {
 		return &ast.FuncArg{Call: call}
 	}
 
-	// Field reference: identifier or identifier.identifier
-	if tok.Type == token.Ident {
+	// Field reference: identifier, identifier.identifier, [bracketed], or a
+	// reserved word used as a name. A quoted string stays a literal here.
+	if tok.Type == token.Ident || tok.Type == token.FieldRef || tok.Type == token.In || tok.Type == token.And ||
+		tok.Type == token.Or || tok.Type == token.Not {
 		field := p.parseFieldName()
 		return &ast.FuncArg{Field: &field}
 	}

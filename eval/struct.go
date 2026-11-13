@@ -48,7 +48,9 @@ func FieldsFromStruct(v any) []validate.FieldConfig {
 	for i := range t.NumField() {
 		field := t.Field(i)
 		tag := field.Tag.Get("query")
-		if tag == "" || tag == "-" {
+		if tag == "" || tag == "-" || !field.IsExported() {
+			// An unexported field cannot be read through reflection, so a
+			// tag on one is ignored rather than panicking at match time.
 			continue
 		}
 
@@ -82,8 +84,9 @@ func tagIndex(t reflect.Type) map[string]int {
 	}
 	m := make(map[string]int, t.NumField())
 	for i := range t.NumField() {
-		tag := t.Field(i).Tag.Get("query")
-		if tag == "" || tag == "-" {
+		f := t.Field(i)
+		tag := f.Tag.Get("query")
+		if tag == "" || tag == "-" || !f.IsExported() {
 			continue
 		}
 		name, _ := parseTag(tag)
@@ -96,10 +99,14 @@ func tagIndex(t reflect.Type) map[string]int {
 // StructAccessor returns a field accessor function for a struct value,
 // resolving field names via `query` tags. The tag→index map is cached per
 // struct type, so repeated calls for the same type allocate nothing beyond the
-// returned closure.
+// returned closure. A pointer field is dereferenced; a nil pointer is a
+// missing field.
 func StructAccessor(v any) func(string) (any, bool) {
 	rv := reflect.ValueOf(v)
 	if rv.Kind() == reflect.Pointer {
+		if rv.IsNil() {
+			return func(string) (any, bool) { return nil, false }
+		}
 		rv = rv.Elem()
 	}
 	if rv.Kind() != reflect.Struct {
@@ -113,12 +120,24 @@ func StructAccessor(v any) func(string) (any, bool) {
 		if !ok {
 			return nil, false
 		}
-		fv := rv.Field(idx)
-		if !fv.IsValid() {
+		return fieldValue(rv.Field(idx))
+	}
+}
+
+// fieldValue reads a struct field for comparison, dereferencing pointers so a
+// *float64 compares as its float64. A nil pointer or interface is reported
+// as a missing field.
+func fieldValue(fv reflect.Value) (any, bool) {
+	if !fv.IsValid() {
+		return nil, false
+	}
+	for fv.Kind() == reflect.Pointer || fv.Kind() == reflect.Interface {
+		if fv.IsNil() {
 			return nil, false
 		}
-		return fv.Interface(), true
+		fv = fv.Elem()
 	}
+	return fv.Interface(), true
 }
 
 var timeType = reflect.TypeOf(time.Time{})

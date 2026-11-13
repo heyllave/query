@@ -7,7 +7,9 @@
       { "Name": "total", "Type": 2, "AllowedOps": ["=", "!=", ">", ">=", "<", "<=", ".."] },
       { "Name": "base", "Type": 2, "AllowedOps": ["=", "!=", ">", ">=", "<", "<=", ".."] },
       { "Name": "cpu", "Type": 1, "AllowedOps": ["=", "!=", ">", ">=", "<", "<="] },
-      { "Name": "cpu_limit", "Type": 1, "AllowedOps": ["=", "!=", ">", ">=", "<", "<="] }
+      { "Name": "cpu_limit", "Type": 1, "AllowedOps": ["=", "!=", ">", ">=", "<", "<="] },
+      { "Name": "labels", "Type": 0, "AllowedOps": ["=", "!=", "*", "?"], "Nested": true },
+      { "Name": "created_at", "Type": 5, "AllowedOps": ["=", "!=", ">", ">=", "<", "<=", ".."] }
     ]
   },
   "cases": [
@@ -56,6 +58,37 @@
     { "id": "eval-field-arith", "desc": "arithmetic over a field ref", "op": "eval", "query": "[base]*2", "fieldSet": "default", "record": { "base": 21 }, "expectValue": 42 },
     { "id": "eval-field-bare", "desc": "bare field ref value", "op": "eval", "query": "[base]", "fieldSet": "default", "record": { "base": 5 }, "expectValue": 5 },
     { "id": "eval-missing-field", "desc": "missing field does not resolve", "op": "eval", "query": "[base]", "fieldSet": "default", "record": {}, "expectError": true },
-    { "id": "eval-div-zero", "desc": "division by zero does not resolve", "op": "eval", "query": "5/0", "fieldSet": "default", "record": {}, "expectError": true }
+    { "id": "eval-div-zero", "desc": "division by zero does not resolve", "op": "eval", "query": "5/0", "fieldSet": "default", "record": {}, "expectError": true },
+
+    { "id": "match-decimal-gt-int-literal", "desc": "an integer literal compares a decimal field without truncation", "op": "match", "query": "total>3", "fieldSet": "default", "record": { "total": 3.5 }, "expectMatch": true },
+    { "id": "match-decimal-eq-int-literal", "desc": "equality against a decimal field is exact", "op": "match", "query": "total=3", "fieldSet": "default", "record": { "total": 3.9 }, "expectMatch": false },
+    { "id": "match-text-numeric-literal", "desc": "a numeric-looking literal on a text field compares as text", "op": "match", "query": "state=90210", "fieldSet": "default", "record": { "state": "90210" }, "expectMatch": true },
+    { "id": "match-text-non-number-never-zero", "desc": "a non-numeric record value is not zero", "op": "match", "query": "cpu=0", "fieldSet": "default", "record": { "cpu": "abc" }, "expectMatch": false },
+    { "id": "match-missing-field-in-func", "desc": "a missing field inside a function is no value, not the text <nil>", "op": "match", "query": "len(state)>3", "fieldSet": "default", "record": {}, "expectMatch": false },
+    { "id": "match-func-negated-op", "desc": "a negated operator on a function desugars like a field", "op": "match", "query": "len(state)!>5", "fieldSet": "default", "record": { "state": "ab" }, "expectMatch": true },
+    { "id": "match-wildcard-neq-hit", "desc": "!= with a wildcard negates the pattern", "op": "match", "query": "state!=dr*", "fieldSet": "default", "record": { "state": "draft" }, "expectMatch": false },
+    { "id": "match-wildcard-neq-miss", "desc": "!= with a wildcard matches a non-matching value", "op": "match", "query": "state!=dr*", "fieldSet": "default", "record": { "state": "paid" }, "expectMatch": true },
+    { "id": "match-nested-map", "desc": "a dotted field descends into a nested map", "op": "match", "query": "labels.dev=jane", "fieldSet": "default", "record": { "labels": { "dev": "jane" } }, "expectMatch": true },
+    { "id": "match-flat-key", "desc": "a dotted field also reads a flat key", "op": "match", "query": "labels.dev=jane", "fieldSet": "default", "record": { "labels.dev": "jane" }, "expectMatch": true },
+    { "id": "match-presence-empty-string", "desc": "presence is false for an empty string", "op": "match", "query": "state", "fieldSet": "default", "record": { "state": "" }, "expectMatch": false },
+    { "id": "match-presence-null", "desc": "presence is false for null", "op": "match", "query": "state", "fieldSet": "default", "record": { "state": null }, "expectMatch": false },
+    { "id": "match-subtraction", "desc": "10-3 is the subtraction 7", "op": "match", "query": "total>10-3", "fieldSet": "default", "record": { "total": 8 }, "expectMatch": true },
+    { "id": "match-spaced-arith", "desc": "whitespace around an arithmetic operator is allowed", "op": "match", "query": "total>10 - 3", "fieldSet": "default", "record": { "total": 6 }, "expectMatch": false },
+    { "id": "match-negative-arg", "desc": "a negative literal is allowed in function arguments", "op": "match", "query": "total>abs(-5)", "fieldSet": "default", "record": { "total": 6 }, "expectMatch": true },
+    { "id": "match-in-negative", "desc": "a negative literal is allowed in an IN list", "op": "match", "query": "cpu IN (-1, 4)", "fieldSet": "default", "record": { "cpu": -1 }, "expectMatch": true },
+    { "id": "match-in-wildcard", "desc": "a wildcard is allowed in an IN list", "op": "match", "query": "state IN (dr*, paid)", "fieldSet": "default", "record": { "state": "draft" }, "expectMatch": true },
+    { "id": "match-datetime-literal", "desc": "an RFC 3339 literal compares a datetime field", "op": "match", "query": "created_at>=2026-01-01T10:00:00Z", "fieldSet": "default", "record": { "created_at": "2026-01-01T12:00:00Z" }, "expectMatch": true },
+    { "id": "match-datetime-unparseable-false", "desc": "an unparseable date is no value, not the zero time", "op": "match", "query": "created_at<2026-01-01", "fieldSet": "default", "record": { "created_at": "yesterday" }, "expectMatch": false },
+    { "id": "match-unknown-function", "desc": "an unknown function is a compile error", "op": "match", "query": "lenght(state)>3", "fieldSet": "default", "record": { "state": "abcd" }, "expectError": true },
+    { "id": "match-arity", "desc": "a wrong argument count is a compile error", "op": "match", "query": "lower(state, state)=a", "fieldSet": "default", "record": { "state": "a" }, "expectError": true },
+    { "id": "match-arith-on-text-rejected", "desc": "arithmetic cannot be compared with a text field", "op": "match", "query": "state=10-3", "fieldSet": "default", "record": { "state": "10-3" }, "expectError": true },
+    { "id": "parse-uuid-value", "desc": "an unquoted UUID is one string value", "op": "stringify", "query": "state=550e8400-e29b-41d4-a716-446655440000", "expectString": "state=550e8400-e29b-41d4-a716-446655440000" },
+    { "id": "stringify-funcfield", "desc": "a function-wrapped qualifier prints its function", "op": "stringify", "query": "lower(state)=draft", "expectString": "lower(state)=draft" },
+    { "id": "stringify-escaped-paren", "desc": "an escaped parenthesis stays escaped", "op": "stringify", "query": "state=a\\(b", "expectString": "state=a\\(b" },
+    { "id": "stringify-escaped-star", "desc": "an escaped star stays a literal star", "op": "stringify", "query": "state=a\\*", "expectString": "state=a\\*" },
+    { "id": "stringify-keyword-field", "desc": "a reserved word can be a field name", "op": "stringify", "query": "true=1", "expectString": "[\"true\"]=1" },
+    { "id": "stringify-quoted-field", "desc": "a quoted field name prints in bracket form", "op": "stringify", "query": "\"foo bar\"=1", "expectString": "[\"foo bar\"]=1" },
+    { "id": "stringify-slash-field", "desc": "a label key with a slash is one field", "op": "stringify", "query": "labels.example.com/team=x", "expectString": "labels.example.com/team=x" },
+    { "id": "parse-leading-and-error", "desc": "a leading AND is still an error", "op": "parse", "query": "AND foo", "expectError": true }
   ]
 }

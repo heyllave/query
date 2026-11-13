@@ -71,7 +71,14 @@ cpu>[cpu_limit]                                    # cross-field comparison
 ["line-item"]-1                                    # bracketed name with hyphen (value position)
 created_at:daysAgo(30)..now()                      # functions on both ends of a range
 ttl.duration>1d                                    # duration comparison
-labels.dev=jane                                    # nested field access
+labels.dev=jane                                    # nested field access (flat key or nested map)
+labels.example.com/team=platform                   # label keys: slashes and hyphens are part of a name
+["billing address"]=remote                         # bracket-quoted name for spaces, dots or other chars
+id=550e8400-e29b-41d4-a716-446655440000            # unquoted values with letters are never arithmetic
+total>10 - 3                                       # whitespace around arithmetic is fine
+created_at>=2026-01-01T10:00:00Z                   # datetime literal (RFC 3339)
+name!=Jo*                                          # negated wildcard
+code=a\*b                                          # \* \( \) \\ escape a literal character
 lower(name)=john*                                  # function call as field transform
 len(name)>5                                        # function in comparison
 contains(tags, "urgent")                           # function with string-literal arg
@@ -106,6 +113,15 @@ prog.Fields()    // []ast.FieldPath{["state"], ["total"]}
 prog.Stringify() // "state=draft AND total>50000"
 prog.AST()       // ast.Expression
 ```
+
+Evaluation semantics worth knowing:
+
+- **Equality on text is case-insensitive** (`state=Draft` matches `"draft"`), as are wildcards.
+- **A value that cannot be read as the literal's type never compares** — `n=0`, `n!=0` and `n<1` are all false when the record's `n` is `"abc"`, and `created_at<2026-01-01` is false for an unparseable date. Numbers compare exactly: every Go integer and float kind is read, and `price>3` against `3.5` is true.
+- **A missing or nil field** makes any comparison false, including through functions: `len(name)>3` does not match a record without a name.
+- **Presence** (`name`) means the field exists and is non-empty: nil, `""` and an empty list or map count as absent.
+- **Dotted fields** read the flat key `"labels.dev"` first, then descend nested maps (`data["labels"]["dev"]`).
+- **Literals follow the field's declared type**: `zip=90210` on a text field compares the text `"90210"`, and a quoted RFC 3339 string on a date field compares as a date. Arithmetic on a text or boolean field is a validation error (quote the value).
 
 ## Value Queries
 
@@ -158,6 +174,11 @@ type Invoice struct {
 
 prog, err := eval.CompileFor[Invoice]("state=draft AND total>50000")
 prog.MatchStruct(Invoice{State: "draft", Total: 60000}) // true
+```
+
+Every Go numeric kind is supported (signed and unsigned, any width, named types). A pointer field is dereferenced, and a nil pointer is a missing field. A `query` tag on an unexported field is ignored, since reflection cannot read it.
+
+```go
 
 // Type mismatches caught at compile time:
 _, err = eval.CompileFor[Invoice]("total=notanumber") // error: type mismatch
@@ -221,14 +242,20 @@ Register domain-specific functions:
 ```go
 prog, err := eval.Compile("wordCount(description)>3", fields,
     eval.WithFunctions(eval.Func{
-        Name: "wordCount",
+        Name:  "wordCount",
+        Arity: eval.Exactly(1), // checked at compile time; omit to leave unchecked
         Call: func(args ...any) (any, error) {
+            if args[0] == nil {
+                return nil, nil // a missing field resolves to no value
+            }
             s := strings.TrimSpace(fmt.Sprint(args[0]))
             return int64(len(strings.Fields(s))), nil
         },
     }),
 )
 ```
+
+A call to a function that is not registered, or with an argument count outside its `Arity` (`eval.Exactly`, `eval.AtLeast`, `eval.Between`), is a compile error (`eval.ErrUnknownFunction`, `eval.ErrArity`) rather than a predicate that is silently false. A function that returns `nil` or an error resolves to no value, so the surrounding comparison is false; an error from a nested call propagates the same way.
 
 Disable built-ins if you want full control:
 
@@ -260,6 +287,14 @@ prog, err := eval.Compile(q, fields,
     eval.WithMaxLength(256),
 )
 ```
+
+The restrictions are enforced inside the validator, after field resolution, so they also bind a custom validator installed with `WithCustomValidator`, and they apply to fields referenced inside function arguments and bracketed field references.
+
+`WithAllowedOps` governs every comparison, including one whose left side is a function (`lower(name)=x`). A field's own `AllowedOps` also applies through a function for `=`, `!=`, wildcard and presence (`trim(secret)=a*` needs the wildcard operator on `secret`); ordering operators through a function over a text or boolean field (`len(name)>5`) are allowed, since that is the only way to order on a derived number.
+
+`WithMaxDepth` measures nesting (groups, negations, selectors and alternating connectives), not length: `a AND b AND c AND d` and an `IN` list of any size have depth 2. Use `WithMaxLength` to bound length.
+
+The built-in day-count functions (`daysAgo`, `addDays`, `addBusinessDays`) accept at most ±`eval.MaxCalendarDays` days (about 10,000 years), so a large literal cannot turn the business-day walk into a CPU sink.
 
 ## Custom Validation Rules
 
@@ -346,13 +381,16 @@ See [`examples/`](examples/) for complete implementations of SQL, JSON, filter f
 ## AST Utilities
 
 ```go
-ast.Fields(expr)      // []FieldPath — all referenced fields
+ast.Fields(expr)      // []FieldPath — all referenced fields, including inside functions and [refs]
 ast.Qualifiers(expr)  // []*QualifierExpr — all field=value pairs
+ast.Calls(expr)       // []*FuncCallExpr — every function call, wherever it appears
 ast.IsSimple(expr)    // bool — single condition (no AND/OR)?
-ast.Depth(expr)       // int — max nesting depth
-ast.Walk(expr, fn)    // depth-first traversal
+ast.Depth(expr)       // int — nesting depth (a chain of one connective is one level)
+ast.Walk(expr, fn)    // depth-first traversal; visits function calls in field, value and argument position
 ast.String(expr)      // round-trip back to query string
 ```
+
+`ast.String(parse(q))` re-parses to the same tree: names outside the identifier alphabet print in the `["..."]` form, and unquoted values that would not lex back as one token print quoted. A function-wrapped qualifier (`lower(name)=john`) has `FieldFunc` set and an empty `Field`; it prints with its function.
 
 ## Selectors (list fields)
 
@@ -399,12 +437,12 @@ Codegen via `Visitor[T]` is the consumer's responsibility — the library does n
 | Operator | Allowed Types | Description |
 |----------|--------------|-------------|
 | `=` | all | Equality or wildcard match (`name=John*`) |
-| `!=` | all | Not equal |
+| `!=` | all | Not equal (`name!=Jo*` negates the wildcard) |
 | `>` `>=` `<` `<=` | number, date, duration | Comparison |
 | `!>` `!>=` `!<` `!<=` | number, date, duration | Negated comparison (`total!>50000` ≡ `NOT total>50000`; missing field is `true`) |
 | `..` | number, date, duration | Inclusive range (`field:start..end`) |
 | `IN` | all literal types | List shorthand (`state IN (draft, issued)` desugars to OR chain) |
-| `<field>` (bare) | any | Presence — field exists and is non-empty |
+| `<field>` (bare) | any | Presence — field exists and is non-empty (nil, `""`, empty list/map are absent) |
 | `@first` `@last` | list | Non-emptiness |
 | `@(...)` `@any(...)` | list | EXISTS — at least one element satisfies |
 | `@all(...)` | list | Universal — every element satisfies (empty list is vacuously true) |
@@ -443,9 +481,15 @@ The language covers most of what general-purpose expression engines offer for fi
 - **Quoted strings** — `field="hello world"` with `\"`, `\\`, `\n`, `\t`, `\r` escapes.
 - **`IN` shorthand** — `state IN (draft, issued, paid)` desugars to an OR chain.
 - **Case-insensitive keywords** — `and`/`or`/`not`/`in` accepted in any case.
-- **Negated comparisons** — `total!>50000` desugars to `NOT total>50000`; missing-field safe.
+- **Negated comparisons** — `total!>50000` desugars to `NOT total>50000`; missing-field safe. The same holds through a function: `len(name)!>5`.
+- **Negated wildcards** — `name!=Jo*` is the negation of the pattern on a present field; `ast.SQLOperator` renders it as `NOT LIKE`.
+- **Datetime literals** — `created_at>=2026-01-01T10:00:00Z` (RFC 3339, optional fraction and zone); a date without a time is midnight UTC. A quoted timestamp on a date field is read the same way.
+- **Signed literals in arguments and lists** — `addDays(d, -7)`, `n IN (-1, 2)`; wildcards are allowed in `IN` lists too.
+- **Escapes in unquoted values** — `\*`, `\(`, `\)` and `\\` stand for the literal character, including inside a wildcard pattern (`a\*b*` matches values starting with `a*b`).
+- **Unquoted values that contain letters are strings** — a UUID, a version (`1.2.3-beta`) or an e-mail address is one value even when it contains `-`, `+` or `/`; only runs made purely of numbers, operators, durations, parens, `[refs]` and calls are arithmetic. `10-3`, `10 - 3` and `10+3` all compute.
 - **Arithmetic in value position** — `total>=50000*1.1`, `created_at>=now()-7d`, `(50000+1000)*1.1` with `* / % > + -` precedence and paren override. Operands may be numeric literals, durations, dates, function results, and bracketed field references.
-- **Field references in value position** — a field is referenced in brackets, `[base]`, as an arithmetic operand (`total>=[base]*1.1`) or a comparison operand. The bracket disambiguates from hyphenated bareword field names; use the quoted form `["line-item"]` for names with hyphens, spaces, or dots. (LHS of a qualifier stays a bareword: `total>=[base]`, not `[total]>=base`.)
+- **Field references in value position** — a field is referenced in brackets, `[base]`, as an arithmetic operand (`total>=[base]*1.1`) or a comparison operand. The bracket disambiguates from hyphenated bareword field names; use the quoted form `["line-item"]` for names with spaces or dots.
+- **Field names** — identifiers may contain letters, digits, `_`, `-` and `/` (`labels.example.com/team`); any other name is written `["billing address"]` or `"billing address"` in field position. The reserved words `true`, `false` and `in` may be field names anywhere; `and`, `or` and `not` only when an operator follows (`not=1`).
 - **Cross-field comparison** — compare two fields by referencing the right-hand one: `cpu>[cpu_limit]`, `start<[end]`. A missing right-hand field makes the comparison false.
 - **Implicit AND** — `state=draft total>1000` parses identically to the explicit form.
 - **Array quantifiers** — `@all(inner)`, `@any(inner)` (alias for `@(...)`), `@none(inner)` complement `@first` / `@last`.

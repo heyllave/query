@@ -69,7 +69,7 @@ func TestString(t *testing.T) {
 				Base:     &QualifierExpr{Field: FieldPath{"items"}, Operator: token.Eq, Value: Value{Raw: "a"}},
 				Selector: "first",
 			},
-			want: "items=a@first",
+			want: "items=a @first",
 		},
 		{
 			name: "selector inner",
@@ -77,7 +77,7 @@ func TestString(t *testing.T) {
 				Base:  &QualifierExpr{Field: FieldPath{"items"}, Operator: token.Eq, Value: Value{Raw: "a"}},
 				Inner: &QualifierExpr{Field: FieldPath{"x"}, Operator: token.Eq, Value: Value{Raw: "1"}},
 			},
-			want: "items=a@(x=1)",
+			want: "items=a @(x=1)",
 		},
 		{
 			name: "func call with field",

@@ -154,6 +154,30 @@ func NegateOperator(t Type) Type {
 	}
 }
 
+// IsKeyword reports whether the token type is a reserved word that the parser
+// also accepts as a field name when it appears in field position (AND, OR,
+// NOT, IN, true, false).
+func (t Type) IsKeyword() bool {
+	switch t { //nolint:exhaustive // only keyword tokens
+	case And, Or, Not, In, Boolean:
+		return true
+	default:
+		return false
+	}
+}
+
+// IsValueEnd reports whether a token type can end a value primary, so that an
+// arithmetic operator following it (after whitespace) continues the value:
+// `total>10 - 3`.
+func (t Type) IsValueEnd() bool {
+	switch t { //nolint:exhaustive // only value-ending tokens
+	case Integer, Float, Duration, Date, RParen, FieldRef:
+		return true
+	default:
+		return false
+	}
+}
+
 // IsLogical reports whether the token type is a logical operator (AND, OR).
 func (t Type) IsLogical() bool {
 	return t == And || t == Or
@@ -165,6 +189,10 @@ type Token struct {
 	Value  string
 	Pos    Position
 	Quoted bool // true if a String token came from a "..."-quoted literal
+	// Raw is the source text of an unquoted value token before escape
+	// sequences were decoded (so `a\(b` keeps its backslash). Empty when the
+	// source text and Value are identical.
+	Raw string
 }
 
 // String returns a debug representation of the token.

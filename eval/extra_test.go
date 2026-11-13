@@ -314,11 +314,11 @@ func TestToTime(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := toTime(tt.input)
-			if tt.wantErr && !got.IsZero() {
-				t.Errorf("expected zero time, got %v", got)
+			got, ok := toTime(tt.input)
+			if tt.wantErr && ok {
+				t.Errorf("expected no time, got %v", got)
 			}
-			if !tt.wantErr && got.IsZero() {
+			if !tt.wantErr && (!ok || got.IsZero()) {
 				t.Errorf("unexpected zero time")
 			}
 		})
@@ -338,7 +338,7 @@ func TestToDuration(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := toDuration(tt.input); got != tt.want {
+			if got, _ := toDuration(tt.input); got != tt.want {
 				t.Errorf("got %v, want %v", got, tt.want)
 			}
 		})

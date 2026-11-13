@@ -126,40 +126,7 @@ func toSlice(v any) ([]any, bool) {
 // Other: accessor always returns (nil, false).
 func elementAccessor(elem any) func(string) (any, bool) {
 	if m, ok := elem.(map[string]any); ok {
-		return func(f string) (any, bool) {
-			v, ok := m[f]
-			return v, ok
-		}
+		return MapAccessor(m)
 	}
-	rv := reflect.ValueOf(elem)
-	if rv.Kind() == reflect.Pointer {
-		if rv.IsNil() {
-			return func(string) (any, bool) { return nil, false }
-		}
-		rv = rv.Elem()
-	}
-	if rv.Kind() != reflect.Struct {
-		return func(string) (any, bool) { return nil, false }
-	}
-	t := rv.Type()
-	tagMap := make(map[string]int, t.NumField())
-	for i := range t.NumField() {
-		tag := t.Field(i).Tag.Get("query")
-		if tag == "" || tag == "-" {
-			continue
-		}
-		name, _ := parseTag(tag)
-		tagMap[name] = i
-	}
-	return func(f string) (any, bool) {
-		idx, ok := tagMap[f]
-		if !ok {
-			return nil, false
-		}
-		fv := rv.Field(idx)
-		if !fv.IsValid() {
-			return nil, false
-		}
-		return fv.Interface(), true
-	}
+	return StructAccessor(elem)
 }
