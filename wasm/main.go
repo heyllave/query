@@ -26,12 +26,12 @@ import (
 )
 
 func main() {
-	js.Global().Set("queryParse", js.FuncOf(jsParse))
-	js.Global().Set("queryValidate", js.FuncOf(jsValidate))
-	js.Global().Set("queryStringify", js.FuncOf(jsStringify))
-	js.Global().Set("queryParseAndValidate", js.FuncOf(jsParseAndValidate))
-	js.Global().Set("queryMatch", js.FuncOf(jsMatch))
-	js.Global().Set("queryEval", js.FuncOf(jsEval))
+	js.Global().Set("queryParse", js.FuncOf(guard(jsParse)))
+	js.Global().Set("queryValidate", js.FuncOf(guard(jsValidate)))
+	js.Global().Set("queryStringify", js.FuncOf(guard(jsStringify)))
+	js.Global().Set("queryParseAndValidate", js.FuncOf(guard(jsParseAndValidate)))
+	js.Global().Set("queryMatch", js.FuncOf(guard(jsMatch)))
+	js.Global().Set("queryEval", js.FuncOf(guard(jsEval)))
 
 	// Block forever so the WASM module stays alive
 	select {}

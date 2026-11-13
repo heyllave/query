@@ -95,6 +95,14 @@ jobs:
       - name: Print coverage summary
         run: go tool cover -func=coverage.out | tail -1
 
+      - name: Run the example programs
+        run: go test -count=1 ./examples/
+
+      # A short fuzz pass on every push; the seed corpus already runs as unit
+      # tests above, this explores from it. `make fuzz FUZZTIME=5m` for more.
+      - name: Fuzz (short)
+        run: make fuzz FUZZTIME=20s
+
       - name: Upload coverage artifact
         uses: actions/upload-artifact@v4
         continue-on-error: true

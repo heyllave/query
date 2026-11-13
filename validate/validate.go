@@ -453,7 +453,7 @@ func (v *Validator) validatePresence(p *ast.PresenceExpr) {
 		v.addError(ErrFieldNotFound, p.Position, fieldName, "", "unknown field %q", fieldName)
 		return
 	}
-	if !cfg.AllowsOp(OpPresence) {
+	if !v.opGloballyAllowed(OpPresence) || !cfg.AllowsOp(OpPresence) {
 		v.addError(ErrOperatorNotAllowed, p.Position, fieldName, string(OpPresence),
 			"presence check is not allowed for field %q", fieldName)
 	}

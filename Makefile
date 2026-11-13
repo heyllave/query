@@ -1,4 +1,4 @@
-.PHONY: build test coverage lint fmt vet check clean wasm
+.PHONY: build test coverage lint fmt vet check clean wasm fuzz examples
 
 GO       := go
 GOTEST   := $(GO) test
@@ -36,3 +36,16 @@ clean:
 
 wasm:
 	cd wasm && $(MAKE) build
+
+# Fuzz the parser, the value grammar and the evaluator for FUZZTIME each
+# (default 30s). Seeds run as ordinary tests under `make test`.
+FUZZTIME ?= 30s
+fuzz:
+	$(GOTEST) -run=^$$ -fuzz=^FuzzParse$$ -fuzztime=$(FUZZTIME) ./parser/
+	$(GOTEST) -run=^$$ -fuzz=^FuzzParseValue$$ -fuzztime=$(FUZZTIME) ./parser/
+	$(GOTEST) -run=^$$ -fuzz=^FuzzCompileMatch$$ -fuzztime=$(FUZZTIME) ./eval/
+	$(GOTEST) -run=^$$ -fuzz=^FuzzCompileValue$$ -fuzztime=$(FUZZTIME) ./eval/
+
+# Run every example program the way the README shows.
+examples:
+	$(GOTEST) -count=1 ./examples/

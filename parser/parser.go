@@ -518,7 +518,10 @@ func (p *parser) parseValuePrimary() *ast.Value {
 		p.advance()
 		// Preserve grouping in Raw for faithful round-trip — the AST itself
 		// doesn't have a value-group node, but the Raw text retains parens.
-		inner.Raw = "(" + inner.Raw + ")"
+		// A grouped literal is just the literal, so only arithmetic keeps them.
+		if inner.Type == ast.ValueArith {
+			inner.Raw = "(" + inner.Raw + ")"
+		}
 		return inner
 	case token.Ident:
 		// An Ident in value position is either a function call (now(),
