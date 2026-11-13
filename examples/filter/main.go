@@ -5,7 +5,9 @@
 // or any context where you filter objects without a database.
 //
 // Covered:
-//   - equality / not-equal / wildcard / presence
+//   - equality / not-equal / wildcard (and its negation) / presence
+//   - field transforms on the left side (lower(name)=john*) from a small
+//     allowlist; a function-wrapped qualifier has FieldFunc set and no Field
 //   - logical AND / OR / NOT / grouping
 //   - selectors @first / @last / @(...) / @any / @all / @none over slice fields
 //     where elements are map[string]any (the JSON-ish shape)
@@ -42,41 +44,74 @@ func (v *filterVisitor) VisitUnary(e *ast.UnaryExpr) predicate {
 	return func(obj map[string]any) bool { return !inner(obj) }
 }
 
+// transforms are the field functions this filter supports on the left side
+// of a comparison (lower(name)=john*). A consumer picks its own set; anything
+// else is rejected by lookup below rather than silently matching nothing.
+var transforms = map[string]func(string) string{
+	"lower": strings.ToLower,
+	"upper": strings.ToUpper,
+	"trim":  strings.TrimSpace,
+}
+
+// lookup resolves the left side of a qualifier against a record: the field
+// itself, or the field transformed by the qualifier's function. A function
+// outside transforms, or one not applied to a single field, is unsupported
+// and reads as missing.
+func lookup(e *ast.QualifierExpr, obj map[string]any) (string, bool) {
+	if !e.HasFieldFunc() {
+		val, ok := obj[e.Field.String()]
+		if !ok || val == nil {
+			return "", false
+		}
+		return fmt.Sprint(val), true
+	}
+	fn, known := transforms[e.FieldFunc.Name]
+	if !known || len(e.FieldFunc.Args) != 1 || e.FieldFunc.Args[0].Field == nil {
+		return "", false
+	}
+	val, ok := obj[e.FieldFunc.Args[0].Field.String()]
+	if !ok || val == nil {
+		return "", false
+	}
+	return fn(fmt.Sprint(val)), true
+}
+
 func (v *filterVisitor) VisitQualifier(e *ast.QualifierExpr) predicate {
-	field := e.Field.String()
 	expected := e.Value.Any()
 
 	if e.IsWildcard() {
 		pattern := e.Value.Str
+		negate := e.Operator == token.Neq
 		return func(obj map[string]any) bool {
-			val, ok := obj[field]
+			s, ok := lookup(e, obj)
 			if !ok {
 				return false
 			}
-			s := fmt.Sprint(val)
+			var matched bool
 			switch {
 			case strings.HasPrefix(pattern, "*") && strings.HasSuffix(pattern, "*"):
-				return strings.Contains(s, pattern[1:len(pattern)-1])
+				matched = strings.Contains(s, pattern[1:len(pattern)-1])
 			case strings.HasPrefix(pattern, "*"):
-				return strings.HasSuffix(s, pattern[1:])
+				matched = strings.HasSuffix(s, pattern[1:])
 			case strings.HasSuffix(pattern, "*"):
-				return strings.HasPrefix(s, pattern[:len(pattern)-1])
+				matched = strings.HasPrefix(s, pattern[:len(pattern)-1])
 			default:
-				return s == pattern
+				matched = s == pattern
 			}
+			return matched != negate
 		}
 	}
 
 	return func(obj map[string]any) bool {
-		val, ok := obj[field]
+		s, ok := lookup(e, obj)
 		if !ok {
 			return false
 		}
 		switch e.Operator {
 		case token.Eq:
-			return fmt.Sprint(val) == fmt.Sprint(expected)
+			return s == fmt.Sprint(expected)
 		case token.Neq:
-			return fmt.Sprint(val) != fmt.Sprint(expected)
+			return s != fmt.Sprint(expected)
 		default:
 			return false
 		}
@@ -182,6 +217,8 @@ func main() {
 	}
 	demo("state=draft AND name=John*", scalar)
 	demo("name=*son", scalar)
+	demo("name!=John*", scalar)
+	demo("lower(name)=john*", scalar)
 	demo("NOT state=published", scalar)
 
 	withLists := []map[string]any{

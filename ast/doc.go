@@ -2,13 +2,16 @@
 //
 // It provides the node types, a generic [Visitor] for transforming the AST
 // into any target representation (SQL, JSON, filter functions, React components),
-// and traversal utilities like [Walk], [Fields], and [Qualifiers].
+// and traversal utilities like [Walk], [Fields], [Calls], and [Qualifiers].
+// [Walk] visits function calls wherever they occur, and [String] prints a
+// tree as a query that parses back to the same tree.
 //
 // # Node Types
 //
 //   - [BinaryExpr]   — logical AND / OR
 //   - [UnaryExpr]    — logical NOT
-//   - [QualifierExpr] — field op value (e.g., state=draft)
+//   - [QualifierExpr] — field op value (e.g., state=draft); with FieldFunc set the
+//     left side is a function (lower(name)=john) and Field is empty
 //   - [PresenceExpr] — field existence check (e.g., tire_size)
 //   - [GroupExpr]    — parenthesized expression
 //   - [SelectorExpr] — @first / @last / @(expr)

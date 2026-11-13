@@ -10,7 +10,13 @@
 //   - [token] — lexical token types and position tracking
 //   - [ast] — AST node types, Visitor pattern, Walk, String
 //   - [parser] — lexer and recursive descent parser
-//   - [validate] — field configuration and AST validation
+//   - [validate] — field configuration, AST validation and sandboxing options
+//   - [eval] — compile a query to a predicate ([eval.Compile]) or a value
+//     ([eval.CompileValue]) and run it against maps or structs
+//
+// The command in cmd/query explains a query's tokens and tree, and the
+// wasm and clients directories hold the JavaScript and Dart bindings, which
+// run the same engine and the same conformance corpus.
 //
 // # Basic usage
 //
@@ -26,6 +32,18 @@
 //	if err := query.Validate(expr, fields); err != nil {
 //	    log.Fatal(err)
 //	}
+//
+//	ok, err := query.Match("state=draft AND total>50000", fields,
+//	    map[string]any{"state": "draft", "total": 60000}) // true
+//
+// # Guarantees
+//
+// Parsing never panics on any input, and [ast.String] of a parsed tree
+// parses back to the same tree; both are fuzzed. A query that compiles can
+// be matched against any record shape. A record value that cannot be read
+// as the literal's type makes the comparison false rather than comparing as
+// zero, and a missing field makes every comparison false, including through
+// functions.
 //
 // # Code generation via Visitor
 //

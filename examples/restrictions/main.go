@@ -70,9 +70,14 @@ func main() {
 	fmt.Println("  Scenario: prevent deeply nested queries (DoS protection)")
 	fmt.Println()
 
+	// Depth counts nesting, not length: a chain of one connective (or an IN
+	// list of any size) is one level, so a long flat search passes while a
+	// query that alternates connectives inside groups does not.
 	depthQueries := []string{
 		"state=draft",
 		"state=draft AND total>50000",
+		"state=draft total>1 year=2026 name=a* state!=x total<9",
+		"state IN (draft, issued, paid, void, archived)",
 		"(state=draft OR state=issued) AND total>50000",
 		"((state=draft OR state=issued) AND total>50000) OR year=2026",
 	}

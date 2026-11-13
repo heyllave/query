@@ -235,6 +235,8 @@ first(tags)               // first/last element
 int("42")                 // parse to int64; float(...), string(...)
 ```
 
+Every built-in declares its argument count, so `lower(a, b)` or a misspelled name is a compile error rather than a predicate that is silently false. A built-in given a missing field (nil) resolves to no value, so `len(name)>3` does not match a record without a name.
+
 ## Custom Functions
 
 Register domain-specific functions:
@@ -617,16 +619,21 @@ go run ./cmd/query explain --json "status=active"
 See the [`examples/`](examples/) directory for runnable programs:
 
 ```bash
-go run ./examples/sql "state=draft AND total>50000"
+go run ./examples/sql "state=draft AND total>50000"   # schema-validated, allowlisted SQL
 go run ./examples/json "(state=draft OR state=issued) AND total>50000"
-go run ./examples/filter
+go run ./examples/explain                               # tokens, tree, fields, depth
+go run ./examples/filter                                # in-memory filter via Visitor
+go run ./examples/selector                              # @first / @any / @all / @none
 go run ./examples/functions
 go run ./examples/value
 go run ./examples/rules
 go run ./examples/struct
 go run ./examples/restrictions
 go run ./examples/customvalidator
+go run ./examples/colombia
 ```
+
+Every example runs under `go test ./examples/` (see `examples/examples_test.go`), so they stay in step with the library.
 
 ## License
 

@@ -21,19 +21,22 @@ import (
 )
 
 type jsonNode struct {
-	Type     string      `json:"type"`
-	Op       string      `json:"op,omitempty"`
-	Field    string      `json:"field,omitempty"`
-	Value    any         `json:"value,omitempty"`
-	EndValue any         `json:"endValue,omitempty"`
-	Wildcard bool        `json:"wildcard,omitempty"`
-	Selector string      `json:"selector,omitempty"`
-	Base     *jsonNode   `json:"base,omitempty"`
-	Inner    *jsonNode   `json:"inner,omitempty"`
-	Left     *jsonNode   `json:"left,omitempty"`
-	Right    *jsonNode   `json:"right,omitempty"`
-	Expr     *jsonNode   `json:"expr,omitempty"`
-	Children []*jsonNode `json:"children,omitempty"`
+	Type  string `json:"type"`
+	Op    string `json:"op,omitempty"`
+	Field string `json:"field,omitempty"`
+	// FieldFunc is the source form of the function a qualifier compares
+	// (lower(name) in lower(name)=john); Field is empty for such a node.
+	FieldFunc string      `json:"fieldFunc,omitempty"`
+	Value     any         `json:"value,omitempty"`
+	EndValue  any         `json:"endValue,omitempty"`
+	Wildcard  bool        `json:"wildcard,omitempty"`
+	Selector  string      `json:"selector,omitempty"`
+	Base      *jsonNode   `json:"base,omitempty"`
+	Inner     *jsonNode   `json:"inner,omitempty"`
+	Left      *jsonNode   `json:"left,omitempty"`
+	Right     *jsonNode   `json:"right,omitempty"`
+	Expr      *jsonNode   `json:"expr,omitempty"`
+	Children  []*jsonNode `json:"children,omitempty"`
 }
 
 type jsonVisitor struct{}
@@ -65,6 +68,9 @@ func (v *jsonVisitor) VisitQualifier(e *ast.QualifierExpr) *jsonNode {
 		Field:    e.Field.String(),
 		Value:    valueJSON(&e.Value),
 		Wildcard: e.IsWildcard(),
+	}
+	if e.HasFieldFunc() {
+		n.FieldFunc = ast.String(e.FieldFunc)
 	}
 	if e.IsRange() {
 		n.Op = ".."

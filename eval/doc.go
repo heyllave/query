@@ -32,6 +32,22 @@
 // zero, a missing field), Eval returns [ErrNoValue] rather than a
 // silently-wrong zero.
 //
+// # Functions
+//
+// Built-ins cover strings, numbers, dates, lists and coercions; register
+// more with [WithFunctions]. A call to an unregistered function, or with an
+// argument count outside the function's [Arity], is a compile error
+// ([ErrUnknownFunction], [ErrArity]). A function that returns nil or an error
+// resolves to no value, so the comparison around it is false; a missing
+// field is passed to a function as nil, and the built-ins treat it the same
+// way.
+//
+// # Records
+//
+// [Program.Match] reads a map, resolving a dotted field through nested maps
+// when the flat key is absent; [TypedProgram.MatchStruct] reads `query`
+// tags, dereferencing pointer fields. Every Go numeric kind is read.
+//
 // # Restrict allowed operations
 //
 //	prog, err := eval.Compile(q, fields,
@@ -39,6 +55,10 @@
 //	    eval.WithAllowedFields("state", "name"),              // only these fields
 //	    eval.WithMaxDepth(3),                                 // limit nesting
 //	)
+//
+// The field and operator restrictions are enforced by the validator after
+// field resolution, so they also bind a custom validator and reach function
+// arguments. Depth counts nesting, not the length of a connective chain.
 //
 // # Custom data accessor
 //
