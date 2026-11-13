@@ -21,7 +21,8 @@ func defaultOpts() options {
 // Option configures query compilation.
 type Option func(*options)
 
-// WithMaxLength sets the maximum query string length. 0 disables the limit.
+// WithMaxLength sets the maximum query string length. 0 disables the limit;
+// nesting stays bounded by [parser.MaxNesting] either way.
 func WithMaxLength(n int) Option {
 	return func(o *options) { o.maxLength = n }
 }
@@ -33,7 +34,9 @@ func WithMaxDepth(n int) Option {
 }
 
 // WithAllowedOps restricts which operators are permitted in the query.
-// If empty, all operators from the field config are allowed.
+// If empty, all operators from the field config are allowed. A function used
+// as a predicate counts as a wildcard on text fields and as equality on any
+// other (see package validate).
 func WithAllowedOps(ops ...validate.Op) Option {
 	return func(o *options) { o.allowedOps = ops }
 }

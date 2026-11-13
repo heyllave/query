@@ -107,10 +107,14 @@ func Fields(expr Expression) []FieldPath {
 
 // Calls returns every function call in the expression, in walk order,
 // wherever it occurs (predicate, field transform, value position, argument).
+// A call node the tree holds more than once is returned once: the qualifiers
+// that `lower(name) IN (a, b)` lowers to share their left-hand call.
 func Calls(expr Expression) []*FuncCallExpr {
 	var result []*FuncCallExpr
+	seen := make(map[*FuncCallExpr]bool)
 	Walk(expr, func(e Expression) bool {
-		if fc, ok := e.(*FuncCallExpr); ok {
+		if fc, ok := e.(*FuncCallExpr); ok && !seen[fc] {
+			seen[fc] = true
 			result = append(result, fc)
 		}
 		return true

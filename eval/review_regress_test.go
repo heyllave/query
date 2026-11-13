@@ -188,8 +188,9 @@ func (regressCV) GetFieldConfig(n string) (validate.FieldConfig, bool) {
 func (regressCV) ValidateCustomRules(ast.Expression) error { return nil }
 
 func TestRegress_FunctionsAllowedThroughOps(t *testing.T) {
-	// Ordering through a function over a text field stays allowed: that is
-	// the only way to order on a derived number.
+	// Ordering through a function over a text field stays allowed when the
+	// field allows wildcards: that is the only way to order on a derived
+	// number.
 	for _, q := range []string{"len(name)>5", "lower(name)=john*", "len(name):1..5"} {
 		if _, err := Compile(q, regressFields); err != nil {
 			t.Errorf("Compile(%q) error: %v", q, err)
@@ -211,6 +212,140 @@ func TestRegress_BusinessDaysBounded(t *testing.T) {
 		}
 	case <-time.After(5 * time.Second):
 		t.Fatal("addBusinessDays with a huge count did not return")
+	}
+}
+
+// The result must not depend on how the walk is done: skipping whole weeks
+// has to land on the same day as stepping one day at a time, from every
+// weekday, in both directions, with and without holidays in the way.
+func TestRegress_BusinessDaysMatchDayByDayWalk(t *testing.T) {
+	walk := func(start time.Time, n int, holidays map[string]bool) time.Time {
+		step := 1
+		if n < 0 {
+			step, n = -1, -n
+		}
+		for n > 0 {
+			start = start.AddDate(0, 0, step)
+			if isBusinessDay(start, holidays) {
+				n--
+			}
+		}
+		return start
+	}
+	base := time.Date(2026, 3, 2, 9, 30, 0, 0, time.UTC) // a Monday
+	holidayList := []any{
+		time.Date(2026, 3, 16, 0, 0, 0, 0, time.UTC),
+		time.Date(2026, 4, 3, 0, 0, 0, 0, time.UTC),
+		time.Date(2026, 12, 25, 0, 0, 0, 0, time.UTC),
+		time.Date(2025, 12, 25, 0, 0, 0, 0, time.UTC),
+	}
+	holidays := holidaySet(holidayList)
+	for offset := 0; offset < 7; offset++ {
+		start := base.AddDate(0, 0, offset)
+		for _, n := range []int{0, 1, 4, 5, 6, 9, 10, 11, 23, 64, 250, 251, 1000, -1, -5, -6, -10, -11, -64, -250, -1000} {
+			got, err := fnAddBusinessDays(start, n)
+			if want := walk(start, n, nil); err != nil || !want.Equal(got.(time.Time)) {
+				t.Errorf("addBusinessDays(%s, %d) = %v, %v; the walk gives %s", start.Format("Mon 2006-01-02"), n, got, err, want.Format("Mon 2006-01-02"))
+			}
+			got, err = fnAddBusinessDays(start, n, holidayList)
+			if want := walk(start, n, holidays); err != nil || !want.Equal(got.(time.Time)) {
+				t.Errorf("addBusinessDays(%s, %d, holidays) = %v, %v; the walk gives %s", start.Format("Mon 2006-01-02"), n, got, err, want.Format("Mon 2006-01-02"))
+			}
+		}
+	}
+}
+
+// The largest accepted count must cost no more than a small one: at the cap
+// the old day-by-day walk took a third of a second per record.
+func TestRegress_BusinessDaysCostIndependentOfCount(t *testing.T) {
+	prog, err := Compile("d<addBusinessDays(d, 3999999) AND d>addBusinessDays(d, -3999999)", regressFields)
+	if err != nil {
+		t.Fatalf("compile: %v", err)
+	}
+	rec := map[string]any{"d": time.Date(2026, 3, 2, 0, 0, 0, 0, time.UTC)}
+	start := time.Now()
+	for i := 0; i < 200; i++ {
+		if !prog.Match(rec) {
+			t.Fatal("Match = false, want true")
+		}
+	}
+	if took := time.Since(start); took > 2*time.Second {
+		t.Errorf("200 matches took %v; the walk is linear in the day count again", took)
+	}
+}
+
+func TestRegress_Gaps(t *testing.T) {
+	type yamlMap = map[any]any
+	type labelSet map[string]string
+	tests := []struct {
+		name  string
+		query string
+		rec   map[string]any
+		want  bool
+	}{
+		// A label key with dots inside a nested map.
+		{"dotted key in nested map", "labels.example.com/team=x", map[string]any{"labels": map[string]any{"example.com/team": "x"}}, true},
+		{"dotted key in string map", "labels.app.kubernetes.io/name=x", map[string]any{"labels": map[string]string{"app.kubernetes.io/name": "x"}}, true},
+		{"dotted key beside a shorter one", "labels.a.b=x", map[string]any{"labels": map[string]any{"a": "scalar", "a.b": "x"}}, true},
+		{"flat prefix then nested", "labels.a.b=x", map[string]any{"labels.a": map[string]any{"b": "x"}}, true},
+		{"fully nested still wins", "labels.a.b=x", map[string]any{"labels": map[string]any{"a": map[string]any{"b": "x"}}}, true},
+		{"yaml map", "labels.dev=x", map[string]any{"labels": yamlMap{"dev": "x"}}, true},
+		{"named map type", "labels.dev=x", map[string]any{"labels": labelSet{"dev": "x"}}, true},
+		{"nil map", "labels.dev=x", map[string]any{"labels": map[string]any(nil)}, false},
+		{"scalar where a map is expected", "labels.dev=x", map[string]any{"labels": "dev"}, false},
+		{"deep path over a shallow record", "labels.a.b.c.d.e.f.g.h.i.j.k.l.m.n.o.p=x", map[string]any{"labels": map[string]any{"a": map[string]any{"b": map[string]any{}}}}, false},
+		// NOT IN: false for a listed value and, like SQL, for a missing field.
+		{"not in miss", "name NOT IN (a, b)", map[string]any{"name": "c"}, true},
+		{"not in hit", "name NOT IN (a, b)", map[string]any{"name": "a"}, false},
+		{"not in missing field", "name NOT IN (a, b)", map[string]any{}, false},
+		{"not in wildcard", "name NOT IN (jo*, x)", map[string]any{"name": "john"}, false},
+		// IN on a function.
+		{"function in", "lower(name) IN (ab, cd)", map[string]any{"name": "AB"}, true},
+		{"function not in", "lower(name) NOT IN (ab, cd)", map[string]any{"name": "AB"}, false},
+		{"function in numbers", "len(name) IN (1, 2)", map[string]any{"name": "AB"}, true},
+		// A term next to a group is an implicit AND, not a call.
+		{"term then group", "name (n=1 OR n=2)", map[string]any{"name": "x", "n": 2}, true},
+		// Arithmetic in arguments and signed operands.
+		{"arithmetic argument", "n=abs(1-8)", map[string]any{"n": 7}, true},
+		{"signed operand", "n=10*-3", map[string]any{"n": -30}, true},
+		// An address is one value.
+		{"cidr", "name=10.0.0.1/24", map[string]any{"name": "10.0.0.1/24"}, true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			prog, err := Compile(tt.query, regressFields)
+			if err != nil {
+				t.Fatalf("compile %q: %v", tt.query, err)
+			}
+			if got := prog.Match(tt.rec); got != tt.want {
+				t.Errorf("Match(%q, %v) = %v, want %v", tt.query, tt.rec, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestRegress_RestrictedFieldThroughCompile(t *testing.T) {
+	for _, q := range []string{
+		`startsWith(secret, "a")`, `contains(secret, "b")`, `lower(secret)>="a"`,
+		"len(secret)>2", "n>len(secret)", "name!=[secret]", "secret NOT IN (a)",
+	} {
+		if _, err := Compile(q, regressFields); err == nil {
+			t.Errorf("Compile(%q) error = nil; secret allows only =", q)
+		}
+	}
+	if _, err := Compile(`startsWith(name, "a")`, regressFields, WithAllowedOps(validate.OpEq)); err == nil {
+		t.Error("a predicate compiled under WithAllowedOps(OpEq)")
+	}
+}
+
+func TestRegress_AbsOfMinInt(t *testing.T) {
+	prog, err := CompileValue("abs(-9223372036854775808)", nil)
+	if err != nil {
+		t.Fatalf("compile: %v", err)
+	}
+	got, err := prog.Eval(nil)
+	if f, ok := got.(float64); err != nil || !ok || f != 9223372036854775808 {
+		t.Errorf("abs(MinInt64) = %v (%T), %v; want 9.223372036854775808e18", got, got, err)
 	}
 }
 

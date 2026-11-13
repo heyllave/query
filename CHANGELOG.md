@@ -20,11 +20,35 @@ semantic versioning once the first tag is cut.
   function-wrapped qualifiers.
 - `WithAllowedOps` and `WithAllowedFields` are enforced inside the validator,
   so they also bind a custom validator, function arguments and bracketed field
-  references. A field's own operators apply through a function for `=`, `!=`,
-  wildcard and presence.
+  references.
+- A field's own operators bound every way a query can read it: through a
+  function (ordering a function's result over a text field needs the wildcard
+  operator), from the value side of a comparison (`name!=[secret]`,
+  `n>len(secret)`), and through a predicate function (`startsWith(secret, "a")`
+  needs the wildcard operator, also under `WithAllowedOps`). A field that
+  allows only `=` can no longer be read prefix by prefix.
 - `daysAgo`, `addDays` and `addBusinessDays` accept at most
-  ±`eval.MaxCalendarDays` days, so a large literal cannot stall evaluation.
-- Dotted fields descend nested maps (`labels.dev` reads `data["labels"]["dev"]`).
+  ±`eval.MaxCalendarDays` days. `addBusinessDays` skips whole weeks outside the
+  holiday calendar, so the largest count costs the same as the smallest (it
+  used to walk a third of a second per record at the cap).
+- Dotted fields descend nested maps (`labels.dev` reads `data["labels"]["dev"]`),
+  including keys that contain dots (`labels.example.com/team` reads
+  `data["labels"]["example.com/team"]`) and any map with string keys.
+- `x NOT IN (a, b)` no longer parses as `x AND NOT=a ...`; it is `x!=a AND x!=b`.
+  `IN` and `NOT IN` accept a function on the left (`lower(name) IN (a, b)`).
+- A term followed by a group (`urgent (a OR b)`) is an implicit AND, not a call
+  to `urgent`; a call is a name directly followed by `(`.
+- Unicode spaces separate terms; a no-break space no longer glues two words
+  into one field name.
+- `ip=10.0.0.1/24` is one string instead of the string `10.0.0.1` divided by 24.
+- A duration literal too large for `time.Duration` is a parse error instead of
+  a wrapped value; `abs` of the smallest integer no longer returns it negative.
+- The parser refuses more than `parser.MaxNesting` levels of nesting
+  (`nestingTooDeep`), so a query cannot exhaust the stack when the length limit
+  is disabled.
+- `ast.String` prints a quoted field argument (`f(["cpu limit"])`) and a
+  grouped string argument (`f((draft))`) in a form that parses back.
+- A failed term is reported once rather than twice.
 - Presence (`name`) is false for nil, `""` and empty lists or maps.
 - `name!=jo*` negates the wildcard; `ast.SQLOperator` renders `NOT LIKE` (#21).
 - A date literal without a time denotes the whole UTC day, so
@@ -65,7 +89,10 @@ semantic versioning once the first tag is cut.
 
 - Datetime literals (`created_at>=2026-01-01T10:00:00Z`); quoted timestamps on
   date fields are read as dates.
-- Signed literals and wildcards in function arguments and `IN` lists.
+- Signed literals and wildcards in function arguments and `IN` lists; arithmetic
+  and bracketed field names in arguments (`addDays(d, 1-8)`, `abs([cpu-limit])`);
+  signed operands (`n>10*-3`).
+- `NOT IN`, and `IN` on a function.
 - Reserved words as field names where unambiguous (`true=1`, `not=1`); quoted
   and bracket-quoted field names (`"foo bar"=1`, `["a.b/c"]=1`).
 - `\*` as a literal star inside wildcard patterns.

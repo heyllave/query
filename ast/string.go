@@ -2,6 +2,8 @@ package ast
 
 import (
 	"strings"
+	"unicode"
+	"unicode/utf8"
 
 	"github.com/heyllave/query/token"
 )
@@ -148,14 +150,21 @@ func writeFuncCall(buf *strings.Builder, fc *FuncCallExpr) {
 		}
 		switch {
 		case arg.Field != nil:
-			buf.WriteString(arg.Field.String())
+			// Same forms as a field anywhere else, so a name written
+			// ["cpu limit"] does not print as two bare words.
+			writeFieldName(buf, *arg.Field)
 		case arg.Value != nil:
-			if arg.Value.Type == ValueArith {
+			switch {
+			case arg.Value.Type == ValueArith:
 				// Arithmetic is an argument only as a paren group.
 				buf.WriteByte('(')
 				writeValue(buf, arg.Value)
 				buf.WriteByte(')')
-			} else {
+			case arg.Value.Type == ValueString && !arg.Value.Wildcard && !arg.Value.Quoted && startsLikeName(arg.Value.Raw):
+				// A bare word in an argument is a field, so a string that
+				// was written as a paren group (f((draft))) is quoted.
+				writeQuotedString(buf, arg.Value.Str)
+			default:
 				writeValue(buf, arg.Value)
 			}
 		case arg.Call != nil:
@@ -163,6 +172,16 @@ func writeFuncCall(buf *strings.Builder, fc *FuncCallExpr) {
 		}
 	}
 	buf.WriteByte(')')
+}
+
+// startsLikeName reports whether s begins the way an identifier does, so that
+// printed bare in a function argument it would be read as a field name.
+func startsLikeName(s string) bool {
+	if s == "" {
+		return false
+	}
+	c := s[0]
+	return c == '_' || (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || c >= utf8.RuneSelf
 }
 
 // writeValue serializes a Value to the buffer. Function-valued expressions
@@ -268,7 +287,19 @@ func unquotedSafe(raw string) bool {
 			return false
 		}
 	}
-	return true
+	return !hasUnicodeSpace(raw)
+}
+
+// hasUnicodeSpace reports whether s holds a non-ASCII whitespace rune (a
+// no-break space, an ideographic space). The lexer separates terms on those
+// like on an ordinary space, so text containing one must be quoted.
+func hasUnicodeSpace(s string) bool {
+	for _, r := range s {
+		if r >= utf8.RuneSelf && unicode.IsSpace(r) {
+			return true
+		}
+	}
+	return false
 }
 
 // endsWithLoneBackslash reports whether raw ends in a backslash that is not
@@ -401,14 +432,14 @@ func FieldRefString(fp FieldPath, quoted bool) string {
 
 // fieldRefNeedsQuote reports whether a field path must use the quoted bracket
 // form because a segment is empty or contains a character outside the bare
-// identifier alphabet (ASCII letters, any non-ASCII rune, digits, underscore,
-// hyphen, slash; not leading digit).
+// identifier alphabet (ASCII letters, any non-ASCII rune that is not
+// whitespace, digits, underscore, hyphen, slash; not leading digit).
 func fieldRefNeedsQuote(fp FieldPath) bool {
 	if len(fp) == 0 {
 		return true
 	}
 	for _, seg := range fp {
-		if seg == "" {
+		if seg == "" || hasUnicodeSpace(seg) {
 			return true
 		}
 		for i := 0; i < len(seg); i++ {

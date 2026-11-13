@@ -118,9 +118,9 @@ Evaluation semantics worth knowing:
 
 - **Equality on text is case-insensitive** (`state=Draft` matches `"draft"`), as are wildcards.
 - **A value that cannot be read as the literal's type never compares** — `n=0`, `n!=0` and `n<1` are all false when the record's `n` is `"abc"`, and `created_at<2026-01-01` is false for an unparseable date. Numbers compare exactly: every Go integer and float kind is read, and `price>3` against `3.5` is true.
-- **A missing or nil field** makes any comparison false, including through functions: `len(name)>3` does not match a record without a name.
+- **A missing or nil field** makes any comparison false, including through functions: `len(name)>3` does not match a record without a name. The negated operators are the one exception by construction: `total!>5` is `NOT total>5`, so it is true for a record without a total; `NOT IN` is not (`state NOT IN (a, b)` is `state!=a AND state!=b`, false without a state, as in SQL).
 - **Presence** (`name`) means the field exists and is non-empty: nil, `""` and an empty list or map count as absent.
-- **Dotted fields** read the flat key `"labels.dev"` first, then descend nested maps (`data["labels"]["dev"]`).
+- **Dotted fields** read the flat key `"labels.dev"` first, then descend nested maps (`data["labels"]["dev"]`). A key may itself contain dots: `labels.example.com/team` finds `data["labels"]["example.com/team"]`. Any map with string keys is descended, including `map[string]string` and the `map[any]any` a YAML decoder produces.
 - **A date literal without a time is a whole day**: `created_at=2026-09-28` matches 13:45 on that day, not only midnight.
 - **Literals follow the field's declared type**: `zip=90210` on a text field compares the text `"90210"`, and a quoted RFC 3339 string on a date field compares as a date. Arithmetic on a text or boolean field is a validation error (quote the value).
 
@@ -293,11 +293,19 @@ prog, err := eval.Compile(q, fields,
 
 The restrictions are enforced inside the validator, after field resolution, so they also bind a custom validator installed with `WithCustomValidator`, and they apply to fields referenced inside function arguments and bracketed field references.
 
-`WithAllowedOps` governs every comparison, including one whose left side is a function (`lower(name)=x`). A field's own `AllowedOps` also applies through a function for `=`, `!=`, wildcard and presence (`trim(secret)=a*` needs the wildcard operator on `secret`); ordering operators through a function over a text or boolean field (`len(name)>5`) are allowed, since that is the only way to order on a derived number.
+`WithAllowedOps` governs every comparison, including one whose left side is a function (`lower(name)=x`). A field's own `AllowedOps` bounds every way a query can read the field, not only `field op value`:
+
+- **Through a function** the operator must be in the field's list (`trim(secret)=a*` needs the wildcard operator on `secret`). A text field has no ordering operators of its own, so ordering a function's result (`len(name)>5`, `lower(name)>=m`) is allowed exactly when the field allows wildcards, which reveal as much.
+- **On the value side** (`name=[secret]`, `total>len(secret)`) the referenced field is checked against the same operator, mirrored.
+- **A predicate function** (`startsWith(secret, "a")`, `contains(tags, "x")`) needs the wildcard operator on each text field it reads and `=` on any other field, and the same operator in `WithAllowedOps` when that is set.
+
+So a field declared with only `=` can be tested for equality and nothing else.
 
 `WithMaxDepth` measures nesting (groups, negations, selectors and alternating connectives), not length: `a AND b AND c AND d` and an `IN` list of any size have depth 2. Use `WithMaxLength` to bound length.
 
-The built-in day-count functions (`daysAgo`, `addDays`, `addBusinessDays`) accept at most ±`eval.MaxCalendarDays` days (about 10,000 years), so a large literal cannot turn the business-day walk into a CPU sink.
+The built-in day-count functions (`daysAgo`, `addDays`, `addBusinessDays`) accept at most ±`eval.MaxCalendarDays` days (about 10,000 years). `addBusinessDays` skips whole weeks arithmetically outside the span of the holiday list, so its cost does not grow with the count.
+
+Independently of `WithMaxLength`, the parser refuses a query that nests groups, negations, selectors, parenthesised values or function calls more than `parser.MaxNesting` (128) levels deep (`nestingTooDeep`), so disabling the length limit cannot be used to exhaust the stack.
 
 ## Custom Validation Rules
 
@@ -445,6 +453,7 @@ Codegen via `Visitor[T]` is the consumer's responsibility — the library does n
 | `!>` `!>=` `!<` `!<=` | number, date, duration | Negated comparison (`total!>50000` ≡ `NOT total>50000`; missing field is `true`) |
 | `..` | number, date, duration | Inclusive range (`field:start..end`) |
 | `IN` | all literal types | List shorthand (`state IN (draft, issued)` desugars to OR chain) |
+| `NOT IN` | all literal types | `state NOT IN (draft, issued)` desugars to `state!=draft AND state!=issued` (false for a missing field) |
 | `<field>` (bare) | any | Presence — field exists and is non-empty (nil, `""`, empty list/map are absent) |
 | `@first` `@last` | list | Non-emptiness |
 | `@(...)` `@any(...)` | list | EXISTS — at least one element satisfies |
@@ -482,14 +491,16 @@ The language covers most of what general-purpose expression engines offer for fi
 - **Value-returning queries** — a query can compute and return a value (number, string, time, duration, or list), via `eval.CompileValue` → `Eval`, in addition to boolean predicates; see [Value Queries](#value-queries).
 - **Lists as values** — a function returning a slice is preserved as a list (`labels()` → `[]any{...}`); `len()` counts list elements; element extraction is a function (`first(tags)`), not a selector.
 - **Quoted strings** — `field="hello world"` with `\"`, `\\`, `\n`, `\t`, `\r` escapes.
-- **`IN` shorthand** — `state IN (draft, issued, paid)` desugars to an OR chain.
+- **`IN` shorthand** — `state IN (draft, issued, paid)` desugars to an OR chain, and `state NOT IN (...)` to an AND chain of `!=`. The left side may be a function: `lower(name) IN (a, b)`.
+- **Calls need no space** — a function call is a name directly followed by `(`. With a space it is a term and a group: `urgent (state=open OR state=new)` is `urgent AND (...)`.
 - **Case-insensitive keywords** — `and`/`or`/`not`/`in` accepted in any case.
 - **Negated comparisons** — `total!>50000` desugars to `NOT total>50000`; missing-field safe. The same holds through a function: `len(name)!>5`.
 - **Negated wildcards** — `name!=Jo*` is the negation of the pattern on a present field; `ast.SQLOperator` renders it as `NOT LIKE`.
 - **Datetime literals** — `created_at>=2026-01-01T10:00:00Z` (RFC 3339, optional fraction and zone) is an instant. A quoted timestamp on a date field is read the same way.
 - **Day literals** — a date without a time (`created_at=2026-09-28`) denotes the whole UTC day: `=` matches any instant in it, `!=` any instant outside it, `<=` anything before its end, `>` anything at or after its end, and a range `created_at:2026-01-01..2026-01-31` covers all of the 31st. A value stored at midnight reads the same either way, so pure date fields are unaffected. SQL backends should lower `=` on a day literal to `>= day AND < day+1` (see `examples/sql`).
-- **Non-ASCII terms** — a bare word may contain any non-ASCII character (`café`, `日本`), in field position or as a value.
-- **Signed literals in arguments and lists** — `addDays(d, -7)`, `n IN (-1, 2)`; wildcards are allowed in `IN` lists too.
+- **Non-ASCII terms** — a bare word may contain any non-ASCII character (`café`, `日本`), in field position or as a value. Unicode spaces (no-break, ideographic) separate terms like an ASCII space.
+- **Addresses and versions are one value** — a digit run with more than one dot is not a number, so `ip=10.0.0.1/24` is the string `10.0.0.1/24`, not a division.
+- **Signed literals in arguments and lists** — `addDays(d, -7)`, `n IN (-1, 2)`; wildcards are allowed in `IN` lists too. Arguments may be arithmetic (`addDays(d, 1-8)`), and an operand may be signed (`n>10*-3`).
 - **Escapes in unquoted values** — `\*`, `\(`, `\)` and `\\` stand for the literal character, including inside a wildcard pattern (`a\*b*` matches values starting with `a*b`).
 - **Unquoted values that contain letters are strings** — a UUID, a version (`1.2.3-beta`) or an e-mail address is one value even when it contains `-`, `+` or `/`; only runs made purely of numbers, operators, durations, parens, `[refs]` and calls are arithmetic. `10-3`, `10 - 3` and `10+3` all compute.
 - **Arithmetic in value position** — `total>=50000*1.1`, `created_at>=now()-7d`, `(50000+1000)*1.1` with `* / % > + -` precedence and paren override. Operands may be numeric literals, durations, dates, function results, and bracketed field references.

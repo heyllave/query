@@ -62,6 +62,7 @@ func FuzzCompileValue(f *testing.F) {
 		"1+2", "now()-7d", "upper(name)", "(1+2)*3", "1/0", "len(tags)", "[price]*2",
 		"9223372036854775807+1", "round(1.5, 400)", "sum(tags)", "avg(tags)", "min(1, 2.5)",
 		"string(now())", "int(\"12\")", "float(name)", "first(tags)", "[n]%0",
+		"string((A))", "abs(1-8)", "10*-3", "abs(-9223372036854775808)",
 	} {
 		f.Add(s)
 	}

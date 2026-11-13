@@ -115,6 +115,11 @@
   {"id": "err-leading-and", "desc": "a leading connective", "query": "AND state=draft", "expectError": true},
   {"id": "err-unclosed-paren", "desc": "an unclosed group", "query": "(state=draft", "expectError": true},
   {"id": "err-unclosed-quote", "desc": "an unterminated string", "query": "customer=\"Alice", "expectError": true},
+  {"id": "logic-not-in", "desc": "NOT IN lowers to an AND of inequalities", "query": "state NOT IN (draft, void)", "expect": [3, 4, 5, 6, 7, 8, 10, 11, 13, 14]},
+  {"id": "null-not-in-list", "desc": "NOT IN over a column with a NULL excludes the NULL row, as in SQL", "query": "country NOT IN (ES, IE, JP)", "expect": [1, 2, 3, 5, 6, 8, 10, 12, 13, 14, 15, 16]},
+  {"id": "func-in", "desc": "IN with a function on the left", "query": "lower(state) IN (paid, void)", "expect": [5, 6, 11, 14, 16]},
+  {"id": "func-not-in", "desc": "NOT IN with a function on the left", "query": "lower(state) NOT IN (draft, issued, paid)", "expect": [7, 8, 16]},
+  {"id": "logic-term-then-group", "desc": "a term followed by a group is an implicit AND, not a call", "query": "notes (state=draft OR state=void)", "expect": [1, 12, 15, 16]},
   {"id": "err-empty-in", "desc": "an empty IN list", "query": "state IN ()", "expectError": true},
   {"id": "err-arith-on-text", "desc": "arithmetic on a text column", "query": "state=10-3", "expectError": true},
   {"id": "err-presence-on-number", "desc": "presence is not among a numeric column's operators", "query": "total", "expectError": true}

@@ -305,8 +305,11 @@ func fnAbs(args ...any) (any, error) {
 		// Non-numeric input has no magnitude; report zero as an integer.
 		return int64(0), nil
 	case isInt:
+		if i == math.MinInt64 {
+			return -float64(i), nil // the magnitude does not fit an int64
+		}
 		if i < 0 {
-			return -i, nil // abs(math.MinInt64) wraps, matching Go's two's complement
+			return -i, nil
 		}
 		return i, nil
 	default:
@@ -564,9 +567,8 @@ func fnWeekday(args ...any) (any, error) {
 }
 
 // MaxCalendarDays bounds the day count accepted by daysAgo, addDays and
-// addBusinessDays: about 10,000 years, far beyond any real schedule, and small
-// enough that the business-day walk cannot be turned into a CPU sink by a
-// large literal. A larger count resolves to no value.
+// addBusinessDays: about 10,000 years, far beyond any real schedule and well
+// inside the range time.Time represents. A larger count resolves to no value.
 const MaxCalendarDays = 4_000_000
 
 // dayCount coerces a day-count argument, reporting false when it is not a
@@ -637,14 +639,16 @@ func fnIsBusinessDay(args ...any) (any, error) {
 //	addBusinessDays(start, 3)              // skip weekends
 //	addBusinessDays(start, 3, holidays())  // skip weekends + holidays
 //
-// The walk is linear in n, so n is bounded by MaxCalendarDays.
+// Whole weeks are skipped arithmetically wherever no holiday can fall, so the
+// cost depends on the span of the holiday calendar, never on the size of n.
 func fnAddBusinessDays(args ...any) (any, error) {
 	if len(args) < 2 || len(args) > 3 {
 		return nil, fmt.Errorf("addBusinessDays() requires 2 or 3 arguments, got %d", len(args))
 	}
 	var holidays map[string]bool
+	var lo, hi time.Time
 	if len(args) == 3 {
-		holidays = holidaySet(args[2])
+		holidays, lo, hi = holidayRange(args[2])
 	}
 	t, ok := toTime(args[0])
 	if !ok {
@@ -660,12 +664,37 @@ func fnAddBusinessDays(args ...any) (any, error) {
 		n = -n
 	}
 	for n > 0 {
+		// Seven calendar days always hold five weekdays, so outside the
+		// holiday calendar whole weeks are skipped at once. At least one
+		// business day is left to walk, so the result lands on a business
+		// day exactly as the day-by-day walk would.
+		if n > 5 && pastHolidays(t, step, len(holidays), lo, hi) {
+			weeks := (n - 1) / 5
+			t = t.AddDate(0, 0, step*weeks*7)
+			n -= weeks * 5
+		}
 		t = t.AddDate(0, 0, step)
 		if isBusinessDay(t, holidays) {
 			n--
 		}
 	}
 	return t, nil
+}
+
+// holidayMargin pads the holiday calendar's bounds so a holiday expressed in
+// another time zone is never skipped over.
+const holidayMargin = 48 * time.Hour
+
+// pastHolidays reports whether no holiday can fall on any day from t onward in
+// the direction of step.
+func pastHolidays(t time.Time, step, count int, lo, hi time.Time) bool {
+	if count == 0 {
+		return true
+	}
+	if step > 0 {
+		return t.After(hi.Add(holidayMargin))
+	}
+	return t.Before(lo.Add(-holidayMargin))
 }
 
 // isBusinessDay reports whether t is a weekday (Monday–Friday) that is not in
@@ -682,17 +711,32 @@ func isBusinessDay(t time.Time, holidays map[string]bool) bool {
 // element is coerced to a date and keyed by its calendar day, so the time of day
 // and location do not affect matching. A non-list argument yields an empty set.
 func holidaySet(v any) map[string]bool {
+	set, _, _ := holidayRange(v)
+	return set
+}
+
+// holidayRange is holidaySet plus the earliest and latest holiday, which bound
+// the stretch of calendar addBusinessDays has to walk day by day.
+func holidayRange(v any) (set map[string]bool, lo, hi time.Time) {
 	elems, ok := toSlice(v)
 	if !ok {
-		return nil
+		return nil, lo, hi
 	}
-	set := make(map[string]bool, len(elems))
+	set = make(map[string]bool, len(elems))
 	for _, e := range elems {
-		if t, ok := toTime(e); ok {
-			set[dayKey(t)] = true
+		t, ok := toTime(e)
+		if !ok {
+			continue
 		}
+		if len(set) == 0 || t.Before(lo) {
+			lo = t
+		}
+		if len(set) == 0 || t.After(hi) {
+			hi = t
+		}
+		set[dayKey(t)] = true
 	}
-	return set
+	return set, lo, hi
 }
 
 // dayKey is the calendar-day identity of t (YYYY-MM-DD), used to compare dates

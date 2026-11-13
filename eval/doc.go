@@ -45,7 +45,8 @@
 // # Records
 //
 // [Program.Match] reads a map, resolving a dotted field through nested maps
-// when the flat key is absent; [TypedProgram.MatchStruct] reads `query`
+// when the flat key is absent (a key may itself contain dots, as label keys
+// do: labels.example.com/team); [TypedProgram.MatchStruct] reads `query`
 // tags, dereferencing pointer fields. Every Go numeric kind is read.
 //
 // # Restrict allowed operations
@@ -58,7 +59,9 @@
 //
 // The field and operator restrictions are enforced by the validator after
 // field resolution, so they also bind a custom validator and reach function
-// arguments. Depth counts nesting, not the length of a connective chain.
+// arguments, predicate functions and fields read on the value side of a
+// comparison; see package validate for the exact rules. Depth counts
+// nesting, not the length of a connective chain.
 //
 // # Custom data accessor
 //

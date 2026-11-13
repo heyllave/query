@@ -10,6 +10,9 @@
       { "Name": "cpu_limit", "Type": 1, "AllowedOps": ["=", "!=", ">", ">=", "<", "<="] },
       { "Name": "labels", "Type": 0, "AllowedOps": ["=", "!=", "*", "?"], "Nested": true },
       { "Name": "created_at", "Type": 5, "AllowedOps": ["=", "!=", ">", ">=", "<", "<=", ".."] }
+    ],
+    "eqOnly": [
+      { "Name": "secret", "Type": 0, "AllowedOps": ["="] }
     ]
   },
   "cases": [
@@ -95,6 +98,18 @@
     { "id": "match-day-range-end", "desc": "a range ending on a day covers that whole day", "op": "match", "query": "created_at:2026-09-01..2026-09-30", "fieldSet": "default", "record": { "created_at": "2026-09-30T18:00:00Z" }, "expectMatch": true },
     { "id": "match-instant-literal", "desc": "a datetime literal is an instant", "op": "match", "query": "created_at=2026-09-28T13:45:12Z", "fieldSet": "default", "record": { "created_at": "2026-09-28T13:45:13Z" }, "expectMatch": false },
     { "id": "parse-non-ascii-term", "desc": "a non-ASCII bare word is one term (#23)", "op": "stringify", "query": "café", "expectString": "café" },
-    { "id": "match-non-ascii-value", "desc": "a non-ASCII bare value compares as text", "op": "match", "query": "state=café", "fieldSet": "default", "record": { "state": "Café" }, "expectMatch": true }
+    { "id": "match-non-ascii-value", "desc": "a non-ASCII bare value compares as text", "op": "match", "query": "state=café", "fieldSet": "default", "record": { "state": "Café" }, "expectMatch": true },
+    { "id": "stringify-not-in", "desc": "NOT IN is an AND of inequalities, not a presence check and a field named NOT", "op": "stringify", "query": "state NOT IN (draft, void)", "expectString": "state!=draft AND state!=void" },
+    { "id": "match-not-in-missing", "desc": "NOT IN is false for a record without the field", "op": "match", "query": "state NOT IN (draft, void)", "fieldSet": "default", "record": {}, "expectMatch": false },
+    { "id": "match-func-in", "desc": "IN accepts a function on the left", "op": "match", "query": "lower(state) IN (draft, void)", "fieldSet": "default", "record": { "state": "VOID" }, "expectMatch": true },
+    { "id": "stringify-term-then-group", "desc": "a term followed by a group is an implicit AND, not a function call", "op": "stringify", "query": "state (total>1 OR total<0)", "expectString": "state AND (total>1 OR total<0)" },
+    { "id": "stringify-nbsp-separates", "desc": "a no-break space separates terms like a space", "op": "stringify", "query": "state\u00a0total>1", "expectString": "state AND total>1" },
+    { "id": "stringify-cidr-value", "desc": "an address with a prefix length is one string, not a division", "op": "stringify", "query": "state=10.0.0.1/24", "expectString": "state=\"10.0.0.1/24\"" },
+    { "id": "match-dotted-label-key", "desc": "a nested key may itself contain dots", "op": "match", "query": "labels.example.com/team=core", "fieldSet": "default", "record": { "labels": { "example.com/team": "core" } }, "expectMatch": true },
+    { "id": "match-arith-argument", "desc": "a function argument may be arithmetic", "op": "match", "query": "cpu=abs(1-8)", "fieldSet": "default", "record": { "cpu": 7 }, "expectMatch": true },
+    { "id": "match-predicate-on-eq-only-field", "desc": "a predicate function cannot read an equality-only field prefix by prefix", "op": "match", "query": "startsWith(secret, \"a\")", "fieldSet": "eqOnly", "record": { "secret": "abc" }, "expectError": true },
+    { "id": "match-order-through-func-on-eq-only-field", "desc": "ordering a function of an equality-only field is refused", "op": "match", "query": "len(secret)>2", "fieldSet": "eqOnly", "record": { "secret": "abc" }, "expectError": true },
+    { "id": "match-eq-on-eq-only-field", "desc": "equality on an equality-only field still works, also through a function", "op": "match", "query": "lower(secret)=abc", "fieldSet": "eqOnly", "record": { "secret": "ABC" }, "expectMatch": true },
+    { "id": "parse-nesting-too-deep", "desc": "nesting is bounded whatever the length limit", "op": "parse", "query": "(((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((a", "expectError": true }
   ]
 }

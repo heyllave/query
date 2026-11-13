@@ -116,6 +116,68 @@ func TestValidate_ThroughFunction(t *testing.T) {
 	}
 }
 
+// A field's operator list bounds every way a query can read the field, not
+// only `field op value`: a predicate function, ordering on a function's
+// result and a reference from the other side of a comparison would each turn
+// an equality-only field into one that can be read character by character.
+func TestValidate_RestrictedFieldCannotBeReadAround(t *testing.T) {
+	tests := []struct {
+		name   string
+		query  string
+		opts   []Option
+		wantOK bool
+	}{
+		// secret allows only "=".
+		{"equality", "secret=abc", nil, true},
+		{"equality through a function", "lower(secret)=abc", nil, true},
+		{"equality with another field", "state=[secret]", nil, true},
+		{"in list", "secret IN (a, b)", nil, true},
+		{"prefix predicate", `startsWith(secret, "a")`, nil, false},
+		{"contains predicate", `contains(secret, "b")`, nil, false},
+		{"negated predicate", `NOT startsWith(secret, "a")`, nil, false},
+		{"predicate reading it as the needle", "contains(state, [secret])", nil, false},
+		{"predicate inside a selector", `labels@(startsWith(secret, "a"))`, nil, false},
+		{"ordering through a function", `lower(secret)>="a"`, nil, false},
+		{"length", "len(secret)>2", nil, false},
+		{"length range", "len(secret):1..3", nil, false},
+		{"inequality with another field", "state!=[secret]", nil, false},
+		{"ordering from the value side", "count>len(secret)", nil, false},
+		{"ordering from the value side in arithmetic", "count>1+len(secret)", nil, false},
+		{"not in", "secret NOT IN (a)", nil, false},
+		// A field with the full text list keeps every form.
+		{"predicate on an open field", `startsWith(state, "a")`, nil, true},
+		{"length of an open field", "len(state)>2", nil, true},
+		{"length of an open field from the value side", "count>len(state)", nil, true},
+		{"numeric field ref", "total>[count]", nil, true},
+		{"date predicate", "isBusinessDay(created)", nil, true},
+		// WithAllowedOps bounds predicates too.
+		{"predicate under an equality-only sandbox", `startsWith(state, "a")`, []Option{WithAllowedOps(OpEq)}, false},
+		{"predicate when wildcards are allowed", `startsWith(state, "a")`, []Option{WithAllowedOps(OpEq, OpWildcard)}, true},
+		{"date predicate needs equality", "isBusinessDay(created)", []Option{WithAllowedOps(OpGt)}, false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Act
+			err := New(optFields, tt.opts...).Validate(mustParse(t, tt.query))
+
+			// Assert
+			if tt.wantOK {
+				if err != nil {
+					t.Fatalf("Validate(%q) error = %v, want nil", tt.query, err)
+				}
+				return
+			}
+			var list ErrorList
+			if !errors.As(err, &list) || len(list) == 0 {
+				t.Fatalf("Validate(%q) error = %v, want an ErrorList", tt.query, err)
+			}
+			if list[0].Kind != ErrOperatorNotAllowed {
+				t.Errorf("Validate(%q) kind = %v, want %v (%s)", tt.query, list[0].Kind, ErrOperatorNotAllowed, list[0].Message)
+			}
+		})
+	}
+}
+
 func TestValidate_CoercesLiterals(t *testing.T) {
 	tests := []struct {
 		query    string

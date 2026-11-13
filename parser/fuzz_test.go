@@ -28,6 +28,10 @@ func FuzzParse(f *testing.F) {
 		// Field names and keywords.
 		`"foo bar"=1`, `""=0`, `"0"or"or"`, "true=1", "not=1", "In!<$0",
 		"labels.example.com/team=x", "[cpu]>5",
+		// IN forms, calls next to groups, Unicode spaces, argument arithmetic.
+		"x NOT IN (a, b)", "lower(x) IN (a, b*)", "f(x) NOT IN (1)", "a (b)", "f(a) (b)",
+		"a\u00a0b", "x=a\u3000b", "[\"a\u00a0b\"]=1", "ip=10.0.0.1/24", "d>f(d, 1-8)",
+		"n>10*-3", "n>10--3", `n>abs(["cpu limit"])`, "f((A))", `f(["true"])`, "f(in)",
 		// Selectors after values and negations.
 		"A>0 @(A)", "(A!>0 @(A))", "email=a@b.com",
 		// Floats with a bare dot and ranges touching dots.

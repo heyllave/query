@@ -236,7 +236,7 @@ func (v *Validator) validate(expr ast.Expression) {
 	case *ast.SelectorExpr:
 		v.validateSelector(e)
 	case *ast.FuncCallExpr:
-		v.validateFuncCallFields(e)
+		v.validatePredicateCall(e)
 	case *ast.QualifierExpr:
 		v.validateQualifier(e)
 	case *ast.PresenceExpr:
@@ -251,18 +251,19 @@ func (v *Validator) validate(expr ast.Expression) {
 }
 
 func (v *Validator) validateQualifier(q *ast.QualifierExpr) {
-	// Validate functions appearing in value position (e.g., created_at>=now()).
-	// Their return type is opaque to the validator, so we only ensure the
-	// field references inside the function are declared.
-	v.validateValueFuncs(&q.Value, q.Position)
-	v.validateValueFuncs(q.EndValue, q.Position)
-
 	op := tokenTypeToOp(q.Operator, q.Value.Wildcard)
+
+	// Fields on the value side (name=[other], total>len(name)) are read by the
+	// same comparison, so they are checked for existence and for the operator
+	// as seen from their side.
+	valueOp := mirrorOp(op)
+	v.checkOperandFields(v.validateValueFuncs(&q.Value, q.Position), valueOp, q.Position)
+	v.checkOperandFields(v.validateValueFuncs(q.EndValue, q.Position), valueOp, q.Position)
 
 	// A function-wrapped qualifier (lower(name)=john) compares the function's
 	// result, whose type is unknown here, so the value is not type-checked.
 	// The operator is still policed: against the global allowed set, and
-	// against each argument field's own operators where that is meaningful.
+	// against each argument field's own operators.
 	if q.HasFieldFunc() {
 		fields := v.validateFuncCallFields(q.FieldFunc)
 		if !v.opGloballyAllowed(op) {
@@ -297,6 +298,60 @@ func (v *Validator) validateQualifier(q *ast.QualifierExpr) {
 	}
 }
 
+// checkOperandFields polices the fields a comparison reads on its value side,
+// directly ([other]) or through a function. They follow allowsOpThroughFunc,
+// like a function on the left side.
+func (v *Validator) checkOperandFields(fields []resolvedField, op Op, pos token.Position) {
+	for _, f := range fields {
+		if !allowsOpThroughFunc(f.cfg, op) {
+			v.addError(ErrOperatorNotAllowed, pos, f.name, string(op),
+				"operator %q is not allowed for field %q (type %s), which the compared value reads",
+				string(op), f.name, f.cfg.Type)
+		}
+	}
+}
+
+// validatePredicateCall validates a function used as a predicate
+// (contains(tags, "urgent")). No operator is written, but the function reads
+// its fields as freely as a pattern match does (startsWith is a prefix
+// wildcard), so each field must allow the operator predicateOp names, and
+// WithAllowedOps must include it.
+func (v *Validator) validatePredicateCall(fc *ast.FuncCallExpr) {
+	for _, f := range v.validateFuncCallFields(fc) {
+		op := predicateOp(f.cfg)
+		if !v.opGloballyAllowed(op) || !f.cfg.AllowsOp(op) {
+			v.addError(ErrOperatorNotAllowed, fc.Position, f.name, string(op),
+				"%s() used as a predicate needs operator %q, which is not allowed for field %q (type %s)",
+				fc.Name, string(op), f.name, f.cfg.Type)
+		}
+	}
+}
+
+// predicateOp is the operator a field must allow before a predicate function
+// may read it: wildcard for text, equality for every other type.
+func predicateOp(cfg FieldConfig) Op {
+	if cfg.Type == TypeText {
+		return OpWildcard
+	}
+	return OpEq
+}
+
+// mirrorOp is op as seen from the other operand: a>b reads b as b<a.
+func mirrorOp(op Op) Op {
+	switch op { //nolint:exhaustive // only ordering operators have a mirror
+	case OpGt:
+		return OpLt
+	case OpGte:
+		return OpLte
+	case OpLt:
+		return OpGt
+	case OpLte:
+		return OpGte
+	default:
+		return op
+	}
+}
+
 // checkValue type-checks one literal operand against the field, coercing it
 // to the field's type first when the lexer guessed a narrower one (see
 // coerceLiteral). Function- and field-valued operands are resolved at match
@@ -323,20 +378,25 @@ func (v *Validator) opGloballyAllowed(op Op) bool {
 	return v.allowedOps == nil || v.allowedOps[op]
 }
 
-// allowsOpThroughFunc reports whether op may be applied to the result of a
-// function over field cfg. Equality, inequality, wildcard and presence follow
+// allowsOpThroughFunc reports whether op may be applied to a value derived
+// from field cfg: the result of a function over it, or the field read as the
+// other operand of a comparison. Equality, inequality, wildcard and presence follow
 // the field's own list: a field that forbids wildcards forbids
 // trim(field)=a* too. Ordering and range operators follow the field's list
-// when the field is ordered (numeric, date, duration); on a text or boolean
-// field a function is the only way to obtain something orderable
-// (len(name)>5), so those operators are permitted there.
+// when the field is ordered (numeric, date, duration). A text field has no
+// ordering operators of its own, and a function is the only way to obtain
+// something orderable from it (len(name)>5); ordering the result reveals as
+// much as a pattern match (lower(name)>=m narrows the value like m*), so it
+// is permitted exactly when the field allows wildcards. A boolean field
+// follows its equality operator.
 func allowsOpThroughFunc(cfg FieldConfig, op Op) bool {
 	switch op {
-	case OpEq, OpNeq, OpWildcard, OpPresence:
-		return cfg.AllowsOp(op)
 	case OpGt, OpGte, OpLt, OpLte, OpRange:
-		if cfg.Type == TypeText || cfg.Type == TypeBoolean {
-			return true
+		switch cfg.Type { //nolint:exhaustive // ordered types use their own list
+		case TypeText:
+			return cfg.AllowsOp(OpWildcard)
+		case TypeBoolean:
+			return cfg.AllowsOp(OpEq)
 		}
 		return cfg.AllowsOp(op)
 	default:
@@ -377,23 +437,28 @@ func coerceLiteral(ft FieldValueType, val *ast.Value) {
 // any embedded field references — both function-call field arguments and
 // bracketed field-ref operands ([cpu_limit]) — against the field config. pos is
 // the enclosing expression's position, used for any error (Value carries none).
-func (v *Validator) validateValueFuncs(val *ast.Value, pos token.Position) {
+// It returns the fields that resolved.
+func (v *Validator) validateValueFuncs(val *ast.Value, pos token.Position) []resolvedField {
 	if val == nil {
-		return
+		return nil
 	}
+	var fields []resolvedField
 	if val.Type == ast.ValueFieldRef {
 		fieldName := val.Field.String()
-		if _, ok := v.resolveField(fieldName); !ok {
+		if cfg, ok := v.resolveField(fieldName); ok {
+			fields = append(fields, resolvedField{name: fieldName, cfg: cfg})
+		} else {
 			v.addError(ErrFieldNotFound, pos, fieldName, "", "unknown field %q", fieldName)
 		}
 	}
 	if val.Func != nil {
-		v.validateFuncCallFields(val.Func)
+		fields = append(fields, v.validateFuncCallFields(val.Func)...)
 	}
 	if val.Arith != nil {
-		v.validateValueFuncs(val.Arith.Left, pos)
-		v.validateValueFuncs(val.Arith.Right, pos)
+		fields = append(fields, v.validateValueFuncs(val.Arith.Left, pos)...)
+		fields = append(fields, v.validateValueFuncs(val.Arith.Right, pos)...)
 	}
+	return fields
 }
 
 // resolvedField pairs a field name with its configuration.
@@ -404,7 +469,7 @@ type resolvedField struct {
 
 // validateFuncCallFields validates field references inside function
 // arguments, recursing into nested calls and value-position operands, and
-// returns the fields that resolved.
+// returns every field that resolved.
 func (v *Validator) validateFuncCallFields(fc *ast.FuncCallExpr) []resolvedField {
 	var fields []resolvedField
 	for _, arg := range fc.Args {
@@ -416,11 +481,11 @@ func (v *Validator) validateFuncCallFields(fc *ast.FuncCallExpr) []resolvedField
 				v.addError(ErrFieldNotFound, fc.Position, fieldName, "", "unknown field %q in function %s()", fieldName, fc.Name)
 				continue
 			}
-			fields = append(fields, resolvedField{fieldName, cfg})
+			fields = append(fields, resolvedField{name: fieldName, cfg: cfg})
 		case arg.Call != nil:
 			fields = append(fields, v.validateFuncCallFields(arg.Call)...)
 		case arg.Value != nil:
-			v.validateValueFuncs(arg.Value, fc.Position)
+			fields = append(fields, v.validateValueFuncs(arg.Value, fc.Position)...)
 		}
 	}
 	return fields

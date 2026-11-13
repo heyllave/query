@@ -14,6 +14,43 @@ type parser struct {
 	tokens []token.Token
 	pos    int
 	errors ErrorList
+	// nesting counts the open groups, negations, selectors, value parentheses
+	// and function calls around the current position; see MaxNesting.
+	nesting int
+	tooDeep bool
+}
+
+// MaxNesting is the deepest a query may nest groups, negations, selectors,
+// parenthesised values and function calls. The parser recurses once per
+// level, so without a bound a long enough run of '(' would exhaust the stack,
+// which a caller that disabled the length limit cannot recover from. No
+// hand-written query comes near it.
+const MaxNesting = 128
+
+// enter opens one nesting level, reporting false (and recording the failure
+// once) when the query nests deeper than MaxNesting. Each successful enter is
+// paired with a leave.
+func (p *parser) enter(pos token.Position) bool {
+	if p.nesting >= MaxNesting {
+		if !p.tooDeep {
+			p.tooDeep = true
+			p.errors.add(newError(CodeNestingTooDeep, ErrSyntax, pos,
+				"query nests deeper than %d levels", MaxNesting))
+		}
+		return false
+	}
+	p.nesting++
+	return true
+}
+
+func (p *parser) leave() { p.nesting-- }
+
+// callFollows reports whether the current token is immediately followed by
+// '(' with no space between, the form of a function call. `urgent (a OR b)`
+// is a term and a group, not a call to urgent.
+func (p *parser) callFollows() bool {
+	tok, next := p.peek(), p.peekAt(1)
+	return next.Type == token.LParen && next.Pos.Offset == tok.Pos.Offset+tok.Pos.Length
 }
 
 // Parse lexes and parses a query string into an AST.
@@ -98,7 +135,7 @@ func (p *parser) parseLogicalOr() ast.Expression {
 
 func (p *parser) parseLogicalAnd() ast.Expression {
 	left := p.parseChainExpr()
-	for {
+	for left != nil {
 		t := p.peek().Type
 		// Explicit AND or an implicit one (juxtaposition). Implicit AND fires
 		// when the next token can legitimately start a new term — Ident,
@@ -206,7 +243,14 @@ func (p *parser) parseSelector(base ast.Expression, pos token.Position) ast.Expr
 	case next.Type == token.Ident && (next.Value == "any" || next.Value == "all" || next.Value == "none") && p.peekAt(1).Type == token.LParen:
 		name := p.advance().Value
 		p.advance() // consume '('
+		if !p.enter(pos) {
+			return nil
+		}
 		inner := p.parseExpression()
+		p.leave()
+		if p.tooDeep {
+			return nil
+		}
 		if p.peek().Type != token.RParen {
 			p.errors.add(newError(CodeUnclosedParen, ErrSyntax, p.peek().Pos,
 				"expected ')' to close @%s selector, got %s", name, p.peek()))
@@ -221,7 +265,14 @@ func (p *parser) parseSelector(base ast.Expression, pos token.Position) ast.Expr
 		}
 	case next.Type == token.LParen:
 		p.advance()
+		if !p.enter(pos) {
+			return nil
+		}
 		inner := p.parseExpression()
+		p.leave()
+		if p.tooDeep {
+			return nil
+		}
 		if p.peek().Type != token.RParen {
 			p.errors.add(newError(CodeUnclosedParen, ErrSyntax, p.peek().Pos,
 				"expected ')' to close selector expression, got %s", p.peek()))
@@ -243,9 +294,13 @@ func (p *parser) parseSelector(base ast.Expression, pos token.Position) ast.Expr
 func (p *parser) parseTerm() ast.Expression {
 	if p.peek().Type == token.Not && !p.keywordIsField() {
 		op := p.advance()
+		if !p.enter(op.Pos) {
+			return nil
+		}
 		// Use parseChainExpr so selectors bind tighter than NOT:
 		//   NOT items@(x=y) → NOT (items@(x=y))
 		expr := p.parseChainExpr()
+		p.leave()
 		if expr == nil {
 			return nil
 		}
@@ -257,7 +312,14 @@ func (p *parser) parseTerm() ast.Expression {
 	}
 	if p.peek().Type == token.LParen {
 		open := p.advance()
+		if !p.enter(open.Pos) {
+			return nil
+		}
 		expr := p.parseExpression()
+		p.leave()
+		if p.tooDeep {
+			return nil
+		}
 		if p.peek().Type != token.RParen {
 			p.errors.add(newError(CodeUnclosedParen, ErrSyntax, p.peek().Pos, "expected ')', got %s", p.peek()))
 			return expr
@@ -286,13 +348,12 @@ func (p *parser) parseQualifier() ast.Expression {
 	// reserved word cannot name a function: `in(` opens an IN list and
 	// `not(`/`and(`/`or(` read as connectives, so such a call could never
 	// print back unambiguously.
-	if p.peek().Type.IsKeyword() && p.peekAt(1).Type == token.LParen {
-		tok := p.peek()
+	if tok := p.peek(); tok.Type.IsKeyword() && (p.callFollows() || (tok.Type == token.In && p.peekAt(1).Type == token.LParen)) {
 		p.errors.add(newError(CodeExpectedField, ErrUnexpectedToken, tok.Pos,
 			"reserved word %q cannot name a function", tok.Value))
 		return nil
 	}
-	if p.peek().Type != token.FieldRef && p.peek().Type != token.String && p.peekAt(1).Type == token.LParen {
+	if p.peek().Type != token.FieldRef && p.peek().Type != token.String && p.callFollows() {
 		return p.parseFuncCallOrQualifier()
 	}
 
@@ -309,9 +370,8 @@ func (p *parser) parseQualifier() ast.Expression {
 		p.advance()
 		return p.parseRangeExpr(field, nil, startPos)
 	}
-	if tok.Type == token.In {
-		p.advance()
-		return p.parseInExpr(field, startPos)
+	if in, negated := p.acceptIn(); in {
+		return p.parseInExpr(field, nil, negated, startPos)
 	}
 	if tok.Type.IsOperator() {
 		p.advance()
@@ -351,11 +411,32 @@ func comparison(field ast.FieldPath, fieldFunc *ast.FuncCallExpr, op token.Type,
 	return q
 }
 
+// acceptIn consumes `IN` or `NOT IN` after a field or function when a list
+// follows, reporting whether it did and whether the form was negated. NOT
+// counts only directly before `IN (`, so `a NOT b` is still a AND NOT b.
+func (p *parser) acceptIn() (in, negated bool) {
+	switch p.peek().Type { //nolint:exhaustive // only IN and NOT IN
+	case token.In:
+		p.advance()
+		return true, false
+	case token.Not:
+		if p.peekAt(1).Type == token.In && p.peekAt(2).Type == token.LParen {
+			p.advance()
+			p.advance()
+			return true, true
+		}
+	}
+	return false, false
+}
+
 // parseInExpr parses the right-hand side of `field IN (...)` and lowers it to
-// an OR chain of equality qualifiers. The IN form is pure surface syntax —
-// once parsed it is indistinguishable from `field=v1 OR field=v2`, and
-// round-tripping normalizes to the expanded form.
-func (p *parser) parseInExpr(field ast.FieldPath, startPos token.Position) ast.Expression {
+// an OR chain of equality qualifiers; `field NOT IN (...)` lowers to an AND
+// chain of inequalities, so like SQL it is false for a record without the
+// field. The left side may be a function (lower(name) IN (a, b)). Both forms
+// are pure surface syntax — once parsed they are indistinguishable from
+// `field=v1 OR field=v2` and `field!=v1 AND field!=v2`, and round-tripping
+// normalizes to the expanded form.
+func (p *parser) parseInExpr(field ast.FieldPath, fieldFunc *ast.FuncCallExpr, negated bool, startPos token.Position) ast.Expression {
 	if p.peek().Type != token.LParen {
 		p.errors.add(newError(CodeExpectedInList, ErrSyntax, p.peek().Pos,
 			"expected '(' after IN, got %s", p.peek()))
@@ -390,20 +471,25 @@ func (p *parser) parseInExpr(field ast.FieldPath, startPos token.Position) ast.E
 		return nil
 	}
 
+	op, join := token.Eq, token.Or
+	if negated {
+		op, join = token.Neq, token.And
+	}
 	var expr ast.Expression
 	for i, v := range values {
 		q := &ast.QualifierExpr{
-			Field:    field,
-			Operator: token.Eq,
-			Value:    v,
-			Position: startPos,
+			Field:     field,
+			FieldFunc: fieldFunc,
+			Operator:  op,
+			Value:     v,
+			Position:  startPos,
 		}
 		if i == 0 {
 			expr = q
 			continue
 		}
 		expr = &ast.BinaryExpr{
-			Op:       token.Or,
+			Op:       join,
 			Left:     expr,
 			Right:    q,
 			Position: startPos,
@@ -516,7 +602,11 @@ func (p *parser) parseValuePrimary() *ast.Value {
 	switch tok.Type {
 	case token.LParen:
 		p.advance()
+		if !p.enter(tok.Pos) {
+			return nil
+		}
 		inner := p.parseValueAdditive()
+		p.leave()
 		if inner == nil {
 			return nil
 		}
@@ -677,6 +767,9 @@ func (p *parser) parseFuncCallOrQualifier() ast.Expression {
 		p.advance()
 		return p.parseRangeExpr(nil, fc, fc.Position)
 	}
+	if in, negated := p.acceptIn(); in {
+		return p.parseInExpr(nil, fc, negated, fc.Position)
+	}
 	if tok.Type.IsOperator() {
 		p.advance()
 		val := p.parseValue()
@@ -695,6 +788,10 @@ func (p *parser) parseFuncCall() *ast.FuncCallExpr {
 	nameTok := p.advance() // consume identifier
 	startPos := nameTok.Pos
 	p.advance() // consume '('
+	if !p.enter(startPos) {
+		return nil
+	}
+	defer p.leave()
 
 	var args []ast.FuncArg
 	for p.peek().Type != token.RParen && p.peek().Type != token.EOF {

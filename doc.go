@@ -43,7 +43,9 @@
 // be matched against any record shape. A record value that cannot be read
 // as the literal's type makes the comparison false rather than comparing as
 // zero, and a missing field makes every comparison false, including through
-// functions.
+// functions. (A negated operator is a NOT, so total!>5 is true for a record
+// without a total.) Nesting is bounded by [parser.MaxNesting] whatever the
+// length limit.
 //
 // # Code generation via Visitor
 //
