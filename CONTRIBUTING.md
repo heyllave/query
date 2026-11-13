@@ -22,6 +22,7 @@ verify. This page is the checklist.
 ```bash
 make check      # gofmt, vet, lint, tests with -race
 make examples   # every example program runs as documented
+make sqltest    # every corpus case through the evaluator and a real SQLite
 make fuzz       # 30s per fuzz target (set FUZZTIME=5m for a longer run)
 make wasm       # the WASM build and its JavaScript tests
 ```
@@ -34,9 +35,24 @@ CI runs the same steps plus the Dart client and an Android build.
 |---|---|
 | Grammar or lexer behaviour | a case in `conformance/corpus.json`, the syntax table in `README.md`, and a seed in `parser/fuzz_test.go` if the shape was ever wrong |
 | A built-in function | its `Arity`, a row in the README's function table, and a nil-argument case in `eval/coerce_test.go` |
-| Evaluation semantics | a case in `eval/review_regress_test.go` or `conformance/corpus.json` |
+| Evaluation semantics | a case in `eval/review_regress_test.go` or `conformance/corpus.json`, and one in `conformance/sql/testdata/cases.json` when SQL should agree |
 | The JSON AST shape | `internal/bridgejson`, the TypeScript types in `clients/npm/src`, and the Dart types in `clients/flutter/lib` |
 | Anything user-visible | a line under *Unreleased* in `CHANGELOG.md` |
+
+## The SQL differential corpus
+
+`conformance/sql/` is a separate Go module (so the library keeps zero dependencies)
+holding a SQLite reference lowering and a corpus of real-world, odd and edge
+cases: `testdata/records.json` is a small invoices table with NULLs, empty
+strings, non-ASCII names, LIKE metacharacters, negative and huge numbers and
+boundary timestamps; `testdata/cases.json` lists queries with the ids they
+must return. Each case runs through the evaluator and through SQLite, and
+both must match the hand-written expectation, so a case documents the
+semantics twice over. A case the SQL side cannot honour sets `skipSQL` with
+the reason. `TestCorpus_IsWellFormed` validates the data itself: unique ids,
+expected ids that exist, timestamps in the canonical form. When adding a
+case, write the expectation by hand first; if the two engines agree with
+each other but not with you, re-read the data before changing the engines.
 
 ## Reporting bugs
 

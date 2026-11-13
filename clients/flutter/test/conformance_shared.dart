@@ -26,6 +26,8 @@ List<FieldConfig> _fields(List<Object?> raw) => raw.map((e) {
         name: m['Name'] as String,
         type: _typeByOrdinal[(m['Type'] as num).toInt()]!,
         allowedOps: ops,
+        searchable: m['Searchable'] == true,
+        nested: m['Nested'] == true,
       );
     }).toList();
 

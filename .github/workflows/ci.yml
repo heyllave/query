@@ -110,6 +110,26 @@ jobs:
           name: coverage-report
           path: coverage.out
 
+  sql:
+    name: Differential tests against SQLite
+    runs-on: ${{ fromJSON(vars.CI_RUNNER || '["ubuntu-latest"]') }}
+    needs: [checks]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+
+      # conformance/sql is its own module so the library stays dependency-free;
+      # its go directive follows the SQLite driver, hence the newer toolchain.
+      # It runs every case in conformance/sql/testdata through the evaluator
+      # and through a real SQLite database and requires both to agree.
+      - name: Run the SQL differential corpus
+        env:
+          GOTOOLCHAIN: auto
+        run: cd conformance/sql && go test -race -count=1 ./...
+
   wasm:
     name: WASM build & JS tests
     runs-on: ${{ fromJSON(vars.CI_RUNNER || '["ubuntu-latest"]') }}

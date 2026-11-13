@@ -638,6 +638,8 @@ go run ./examples/colombia
 
 Every example runs under `go test ./examples/` (see `examples/examples_test.go`), so they stay in step with the library.
 
+The `conformance/sql/` module checks the language against a real database: a corpus of invoices with NULLs, empty strings, non-ASCII names, LIKE metacharacters and boundary timestamps, and queries that must return the same rows from the evaluator and from SQLite through the reference lowering in `conformance/sql/dialect.go`. That lowering is the one to copy for a SQL backend: two-valued comparisons via `COALESCE`, `NOCASE` text, half-open intervals for day literals.
+
 ## License
 
 Apache License 2.0

@@ -1,4 +1,4 @@
-.PHONY: build test coverage lint fmt vet check clean wasm fuzz examples
+.PHONY: build test coverage lint fmt vet check clean wasm fuzz examples sqltest
 
 GO       := go
 GOTEST   := $(GO) test
@@ -49,3 +49,8 @@ fuzz:
 # Run every example program the way the README shows.
 examples:
 	$(GOTEST) -count=1 ./examples/
+
+# Differential tests: every case in conformance/sql/testdata through the evaluator
+# and through a real SQLite database (separate module, pure-Go driver).
+sqltest:
+	cd conformance/sql && $(GOTEST) $(GOFLAGS) -count=1 ./...
