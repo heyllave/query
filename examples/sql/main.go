@@ -13,6 +13,7 @@
 //
 // Covered:
 //   - equality / comparison / wildcard (LIKE, NOT LIKE) / range (BETWEEN)
+//   - day literals (createdAt=2026-09-28) as half-open intervals over the day
 //   - logical AND/OR with precedence-aware parens around OR children
 //   - NOT (UnaryExpr) and grouping (GroupExpr)
 //   - field presence (IS NOT NULL)
@@ -144,10 +145,24 @@ func (v *sqlVisitor) VisitQualifier(e *ast.QualifierExpr) string {
 		field = v.column(e.Field)
 	}
 
-	// Range: field BETWEEN <left> AND <right>
+	// Range: field BETWEEN <left> AND <right>. A day literal at the end of a
+	// range covers that whole day, so the bound becomes `< next day`.
 	if e.IsRange() {
+		if e.EndValue.Type == ast.ValueDate && e.EndValue.DayOnly {
+			return fmt.Sprintf("(%s >= %s AND %s < %s)",
+				field, v.renderValue(&e.Value), field, v.bindTime(e.EndValue.Date.AddDate(0, 0, 1)))
+		}
 		return fmt.Sprintf("%s BETWEEN %s AND %s",
 			field, v.renderValue(&e.Value), v.renderValue(e.EndValue))
+	}
+
+	// A day literal (createdAt=2026-09-28) denotes the whole UTC day, the same
+	// reading the evaluator uses, so `=` on a datetime column is a half-open
+	// interval and the other operators move to the day's bounds.
+	if e.Value.Type == ast.ValueDate && e.Value.DayOnly {
+		if sql, ok := v.renderDay(field, e.Operator, e.Value.Date); ok {
+			return sql
+		}
 	}
 
 	// Wildcard: field LIKE $1 / field NOT LIKE $1
@@ -159,6 +174,30 @@ func (v *sqlVisitor) VisitQualifier(e *ast.QualifierExpr) string {
 	// Standard comparison: field op <value>
 	op := ast.SQLOperator(e.Operator, false)
 	return fmt.Sprintf("%s %s %s", field, op, v.renderValue(&e.Value))
+}
+
+// bindTime binds a timestamp as a parameter and returns its placeholder.
+func (v *sqlVisitor) bindTime(t time.Time) string {
+	v.params = append(v.params, t)
+	return fmt.Sprintf("$%d", len(v.params))
+}
+
+// renderDay lowers a comparison against a whole day. ok is false for
+// operators whose lowering is the plain one (>= start, < start).
+func (v *sqlVisitor) renderDay(field string, op token.Type, day time.Time) (string, bool) {
+	next := day.AddDate(0, 0, 1)
+	switch op { //nolint:exhaustive // the rest use the plain lowering
+	case token.Eq:
+		return fmt.Sprintf("(%s >= %s AND %s < %s)", field, v.bindTime(day), field, v.bindTime(next)), true
+	case token.Neq:
+		return fmt.Sprintf("(%s < %s OR %s >= %s)", field, v.bindTime(day), field, v.bindTime(next)), true
+	case token.Lte:
+		return fmt.Sprintf("%s < %s", field, v.bindTime(next)), true
+	case token.Gt:
+		return fmt.Sprintf("%s >= %s", field, v.bindTime(next)), true
+	default:
+		return "", false
+	}
 }
 
 func (v *sqlVisitor) VisitPresence(e *ast.PresenceExpr) string {

@@ -365,8 +365,8 @@ func FieldRefString(fp FieldPath, quoted bool) string {
 
 // fieldRefNeedsQuote reports whether a field path must use the quoted bracket
 // form because a segment is empty or contains a character outside the bare
-// identifier alphabet (letters, digits, underscore, hyphen, slash; not leading
-// digit).
+// identifier alphabet (ASCII letters, any non-ASCII rune, digits, underscore,
+// hyphen, slash; not leading digit).
 func fieldRefNeedsQuote(fp FieldPath) bool {
 	if len(fp) == 0 {
 		return true
@@ -377,7 +377,7 @@ func fieldRefNeedsQuote(fp FieldPath) bool {
 		}
 		for i := 0; i < len(seg); i++ {
 			c := seg[i]
-			isAlpha := c == '_' || (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z')
+			isAlpha := c == '_' || (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || c >= 0x80
 			isDigit := c >= '0' && c <= '9'
 			if i == 0 && !isAlpha {
 				return true

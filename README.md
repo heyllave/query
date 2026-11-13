@@ -121,6 +121,7 @@ Evaluation semantics worth knowing:
 - **A missing or nil field** makes any comparison false, including through functions: `len(name)>3` does not match a record without a name.
 - **Presence** (`name`) means the field exists and is non-empty: nil, `""` and an empty list or map count as absent.
 - **Dotted fields** read the flat key `"labels.dev"` first, then descend nested maps (`data["labels"]["dev"]`).
+- **A date literal without a time is a whole day**: `created_at=2026-09-28` matches 13:45 on that day, not only midnight.
 - **Literals follow the field's declared type**: `zip=90210` on a text field compares the text `"90210"`, and a quoted RFC 3339 string on a date field compares as a date. Arithmetic on a text or boolean field is a validation error (quote the value).
 
 ## Value Queries
@@ -485,7 +486,9 @@ The language covers most of what general-purpose expression engines offer for fi
 - **Case-insensitive keywords** — `and`/`or`/`not`/`in` accepted in any case.
 - **Negated comparisons** — `total!>50000` desugars to `NOT total>50000`; missing-field safe. The same holds through a function: `len(name)!>5`.
 - **Negated wildcards** — `name!=Jo*` is the negation of the pattern on a present field; `ast.SQLOperator` renders it as `NOT LIKE`.
-- **Datetime literals** — `created_at>=2026-01-01T10:00:00Z` (RFC 3339, optional fraction and zone); a date without a time is midnight UTC. A quoted timestamp on a date field is read the same way.
+- **Datetime literals** — `created_at>=2026-01-01T10:00:00Z` (RFC 3339, optional fraction and zone) is an instant. A quoted timestamp on a date field is read the same way.
+- **Day literals** — a date without a time (`created_at=2026-09-28`) denotes the whole UTC day: `=` matches any instant in it, `!=` any instant outside it, `<=` anything before its end, `>` anything at or after its end, and a range `created_at:2026-01-01..2026-01-31` covers all of the 31st. A value stored at midnight reads the same either way, so pure date fields are unaffected. SQL backends should lower `=` on a day literal to `>= day AND < day+1` (see `examples/sql`).
+- **Non-ASCII terms** — a bare word may contain any non-ASCII character (`café`, `日本`), in field position or as a value.
 - **Signed literals in arguments and lists** — `addDays(d, -7)`, `n IN (-1, 2)`; wildcards are allowed in `IN` lists too.
 - **Escapes in unquoted values** — `\*`, `\(`, `\)` and `\\` stand for the literal character, including inside a wildcard pattern (`a\*b*` matches values starting with `a*b`).
 - **Unquoted values that contain letters are strings** — a UUID, a version (`1.2.3-beta`) or an e-mail address is one value even when it contains `-`, `+` or `/`; only runs made purely of numbers, operators, durations, parens, `[refs]` and calls are arithmetic. `10-3`, `10 - 3` and `10+3` all compute.

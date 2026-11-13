@@ -441,6 +441,8 @@ func compileRangeWithResolver(resolve func(func(string) (any, bool)) (any, bool)
 		if e == nil {
 			return false
 		}
+		// Lte on a day literal already reads as "before the end of that
+		// day", so created:2026-01-01..2026-01-31 covers all of the 31st.
 		return compareValues(raw, s, token.Gte) && compareValues(raw, e, token.Lte)
 	}
 }
@@ -552,7 +554,7 @@ func equalValues(actual any, expected *ast.Value) bool {
 		return b == expected.Bool
 	case ast.ValueDate:
 		t, ok := toTime(actual)
-		return ok && t.Equal(expected.Date)
+		return ok && compareDate(t, expected, token.Eq)
 	case ast.ValueDuration:
 		d, ok := toDuration(actual)
 		return ok && d == expected.Duration
@@ -578,21 +580,7 @@ func compareValues(actual any, expected *ast.Value, op token.Type) bool {
 		if !ok {
 			return false
 		}
-		b := expected.Date
-		switch op { //nolint:exhaustive // only relational
-		case token.Gt:
-			return a.After(b)
-		case token.Gte:
-			return !a.Before(b)
-		case token.Lt:
-			return a.Before(b)
-		case token.Lte:
-			return !a.After(b)
-		case token.Neq:
-			return !a.Equal(b)
-		default:
-			return a.Equal(b)
-		}
+		return compareDate(a, expected, op)
 	case ast.ValueDuration:
 		a, ok := toDuration(actual)
 		if !ok {
@@ -638,6 +626,44 @@ func readableAs(actual any, expected *ast.Value) bool {
 		return ok
 	default:
 		return true
+	}
+}
+
+// compareDate compares an instant with a date literal. A literal with a time
+// is an instant and compares exactly. A day literal (2026-09-28) is the UTC
+// day [start, end): `=` is any instant in it (so createdAt=2026-09-28 finds
+// everything created that day, issue #24), `!=` its complement, `<` before
+// the day, `<=` before its end, `>` at or after its end, `>=` at or after its
+// start. A value at midnight behaves the same under both readings, so date
+// fields are unaffected.
+func compareDate(a time.Time, expected *ast.Value, op token.Type) bool {
+	start := expected.Date
+	end := start
+	if expected.DayOnly {
+		end = start.AddDate(0, 0, 1)
+	}
+	inDay := !a.Before(start) && (a.Before(end) || (!expected.DayOnly && a.Equal(start)))
+	switch op { //nolint:exhaustive // only comparison operators
+	case token.Eq:
+		return inDay
+	case token.Neq:
+		return !inDay
+	case token.Lt:
+		return a.Before(start)
+	case token.Lte:
+		if expected.DayOnly {
+			return a.Before(end)
+		}
+		return !a.After(start)
+	case token.Gt:
+		if expected.DayOnly {
+			return !a.Before(end)
+		}
+		return a.After(start)
+	case token.Gte:
+		return !a.Before(start)
+	default:
+		return false
 	}
 }
 

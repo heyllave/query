@@ -583,7 +583,7 @@ func (p *parser) parseValuePrimary() *ast.Value {
 			p.errors.add(newError(CodeInvalidDate, ErrInvalidDate, tok.Pos, "invalid date %q", tok.Value))
 			return nil
 		}
-		return &ast.Value{Type: ast.ValueDate, Raw: tok.Value, Date: d}
+		return &ast.Value{Type: ast.ValueDate, Raw: tok.Value, Date: d, DayOnly: IsDayLiteral(tok.Value)}
 	case token.Duration:
 		p.advance()
 		dur, err := ParseDuration(tok.Value)

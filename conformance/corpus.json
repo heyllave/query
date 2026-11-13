@@ -89,6 +89,12 @@
     { "id": "stringify-keyword-field", "desc": "a reserved word can be a field name", "op": "stringify", "query": "true=1", "expectString": "[\"true\"]=1" },
     { "id": "stringify-quoted-field", "desc": "a quoted field name prints in bracket form", "op": "stringify", "query": "\"foo bar\"=1", "expectString": "[\"foo bar\"]=1" },
     { "id": "stringify-slash-field", "desc": "a label key with a slash is one field", "op": "stringify", "query": "labels.example.com/team=x", "expectString": "labels.example.com/team=x" },
-    { "id": "parse-leading-and-error", "desc": "a leading AND is still an error", "op": "parse", "query": "AND foo", "expectError": true }
+    { "id": "parse-leading-and-error", "desc": "a leading AND is still an error", "op": "parse", "query": "AND foo", "expectError": true },
+    { "id": "match-day-literal-afternoon", "desc": "a day literal matches any instant in that UTC day (#24)", "op": "match", "query": "created_at=2026-09-28", "fieldSet": "default", "record": { "created_at": "2026-09-28T13:45:12Z" }, "expectMatch": true },
+    { "id": "match-day-literal-next-day", "desc": "a day literal excludes the next midnight", "op": "match", "query": "created_at=2026-09-28", "fieldSet": "default", "record": { "created_at": "2026-09-29T00:00:00Z" }, "expectMatch": false },
+    { "id": "match-day-range-end", "desc": "a range ending on a day covers that whole day", "op": "match", "query": "created_at:2026-09-01..2026-09-30", "fieldSet": "default", "record": { "created_at": "2026-09-30T18:00:00Z" }, "expectMatch": true },
+    { "id": "match-instant-literal", "desc": "a datetime literal is an instant", "op": "match", "query": "created_at=2026-09-28T13:45:12Z", "fieldSet": "default", "record": { "created_at": "2026-09-28T13:45:13Z" }, "expectMatch": false },
+    { "id": "parse-non-ascii-term", "desc": "a non-ASCII bare word is one term (#23)", "op": "stringify", "query": "café", "expectString": "café" },
+    { "id": "match-non-ascii-value", "desc": "a non-ASCII bare value compares as text", "op": "match", "query": "state=café", "fieldSet": "default", "record": { "state": "Café" }, "expectMatch": true }
   ]
 }

@@ -67,13 +67,19 @@ func (v ValueType) String() string {
 
 // Value represents a typed value in a qualifier expression.
 type Value struct {
-	Type     ValueType
-	Raw      string        // original string from the query
-	Str      string        // for string values
-	Int      int64         // for integer values
-	Float    float64       // for float values
-	Bool     bool          // for boolean values
-	Date     time.Time     // for date values
+	Type  ValueType
+	Raw   string    // original string from the query
+	Str   string    // for string values
+	Int   int64     // for integer values
+	Float float64   // for float values
+	Bool  bool      // for boolean values
+	Date  time.Time // for date values
+	// DayOnly marks a date literal written without a time (2026-09-28). Such
+	// a literal denotes the whole UTC day [Date, Date+24h): `=` matches any
+	// instant in it, `<=` any instant before its end, `>` any instant at or
+	// after its end. A literal with a time (2026-09-28T10:00:00Z) is an
+	// instant.
+	DayOnly  bool
 	Duration time.Duration // for duration values
 	Wildcard bool          // true if the value contains wildcards; Str then keeps an escaped literal star as `\*`
 	Quoted   bool          // true if the string value came from a "..."-quoted literal

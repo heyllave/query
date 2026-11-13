@@ -8,13 +8,15 @@
 //
 // # Lexical notes
 //
-// Field names are identifiers (letters, digits, '_', '-', '/') joined by
+// Field names are identifiers (letters including any non-ASCII character,
+// digits, '_', '-', '/') joined by
 // dots, or a bracket-quoted name (["billing address"]) for anything else.
 // The reserved words true, false and in may name a field anywhere; and, or
 // and not only when an operator follows.
 //
-// An unquoted value is classified by shape: an integer, float, date
-// (2026-01-01), datetime (2026-01-01T10:00:00Z), duration (7d), boolean, or
+// An unquoted value is classified by shape: an integer, float, day
+// (2026-01-01, denoting the whole UTC day), datetime (2026-01-01T10:00:00Z,
+// an instant), duration (7d), boolean, or
 // wildcard pattern (jo*), else a string. A value that contains letters is
 // always a string (a UUID or a version is one value); a run of numbers,
 // operators, durations, parens, [field refs] and calls is arithmetic, so

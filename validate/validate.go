@@ -365,7 +365,7 @@ func coerceLiteral(ft FieldValueType, val *ast.Value) {
 	case TypeDate, TypeDatetime:
 		if val.Type == ast.ValueString && !val.Wildcard {
 			if t, err := parser.ParseDateLiteral(val.Str); err == nil {
-				*val = ast.Value{Type: ast.ValueDate, Raw: val.Raw, Date: t, Quoted: val.Quoted}
+				*val = ast.Value{Type: ast.ValueDate, Raw: val.Raw, Date: t, Quoted: val.Quoted, DayOnly: parser.IsDayLiteral(val.Str)}
 			}
 		}
 	case TypeInteger, TypeDecimal, TypeBoolean, TypeDuration:

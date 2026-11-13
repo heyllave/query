@@ -4,6 +4,7 @@ import (
 	"strings"
 	"time"
 	"unicode"
+	"unicode/utf8"
 
 	"github.com/heyllave/query/token"
 )
@@ -165,9 +166,12 @@ func (l *lexer) run() {
 		case isDigit(ch):
 			l.lexNumericLiteral()
 		default:
-			l.errors.add(newError(CodeUnexpectedChar, ErrSyntax, token.Position{Offset: l.pos, Length: 1},
-				"unexpected character %q", string(ch)))
-			l.pos++
+			// Report the whole rune, not its first byte, so the message
+			// shows what was typed and the span covers it.
+			_, width := utf8.DecodeRuneInString(l.input[l.pos:])
+			l.errors.add(newError(CodeUnexpectedChar, ErrSyntax, token.Position{Offset: l.pos, Length: width},
+				"unexpected character %q", l.input[l.pos:l.pos+width]))
+			l.pos += width
 		}
 	}
 
@@ -990,8 +994,11 @@ func (l *lexer) peek(offset int) byte {
 	return l.input[idx]
 }
 
+// isIdentStart reports whether ch may begin an identifier: an ASCII letter,
+// '_', or any byte of a multi-byte UTF-8 sequence, so a non-ASCII word such
+// as café or 日本 is one bare term rather than a run of unexpected bytes.
 func isIdentStart(ch byte) bool {
-	return (ch >= 'a' && ch <= 'z') || (ch >= 'A' && ch <= 'Z') || ch == '_'
+	return (ch >= 'a' && ch <= 'z') || (ch >= 'A' && ch <= 'Z') || ch == '_' || ch >= utf8.RuneSelf
 }
 
 // isIdentChar reports whether ch may continue an identifier. Hyphens and
@@ -1081,6 +1088,10 @@ var dateLayouts = []string{
 	"2006-01-02 15:04:05",
 	"2006-01-02",
 }
+
+// IsDayLiteral reports whether s is a date literal without a time part
+// (YYYY-MM-DD), which denotes a whole day rather than an instant.
+func IsDayLiteral(s string) bool { return isDateLiteral(s) }
 
 // ParseDateLiteral parses a date (2026-01-01) or datetime literal
 // (2026-01-01T10:00:00Z, 2026-01-01T10:00:00, 2026-01-01 10:00:00). A date

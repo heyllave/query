@@ -1,6 +1,8 @@
 package parser
 
 import (
+	"errors"
+	"strings"
 	"testing"
 
 	"github.com/heyllave/query/ast"
@@ -85,6 +87,9 @@ func TestParse_FieldRefOnLeft(t *testing.T) {
 		"[labels.dev]=x":            "labels.dev",
 		`["a.b/c"]`:                 "a.b/c",
 		"labels.example.com/team=x": "labels.example.com/team",
+		"café":                      "café",
+		"naïve=1":                   "naïve",
+		"日本語.テスト":                   "日本語.テスト",
 	} {
 		t.Run(q, func(t *testing.T) {
 			expr, err := Parse(q, 256)
@@ -114,5 +119,33 @@ func TestParse_BarewordValuesUnaffected(t *testing.T) {
 				t.Errorf("Parse(%q) error: %v", q, err)
 			}
 		})
+	}
+}
+
+// TestLex_UnexpectedChar confirms an unexpected character is reported once,
+// as the character typed, with a span covering all its bytes. Any non-ASCII
+// character is a word character, so the unexpected ones are ASCII symbols.
+func TestLex_UnexpectedChar(t *testing.T) {
+	_, err := Parse("a=1 $", 0)
+	if err == nil {
+		t.Fatal("expected an error")
+	}
+	var list ErrorList
+	if !errors.As(err, &list) || len(list) != 1 {
+		t.Fatalf("errors = %v, want exactly one", err)
+	}
+	if got := list[0].Error(); !strings.Contains(got, `"$"`) {
+		t.Errorf("error = %q, want it to quote the character", got)
+	}
+	if list[0].Position.Length != 1 {
+		t.Errorf("span length = %d, want 1", list[0].Position.Length)
+	}
+	// A non-ASCII symbol is a bare term, not an error (issue #23).
+	expr, err := Parse("a=1 ¿", 0)
+	if err != nil {
+		t.Fatalf("Parse(%q): %v", "a=1 ¿", err)
+	}
+	if got := ast.String(expr); got != "a=1 AND ¿" {
+		t.Errorf("String = %q, want %q", got, "a=1 AND ¿")
 	}
 }

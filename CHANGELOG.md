@@ -14,8 +14,8 @@ semantic versioning once the first tag is cut.
   value that cannot be read as the literal's type never compares as zero or as
   the zero time; `n=0`, `n!=0` and `n<1` are all false for `"abc"`.
 - A missing or nil field inside a function resolves to no value instead of the
-  text `<nil>`, so `len(name)>3` no longer matches records without a name.
-  Errors from nested calls propagate.
+  text `<nil>`, so `len(name)>3` no longer matches records without a name
+  (#22). Errors from nested calls propagate.
 - Negated operators (`len(name)!>5`) and ranges (`len(name):1..5`) work on
   function-wrapped qualifiers.
 - `WithAllowedOps` and `WithAllowedFields` are enforced inside the validator,
@@ -26,7 +26,13 @@ semantic versioning once the first tag is cut.
   ±`eval.MaxCalendarDays` days, so a large literal cannot stall evaluation.
 - Dotted fields descend nested maps (`labels.dev` reads `data["labels"]["dev"]`).
 - Presence (`name`) is false for nil, `""` and empty lists or maps.
-- `name!=jo*` negates the wildcard; `ast.SQLOperator` renders `NOT LIKE`.
+- `name!=jo*` negates the wildcard; `ast.SQLOperator` renders `NOT LIKE` (#21).
+- A date literal without a time denotes the whole UTC day, so
+  `createdAt=2026-09-28` matches everything created that day instead of only
+  midnight; `!=`, `<=`, `>` and range ends follow the day's bounds, and
+  `examples/sql` lowers them to half-open intervals (#24).
+- Non-ASCII bare words (`café`, `日本`) lex as one term in field and value
+  position; an unexpected character is reported as the whole rune (#23).
 - Struct binding dereferences pointer fields and ignores `query` tags on
   unexported fields instead of panicking.
 - Integer overflow in arithmetic promotes to float; `round()` with an absurd
@@ -63,7 +69,7 @@ semantic versioning once the first tag is cut.
 - Reserved words as field names where unambiguous (`true=1`, `not=1`); quoted
   and bracket-quoted field names (`"foo bar"=1`, `["a.b/c"]=1`).
 - `\*` as a literal star inside wildcard patterns.
-- `ast.Calls`, `eval.MapAccessor`, `eval.Exactly`/`AtLeast`/`Between`,
+- `ast.Value.DayOnly`, `parser.IsDayLiteral`, `ast.Calls`, `eval.MapAccessor`, `eval.Exactly`/`AtLeast`/`Between`,
   `validate.WithAllowedFields`/`WithAllowedOps`, `parser.ParseDateLiteral`.
 - Fuzz targets for the parser, value grammar and evaluator (`make fuzz`), run
   briefly in CI; a test that runs every example program (`make examples`).
