@@ -79,10 +79,15 @@ func WildcardToLike(pattern string) string {
 	for i := 0; i < len(pattern); i++ {
 		switch pattern[i] {
 		case '\\':
+			// Pattern form: `\*` is a literal star, `\\` a literal backslash,
+			// which LIKE needs escaped under ESCAPE '\'.
 			if i+1 < len(pattern) && pattern[i+1] == '*' {
 				buf = append(buf, '*')
 				i++
 				continue
+			}
+			if i+1 < len(pattern) && pattern[i+1] == '\\' {
+				i++
 			}
 			buf = append(buf, '\\', '\\')
 		case '*':

@@ -448,10 +448,11 @@ func compileRangeWithResolver(resolve func(func(string) (any, bool)) (any, bool)
 }
 
 func compileWildcardWithResolver(resolve func(func(string) (any, bool)) (any, bool), pattern string, negate bool) matcher {
-	// An escaped star in the pattern is a literal star (see the lexer); the
-	// wildcard stars are the unescaped ones at either end.
+	// The pattern is in pattern form (`\*` literal star, `\\` backslash,
+	// see ast.DecodePattern); the wildcard stars are the bare ones at either
+	// end.
 	prefix := strings.HasPrefix(pattern, "*")
-	suffix := len(pattern) > 1 && strings.HasSuffix(pattern, "*") && !strings.HasSuffix(pattern, `\*`)
+	suffix := len(pattern) > 1 && endsWithWildcardStar(pattern)
 	inner := pattern
 	if prefix {
 		inner = inner[1:]
@@ -462,7 +463,7 @@ func compileWildcardWithResolver(resolve func(func(string) (any, bool)) (any, bo
 	if pattern == "*" {
 		suffix = true // a lone star matches any present value
 	}
-	lowerInner := strings.ToLower(strings.ReplaceAll(inner, `\*`, "*"))
+	lowerInner := strings.ToLower(ast.DecodePattern(inner))
 
 	return func(get func(string) (any, bool)) bool {
 		raw, ok := resolve(get)
@@ -483,6 +484,20 @@ func compileWildcardWithResolver(resolve func(func(string) (any, bool)) (any, bo
 		}
 		return matched != negate
 	}
+}
+
+// endsWithWildcardStar reports whether a pattern in pattern form ends with a
+// wildcard star: a final `*` preceded by an even number of backslashes (an
+// odd number would make it the literal `\*`).
+func endsWithWildcardStar(p string) bool {
+	if !strings.HasSuffix(p, "*") {
+		return false
+	}
+	n := 0
+	for i := len(p) - 2; i >= 0 && p[i] == '\\'; i-- {
+		n++
+	}
+	return n%2 == 0
 }
 
 func compileComparisonWithResolver(resolve func(func(string) (any, bool)) (any, bool), op token.Type, expected valueResolver) matcher {

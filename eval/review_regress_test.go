@@ -107,6 +107,9 @@ func TestRegress_Matches(t *testing.T) {
 		{"escaped star in pattern", `name=a\*b*`, map[string]any{"name": "a*bc"}, true},
 		{"escaped star in pattern no match", `name=a\*b*`, map[string]any{"name": "axbc"}, false},
 		{"lone star", "name=*", map[string]any{"name": "anything"}, true},
+		{"backslash then wildcard", `name=a\\*`, map[string]any{"name": `a\b`}, true},
+		{"backslash then wildcard no match", `name=a\\*`, map[string]any{"name": "ab"}, false},
+		{"backslash then literal star", `name=a\\\*`, map[string]any{"name": `a\*`}, true},
 		// Arithmetic forms.
 		{"subtraction", "n>10-3", map[string]any{"n": 8}, true},
 		{"spaced subtraction", "n>10 - 3", map[string]any{"n": 6}, false},

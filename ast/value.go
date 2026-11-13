@@ -81,12 +81,29 @@ type Value struct {
 	// instant.
 	DayOnly  bool
 	Duration time.Duration // for duration values
-	Wildcard bool          // true if the value contains wildcards; Str then keeps an escaped literal star as `\*`
+	Wildcard bool          // true if the value is a pattern; Str is then in pattern form (`\*` literal star, `\\` backslash), see DecodePattern
 	Quoted   bool          // true if the string value came from a "..."-quoted literal
 	Func     *FuncCallExpr // for ValueFunc: function call resolved at match time
 	Arith    *ArithExpr    // for ValueArith: arithmetic expression resolved at match time
 	List     []any         // for ValueList: elements produced at match time
 	Field    FieldPath     // for ValueFieldRef: the referenced field path
+}
+
+// DecodePattern turns a wildcard value's Str (its pattern form, where `\\`
+// is a backslash and `\*` a literal star) into plain text with the wildcard
+// stars kept as `*`. It is for consumers that match patterns themselves;
+// WildcardToLike does the same for SQL.
+func DecodePattern(s string) string {
+	var b strings.Builder
+	for i := 0; i < len(s); i++ {
+		if s[i] == '\\' && i+1 < len(s) && (s[i+1] == '*' || s[i+1] == '\\') {
+			b.WriteByte(s[i+1])
+			i++
+			continue
+		}
+		b.WriteByte(s[i])
+	}
+	return b.String()
 }
 
 // ArithOp identifies a binary arithmetic operator inside an [ArithExpr]. The

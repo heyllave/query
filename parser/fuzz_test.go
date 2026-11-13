@@ -31,7 +31,7 @@ func FuzzParse(f *testing.F) {
 		// Selectors after values and negations.
 		"A>0 @(A)", "(A!>0 @(A))", "email=a@b.com",
 		// Floats with a bare dot and ranges touching dots.
-		"A>00000. -000000-000000-0", "A:.0. ...0.",
+		"A>00000. -000000-000000-0", "A:.0. ...0.", "A:\x94...00", "A>+0000 -0", "IN A(0A)", "A=0+(+0+(0))", "A(0%(A*(0%0)))", "A(0%(A*(0*0)))", "n>1+(2+3)", "IN(\\(,\\(,\\(,\\ )", "IN(*\\ )", "name=*\\", "A=0 %0\\\\\\\\*", "[A.iN]", "labels.in=1", "IN()!<0", "IN(0)!<0", "IN.A!<0", "NOT or.x=1",
 		// Values that look like other things.
 		"id=550e8400-e29b-41d4-a716-446655440000", "id=version-1.2.3-4", "n=5+3x",
 		"A> =\"*", "A>0 %A(A)A<=0",

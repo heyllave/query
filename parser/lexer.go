@@ -73,6 +73,11 @@ func (l *lexer) run() {
 		}
 
 		ch := l.input[l.pos]
+		if ch != '(' {
+			// Only a '(' directly after IN opens a list; anything else means
+			// the word was a field name (IN=1, IN x(...)).
+			l.expectInList = false
+		}
 		switch {
 		case ch == '(':
 			l.emit(token.LParen, "(")
@@ -242,9 +247,10 @@ func (l *lexer) lexNumericLiteral() {
 			l.pos++
 			continue
 		}
-		if ch == '-' && l.pos+1 < len(l.input) && isDigit(l.input[l.pos+1]) && isDatePrefix(l.input[digitsStart:l.pos]) {
+		if ch == '-' && l.pos+1 < len(l.input) && isDigit(l.input[l.pos+1]) && digitsStart == start && isDatePrefix(l.input[digitsStart:l.pos]) {
 			// A hyphen is part of the literal only where a date has one, so
 			// 2026-01-01 stays a date while 10-3 is the subtraction 10 - 3.
+			// A signed number is never a date (+0000-0 is +0000 minus 0).
 			l.pos++
 			continue
 		}
@@ -676,9 +682,10 @@ func (l *lexer) beginsPrimary(i int) bool {
 // lexUnquotedStringValue lexes the unquoted-string value form used for
 // bareword strings and wildcard patterns. Stops at whitespace, ')', or '..'.
 //
-// Escapes: \* \\ \( \) stand for the literal character. In a value that also
-// has an unescaped star (a wildcard pattern), an escaped star is kept as `\*`
-// in the token value so the matcher can tell a literal star from a wildcard.
+// Escapes: \* \\ \( \) stand for the literal character. A value with an
+// unescaped star is a wildcard pattern and its token value is in pattern
+// form (see encodePattern), so a literal star or backslash stays
+// distinguishable from a wildcard star.
 func (l *lexer) lexUnquotedStringValue() {
 	start := l.pos
 	var buf strings.Builder
@@ -717,8 +724,8 @@ func (l *lexer) lexUnquotedStringValue() {
 
 	raw := l.input[start:l.pos]
 	value := buf.String()
-	if hasWildcard && len(literalStars) > 0 {
-		value = reescapeStars(value, literalStars)
+	if hasWildcard {
+		value = encodePattern(value, literalStars)
 	}
 	pos := token.Position{Offset: start, Length: l.pos - start}
 
@@ -733,17 +740,25 @@ func (l *lexer) lexUnquotedStringValue() {
 	l.tokens = append(l.tokens, tok)
 }
 
-// reescapeStars re-inserts a backslash before the stars at the given byte
-// offsets of value, so they stay distinguishable from wildcard stars.
-func reescapeStars(value string, offsets []int) string {
+// encodePattern writes a decoded wildcard value in pattern form: a
+// backslash becomes `\\`, a literal star (one that was escaped in the source,
+// at the given byte offsets of value) becomes `\*`, and a bare `*` stays a
+// wildcard. ast.DecodePattern reverses it; the matcher and SQL lowering read
+// the pattern form so a literal backslash can never be mistaken for the
+// escape of a star.
+func encodePattern(value string, literalStars []int) string {
 	var b strings.Builder
 	next := 0
 	for i := 0; i < len(value); i++ {
-		if next < len(offsets) && offsets[next] == i {
-			b.WriteByte('\\')
+		switch {
+		case next < len(literalStars) && literalStars[next] == i:
+			b.WriteString(`\*`)
 			next++
+		case value[i] == '\\':
+			b.WriteString(`\\`)
+		default:
+			b.WriteByte(value[i])
 		}
-		b.WriteByte(value[i])
 	}
 	return b.String()
 }

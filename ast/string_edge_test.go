@@ -90,8 +90,8 @@ func TestFieldRefString_Forms(t *testing.T) {
 }
 
 func TestUnquotedSafe(t *testing.T) {
-	safe := []string{"draft", "550e8400-e29b", "1.2.3-beta", "a@b.com", "a\\(b", "a\\*", "x\\\\y", "ünïcode", "a\\"}
-	unsafe := []string{"", "a b", "(a", "a)", "[a]", `a"b`, "a,b", "a=b", "a<b", "a!b", "a:b", "a+b", "a*", "a/b", "a%b", "\x7f"}
+	safe := []string{"draft", "550e8400-e29b", "1.2.3-beta", "a@b.com", "a\\(b", "a\\*", "x\\\\y", "ünïcode"}
+	unsafe := []string{"", "a b", "(a", "a)", "[a]", `a"b`, "a,b", "a=b", "a<b", "a!b", "a:b", "a+b", "a*", "a/b", "a%b", "\x7f", "a\\"}
 	for _, s := range safe {
 		if !unquotedSafe(s) {
 			t.Errorf("unquotedSafe(%q) = false, want true", s)
@@ -117,13 +117,14 @@ func TestSQLOperator_And_WildcardToLike(t *testing.T) {
 		}
 	}
 	tests := map[string]string{
-		"John*":   "John%",
-		"*yota":   "%yota",
-		"*mid*":   "%mid%",
-		"50%*":    `50\%%`,
-		"a_b*":    `a\_b%`,
-		`a\*b*`:   "a*b%",
-		`back\\s`: `back\\\\s`,
+		"John*":    "John%",
+		"*yota":    "%yota",
+		"*mid*":    "%mid%",
+		"50%*":     `50\%%`,
+		"a_b*":     `a\_b%`,
+		`a\*b*`:    "a*b%",
+		`back\\s*`: `back\\s%`,
+		`c\\*`:     `c\\%`,
 	}
 	for in, want := range tests {
 		if got := WildcardToLike(in); got != want {
@@ -191,5 +192,15 @@ func TestWalk_VisitsEveryCall(t *testing.T) {
 	Walk(expr, func(Expression) bool { seen++; return false })
 	if seen != 1 {
 		t.Errorf("pruned walk visited %d nodes, want 1", seen)
+	}
+}
+
+func TestDecodePattern(t *testing.T) {
+	for in, want := range map[string]string{
+		"jo*": "jo*", `a\*b*`: "a*b*", `c\\*`: `c\*`, `\\\*`: `\*`, `plain`: "plain", `trail\\`: `trail\`,
+	} {
+		if got := DecodePattern(in); got != want {
+			t.Errorf("DecodePattern(%q) = %q, want %q", in, got, want)
+		}
 	}
 }

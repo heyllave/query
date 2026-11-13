@@ -73,4 +73,12 @@ semantic versioning once the first tag is cut.
   `validate.WithAllowedFields`/`WithAllowedOps`, `parser.ParseDateLiteral`.
 - Fuzz targets for the parser, value grammar and evaluator (`make fuzz`), run
   briefly in CI; a test that runs every example program (`make examples`).
+- `conformance/sql/`, a separate module with a SQLite reference lowering and a corpus
+  of real, odd and edge cases that the evaluator and a real database must
+  both satisfy (`make sqltest`, run in CI).
+- `len()` counts characters, not bytes.
+- A wildcard value's `Str` is in pattern form (`\*` literal star, `\\`
+  backslash); `ast.DecodePattern` reads it and `WildcardToLike` honours it.
+- A reserved word cannot name a function (`in(x)` is an error); a dotted
+  path may contain one as a later segment (`labels.in`).
 - `CONTRIBUTING.md` and this changelog.

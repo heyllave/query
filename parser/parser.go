@@ -282,7 +282,16 @@ func (p *parser) parseQualifier() ast.Expression {
 		return nil
 	}
 
-	// Check if this is a function call: identifier followed by '('
+	// Check if this is a function call: identifier followed by '('. A
+	// reserved word cannot name a function: `in(` opens an IN list and
+	// `not(`/`and(`/`or(` read as connectives, so such a call could never
+	// print back unambiguously.
+	if p.peek().Type.IsKeyword() && p.peekAt(1).Type == token.LParen {
+		tok := p.peek()
+		p.errors.add(newError(CodeExpectedField, ErrUnexpectedToken, tok.Pos,
+			"reserved word %q cannot name a function", tok.Value))
+		return nil
+	}
 	if p.peek().Type != token.FieldRef && p.peek().Type != token.String && p.peekAt(1).Type == token.LParen {
 		return p.parseFuncCallOrQualifier()
 	}
@@ -442,7 +451,8 @@ func (p *parser) parseFieldName() ast.FieldPath {
 	parts = append(parts, first.Value)
 	for p.peek().Type == token.Dot {
 		p.advance()
-		if p.peek().Type != token.Ident {
+		// A segment after a dot may be a reserved word (labels.in).
+		if p.peek().Type != token.Ident && !p.peek().Type.IsKeyword() {
 			p.errors.add(newError(CodeExpectedField, ErrSyntax, p.peek().Pos,
 				"expected field name after '.', got %s", p.peek()))
 			break

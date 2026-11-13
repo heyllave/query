@@ -6,6 +6,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode/utf8"
 )
 
 // Func is a registered function that can be called from query expressions.
@@ -225,8 +226,9 @@ func fnLen(args ...any) (any, error) {
 	if len(args) != 1 {
 		return nil, fmt.Errorf("len() requires 1 argument, got %d", len(args))
 	}
-	// A list reports its element count; anything else reports the length of its
-	// string form (so len() of a name is its character count).
+	// A list reports its element count; anything else reports the number of
+	// characters (runes) in its string form, so len() of "café" is 4, as a
+	// user and a SQL LENGTH() would both count it.
 	if elems, ok := toSlice(args[0]); ok {
 		return int64(len(elems)), nil
 	}
@@ -234,7 +236,7 @@ func fnLen(args ...any) (any, error) {
 	if !ok {
 		return nil, nil
 	}
-	return int64(len(s)), nil
+	return int64(utf8.RuneCountInString(s)), nil
 }
 
 // fnContains reports membership two ways. When the first argument is a list, it

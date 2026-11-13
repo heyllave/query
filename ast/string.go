@@ -41,16 +41,20 @@ func writeExpr(buf *strings.Builder, expr Expression) {
 		}
 		if e.EndValue != nil {
 			buf.WriteByte(':')
-			writeValue(buf, &e.Value)
-			// A boundary that touches a '.' would fuse with the range
-			// operator (`.0....0`), so pad it with spaces, which the lexer
-			// accepts around `..`.
-			if strings.HasSuffix(e.Value.Raw, ".") || strings.HasPrefix(e.EndValue.Raw, ".") {
+			var start, end strings.Builder
+			writeValue(&start, &e.Value)
+			writeValue(&end, e.EndValue)
+			buf.WriteString(start.String())
+			// A printed boundary that touches a '.' would fuse with the
+			// range operator (`.0....0`), so pad it with spaces, which the
+			// lexer accepts around `..`. The decision uses the printed text,
+			// not Raw, so it is stable across re-parses.
+			if strings.HasSuffix(start.String(), ".") || strings.HasPrefix(end.String(), ".") {
 				buf.WriteString(" .. ")
 			} else {
 				buf.WriteString("..")
 			}
-			writeValue(buf, e.EndValue)
+			buf.WriteString(end.String())
 		} else {
 			buf.WriteString(token.OperatorSymbol(e.Operator))
 			writeValue(buf, &e.Value)
@@ -96,7 +100,7 @@ func writeExpr(buf *strings.Builder, expr Expression) {
 // is a plain identifier, otherwise in the quoted bracket form the parser
 // accepts there (["foo bar"]).
 func writeFieldName(buf *strings.Builder, fp FieldPath) {
-	if fieldRefNeedsQuote(fp) || isReservedWord(fp.String()) {
+	if fieldRefNeedsQuote(fp) || (len(fp) > 0 && isReservedWord(fp[0])) {
 		buf.WriteString(FieldRefString(fp, true))
 		return
 	}
@@ -220,6 +224,12 @@ func writeValue(buf *strings.Builder, v *Value) {
 		// them apart and is skipped by the lexer.
 		buf.WriteByte(' ')
 	}
+	if v.Type == ValueString && v.Wildcard && endsWithLoneBackslash(v.Raw) {
+		// A pattern cannot be quoted without losing its stars, so a trailing
+		// backslash is doubled; the lexer decodes `\\` back to one.
+		buf.WriteString(v.Raw + `\`)
+		return
+	}
 	if v.Type == ValueString && (v.Quoted || (!v.Wildcard && !unquotedSafe(v.Raw))) {
 		// A string that would not lex back as the same unquoted value (it is
 		// empty, or holds whitespace, an operator or a delimiter) is quoted.
@@ -238,7 +248,12 @@ func unquotedSafe(raw string) bool {
 		return false
 	}
 	for i := 0; i < len(raw); i++ {
-		if raw[i] == '\\' && i+1 < len(raw) {
+		if raw[i] == '\\' {
+			if i+1 >= len(raw) {
+				// A trailing backslash would escape whatever follows the
+				// value when it is printed (`\)` or `\,`).
+				return false
+			}
 			switch raw[i+1] {
 			case '*', '\\', '(', ')':
 				i++ // an escape pair the lexer decodes
@@ -254,6 +269,16 @@ func unquotedSafe(raw string) bool {
 		}
 	}
 	return true
+}
+
+// endsWithLoneBackslash reports whether raw ends in a backslash that is not
+// itself escaped, which would escape the character printed after it.
+func endsWithLoneBackslash(raw string) bool {
+	n := 0
+	for i := len(raw) - 1; i >= 0 && raw[i] == '\\'; i-- {
+		n++
+	}
+	return n%2 == 1
 }
 
 // hasStringOperand reports whether an arithmetic value has a string literal
@@ -278,9 +303,10 @@ func hasStringOperand(v *Value) bool {
 // non-commutative parent (`-`, `/`, `%`) also needs parens when its operator
 // has equal precedence — `5-(2-1)` is not `5-2-1`.
 func writeArithOperand(buf *strings.Builder, v *Value, parentOp ArithOp, isLeft bool) {
-	if v != nil && !isLeft && (v.Type == ValueInteger || v.Type == ValueFloat) && len(v.Raw) > 0 && (v.Raw[0] == '-' || v.Raw[0] == '+') {
-		// A signed literal on the right (`5 - -3`) is grouped so the sign
-		// does not read as a second operator.
+	if v != nil && !isLeft && leftmostSigned(v) {
+		// A right operand whose text begins with a sign (`5 - -3`, or a
+		// sub-expression starting with one) is grouped so the sign does not
+		// read as a second operator.
 		buf.WriteByte('(')
 		writeValue(buf, v)
 		buf.WriteByte(')')
@@ -290,7 +316,11 @@ func writeArithOperand(buf *strings.Builder, v *Value, parentOp ArithOp, isLeft 
 		// A string operand only lexes inside arithmetic when quoted. A
 		// wildcard here is printed as literal text: arithmetic over a
 		// pattern never resolves, so nothing is lost.
-		writeQuotedString(buf, strings.ReplaceAll(v.Str, `\*`, "*"))
+		text := v.Str
+		if v.Wildcard {
+			text = DecodePattern(text)
+		}
+		writeQuotedString(buf, text)
 		return
 	}
 	if v != nil && v.Type == ValueArith && v.Arith != nil {
@@ -298,14 +328,11 @@ func writeArithOperand(buf *strings.Builder, v *Value, parentOp ArithOp, isLeft 
 		parentPrec := arithPrecedence(parentOp)
 		needParens := childPrec < parentPrec
 		if !needParens && !isLeft && childPrec == parentPrec {
-			// Non-commutative ops need right-side parens at equal precedence
-			// (`5-(2-1)` is not `5-2-1`). Commutative `+` and `*` don't.
-			switch parentOp {
-			case ArithSub, ArithDiv, ArithMod:
-				needParens = true
-			default:
-				// ArithAdd, ArithMul — commutative, no parens needed.
-			}
+			// A right child at equal precedence always keeps its parens:
+			// `5-(2-1)` is not `5-2-1`, `a*(b%c)` is not `a*b%c`, and even
+			// `a+(b+c)` is a different tree from `a+b+c`, which String must
+			// reproduce exactly.
+			needParens = true
 		}
 		if needParens {
 			buf.WriteByte('(')
@@ -332,6 +359,15 @@ func looksLikeDatePrefix(v *Value) bool {
 		}
 	}
 	return true
+}
+
+// leftmostSigned reports whether the printed text of v begins with a sign:
+// a signed numeric literal, or arithmetic whose leftmost leaf is one.
+func leftmostSigned(v *Value) bool {
+	for v != nil && v.Type == ValueArith && v.Arith != nil {
+		v = v.Arith.Left
+	}
+	return v != nil && (v.Type == ValueInteger || v.Type == ValueFloat) && len(v.Raw) > 0 && (v.Raw[0] == '-' || v.Raw[0] == '+')
 }
 
 func arithPrecedence(op ArithOp) int {
