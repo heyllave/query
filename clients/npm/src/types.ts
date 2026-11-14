@@ -132,11 +132,23 @@ export type OpId =
   | "*"
   | "?";
 
+/** The name of a field type, as Go's validate.FieldValueType prints it. */
+export type FieldTypeName =
+  | "text"
+  | "integer"
+  | "decimal"
+  | "boolean"
+  | "date"
+  | "datetime"
+  | "duration";
+
 /** Field configuration for validation. */
 export interface FieldConfig {
   Name: string;
-  Type: number;
-  AllowedOps: string[];
+  /** The type's name, or its number in the order of {@link FieldTypeName}. */
+  Type: number | FieldTypeName;
+  /** Omit to get the operators that suit the type. */
+  AllowedOps?: string[];
   Searchable?: boolean;
   Nested?: boolean;
 }
@@ -189,6 +201,7 @@ export type ValidationErrorCode =
   | "fieldNotFound"
   | "operatorNotAllowed"
   | "typeMismatch"
+  | "functionNotAllowed"
   | "customRule";
 
 /**

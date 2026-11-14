@@ -1,4 +1,4 @@
-.PHONY: build test coverage lint fmt vet check clean wasm fuzz examples sqltest
+.PHONY: build test coverage lint fmt vet check clean wasm fuzz examples sqltest clib golden
 
 GO       := go
 GOTEST   := $(GO) test
@@ -20,7 +20,7 @@ coverage:
 	$(GO) tool cover -func=$(COVERAGE) | tail -1
 
 lint:
-	golangci-lint run ./token/... ./ast/... ./parser/... ./validate/... ./eval/... ./examples/... .
+	golangci-lint run ./cmd/... ./token/... ./ast/... ./parser/... ./validate/... ./eval/... ./examples/... ./internal/... ./conformance/... .
 
 fmt:
 	gofmt -w .
@@ -54,3 +54,13 @@ examples:
 # and through a real SQLite database (separate module, pure-Go driver).
 sqltest:
 	cd conformance/sql && $(GOTEST) $(GOFLAGS) -count=1 ./...
+
+# Build the C shared library and run the shared corpus through it from Python.
+clib:
+	$(MAKE) -C clients/ffi test
+
+# Rewrite the golden file after an intended change to the grammar, the printed
+# form, the JSON tree or an error code. Review the diff: each changed line is a
+# query that now means something else.
+golden:
+	$(GOTEST) -count=1 -run TestGolden ./internal/bridgejson -update

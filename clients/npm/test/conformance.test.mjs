@@ -1,5 +1,5 @@
 // Runs the shared cross-language corpus (/conformance/corpus.json) against the
-// query WASM build. The Go client runs the same file, so grammar drift
+// query WASM build. The Go API and the C library run the same file, so grammar drift
 // between implementations becomes a failing build.
 
 import test from "node:test";
@@ -13,7 +13,7 @@ const wasmPath = join(here, "..", "query.wasm");
 const wasmExecPath = join(here, "..", "src", "wasm_exec.js");
 const corpusPath = join(here, "..", "..", "..", "conformance", "corpus.json");
 
-const EXPECTED_CASES = 43;
+const EXPECTED_CASES = 135;
 
 async function loadWasm() {
   await import(wasmExecPath);

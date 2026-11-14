@@ -1,8 +1,9 @@
 // Package bridgejson is the shared JSON contract for the query language's
-// foreign-language bridges (WASM/JS and cgo/FFI). It converts between the AST
-// and a stable JSON representation and decodes field configs, so every bridge
-// produces and accepts identical shapes — the single source of truth that keeps
-// the JavaScript and C clients from drifting apart.
+// foreign-language bridges: WASM for JavaScript and a C shared library for
+// everything else. It converts between the AST and a stable JSON
+// representation, decodes field configs and implements each bridge call
+// (api.go), so every bridge produces and accepts identical shapes and a client
+// in one language cannot drift from a client in another.
 //
 // It carries no build tag and depends only on the pure-Go library packages, so
 // it compiles in every target (host, WASM, cgo).
@@ -311,14 +312,45 @@ func symbolToToken(op string) token.Type {
 	}
 }
 
-// ParseFields decodes a field-config JSON array, shared by the bridges so the
-// "invalid fields config" error wording stays identical across clients.
+// ParseFields decodes a field-config JSON array, shared by the bridges so
+// every client is held to the same rules. A field's type is its name
+// ("decimal") or its number; a field that lists no operators gets the defaults
+// for its type. A config that could only misbehave silently — a nameless or
+// repeated field, an operator the language does not have — is an error.
 func ParseFields(fieldsJSON string) ([]validate.FieldConfig, error) {
 	var fields []validate.FieldConfig
 	if err := json.Unmarshal([]byte(fieldsJSON), &fields); err != nil {
 		return nil, fmt.Errorf("invalid fields config: %w", err)
 	}
+	seen := make(map[string]bool, len(fields))
+	for i := range fields {
+		f := &fields[i]
+		if f.Name == "" {
+			return nil, fmt.Errorf("invalid fields config: field %d has no name", i)
+		}
+		if seen[f.Name] {
+			return nil, fmt.Errorf("invalid fields config: field %q is declared twice", f.Name)
+		}
+		seen[f.Name] = true
+		if f.AllowedOps == nil {
+			f.AllowedOps = validate.DefaultOps(f.Type)
+		}
+		for _, op := range f.AllowedOps {
+			if !knownOp(op) {
+				return nil, fmt.Errorf("invalid fields config: field %q lists unknown operator %q", f.Name, op)
+			}
+		}
+	}
 	return fields, nil
+}
+
+func knownOp(op validate.Op) bool {
+	switch op {
+	case validate.OpEq, validate.OpNeq, validate.OpGt, validate.OpGte, validate.OpLt,
+		validate.OpLte, validate.OpRange, validate.OpWildcard, validate.OpPresence:
+		return true
+	}
+	return false
 }
 
 // ValidationErrors lists each validation failure inside err as

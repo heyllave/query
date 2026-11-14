@@ -5,6 +5,10 @@ on:
     branches: [main]
   pull_request:
     branches: [main]
+  # A longer fuzz pass once a week, so a slow-to-find input turns up between
+  # changes rather than in someone's pull request.
+  schedule:
+    - cron: "17 4 * * 1"
 
 permissions:
   contents: read
@@ -52,7 +56,7 @@ jobs:
         uses: golangci/golangci-lint-action@v9
         with:
           version: v2.13
-          args: ./token/... ./ast/... ./parser/... ./validate/... ./eval/... ./examples/... ./internal/... ./conformance/... .
+          args: ./cmd/... ./token/... ./ast/... ./parser/... ./validate/... ./eval/... ./examples/... ./internal/... ./conformance/... .
 
   test:
     name: Unit tests
@@ -67,7 +71,7 @@ jobs:
 
       # cgo needs a C compiler and the runner's has moved before: the job used
       # to hard-code clang, which vanished from the image and took the race
-      # detector, and the FFI build down with it. Pick whichever is
+      # detector and the C library build down with it. Pick whichever is
       # actually installed, and say so plainly when none is.
       - name: Pick a C compiler for cgo
         run: |
@@ -78,7 +82,7 @@ jobs:
               exit 0
             fi
           done
-          echo "::error::No C compiler on this runner. cgo needs one for the race detector and the FFI build — install clang or gcc on the image."
+          echo "::error::No C compiler on this runner. cgo needs one for the race detector and the C library build — install clang or gcc on the image."
           exit 1
 
       - name: Run tests
@@ -90,10 +94,19 @@ jobs:
           go test -race -count=1 \
             -coverprofile=coverage.out -covermode=atomic \
             -coverpkg=./token/...,./ast/...,./parser/...,./validate/...,./eval/...,./ \
-            ./token/... ./ast/... ./parser/... ./validate/... ./eval/... ./conformance/... .
+            ./token/... ./ast/... ./parser/... ./validate/... ./eval/... ./conformance/... \
+            ./internal/... ./cmd/... .
 
-      - name: Print coverage summary
-        run: go tool cover -func=coverage.out | tail -1
+      # The library packages sit near 95%; a change that drops them below 90%
+      # is adding untested behaviour.
+      - name: Enforce the coverage floor
+        run: |
+          total=$(go tool cover -func=coverage.out | tail -1 | awk '{print $NF}' | tr -d '%')
+          echo "coverage: ${total}%"
+          if awk -v t="$total" 'BEGIN { exit !(t < 90) }'; then
+            echo "::error::Coverage ${total}% is below the 90% floor."
+            exit 1
+          fi
 
       - name: Run the example programs
         run: go test -count=1 ./examples/
@@ -171,3 +184,88 @@ jobs:
         with:
           name: query-wasm
           path: clients/npm/query.wasm
+
+  # The library promises to behave the same wherever Go runs. This job holds
+  # it to that on the three desktop systems, on the oldest Go the module
+  # supports and the newest one released, and on a 32-bit build where int is
+  # half the size.
+  portability:
+    name: ${{ matrix.name }}
+    runs-on: ${{ matrix.os }}
+    needs: [checks]
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { name: "Linux, oldest Go", os: ubuntu-latest, go: "1.25", goarch: amd64 }
+          - { name: "Linux, newest Go", os: ubuntu-latest, go: stable, goarch: amd64 }
+          - { name: "Linux, 32-bit", os: ubuntu-latest, go: stable, goarch: "386" }
+          - { name: "macOS", os: macos-latest, go: stable, goarch: arm64 }
+          - { name: "Windows", os: windows-latest, go: stable, goarch: amd64 }
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ matrix.go }}
+
+      - name: Run tests
+        env:
+          GOARCH: ${{ matrix.goarch }}
+          CGO_ENABLED: "0"
+        run: go test -count=1 ./...
+
+  # The C shared library is how every language other than Go and JavaScript
+  # reaches the engine. This builds it and runs the shared corpus through it
+  # from Python, the way a real binding would call it, along with malformed
+  # requests and calls from several threads at once.
+  clib:
+    name: C library & cross-language conformance
+    runs-on: ${{ fromJSON(vars.CI_RUNNER || '["ubuntu-latest"]') }}
+    needs: [checks]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+
+      - name: Pick a C compiler for cgo
+        run: |
+          for candidate in clang gcc cc; do
+            if command -v "$candidate" >/dev/null 2>&1; then
+              echo "CC=$candidate" >> "$GITHUB_ENV"
+              echo "using $candidate ($(command -v "$candidate"))"
+              exit 0
+            fi
+          done
+          echo "::error::No C compiler on this runner. cgo needs one for the C library build — install clang or gcc on the image."
+          exit 1
+
+      - name: Build libquery and run the corpus from Python
+        env:
+          CGO_ENABLED: "1"
+        run: make -C clients/ffi test
+
+  fuzz-long:
+    name: Fuzz (weekly, 5 minutes per target)
+    if: github.event_name == 'schedule'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+
+      - name: Fuzz
+        run: make fuzz FUZZTIME=5m
+
+      # A failing input is written under testdata/fuzz; keep it so it can be
+      # committed as a regression seed.
+      - name: Upload failing inputs
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: fuzz-failures
+          path: "**/testdata/fuzz/"

@@ -307,6 +307,15 @@ The built-in day-count functions (`daysAgo`, `addDays`, `addBusinessDays`) accep
 
 Independently of `WithMaxLength`, the parser refuses a query that nests groups, negations, selectors, parenthesised values or function calls more than `parser.MaxNesting` (128) levels deep (`nestingTooDeep`), so disabling the length limit cannot be used to exhaust the stack.
 
+A consumer that only parses and validates, then translates the tree itself (to SQL, to an API filter), should also name the functions it can translate. The validator otherwise accepts any function name, because which functions exist is the evaluator's business:
+
+```go
+v := validate.New(fields,
+    validate.WithAllowedFunctions("lower", "now"), // none listed: no functions at all
+)
+err := v.Validate(expr) // upper(name)=X fails with code functionNotAllowed, positioned at upper
+```
+
 ## Custom Validation Rules
 
 For rules beyond field/type/op checks (per-tenant access, cross-field
@@ -443,6 +452,48 @@ orders@all(price>0) AND orders@none(status=cancelled)
 
 Codegen via `Visitor[T]` is the consumer's responsibility — the library does not translate selectors into SQL `EXISTS` or JSON path queries. See `ast.VisitSelector` to plug in your target. `examples/sql/main.go` shows a translation to `EXISTS` / `NOT EXISTS` correlated subqueries.
 
+## Other Languages
+
+JavaScript and TypeScript use the npm package in `clients/npm`, which runs the Go engine compiled to WASM. Every other language uses the C shared library in `clients/ffi`:
+
+```bash
+make -C clients/ffi build   # libquery.so / libquery.dylib and libquery.h
+make -C clients/ffi test    # the shared corpus, run from Python through the library
+```
+
+Each of the six functions (`QueryParse`, `QueryValidate`, `QueryStringify`, `QueryParseAndValidate`, `QueryMatch`, `QueryEval`) takes one JSON object as a C string and returns one, which the caller frees with `QueryFree`. They are safe to call from many threads, never return `NULL` and never abort the process. `clients/ffi/conformance_test.py` is a complete binding in about forty lines:
+
+```python
+lib.call("QueryMatch",
+         query="labels.team=payments AND replicas>=2",
+         fields=[{"name": "labels", "type": "text", "nested": True},
+                 {"name": "replicas", "type": "integer"}],
+         record={"labels": {"team": "payments"}, "replicas": 3})
+# {"result": true}
+```
+
+A field's `type` is its name (`text`, `integer`, `decimal`, `boolean`, `date`, `datetime`, `duration`); a field that lists no `allowedOps` gets the operators that suit its type. Failures carry `error` (English, for logs) and a list of coded entries with the span to underline: `errors` for syntax, `validationErrors` for validation. Both bridges are thin wrappers over one implementation (`internal/bridgejson`), so the JavaScript and C results cannot differ.
+
+## Stability
+
+What a caller can rely on, and what holds the library to it:
+
+| Promise | Held by |
+|---|---|
+| A query keeps its meaning. | `internal/bridgejson/testdata/golden.jsonl` records, for several hundred queries, the printed form and the JSON tree, or the error codes. Any change shows up as a diff of that file and has to be made on purpose (`go test ./internal/bridgejson -run TestGolden -update`). |
+| Error codes never change once shipped. | The same file, plus `parser/code_test.go`, which requires an input for every code. English messages may be reworded. |
+| Every client agrees. | `conformance/corpus.json` runs against the Go API, the bridge envelopes, the JavaScript client and the C library. |
+| The evaluator agrees with SQL. | `conformance/sql` runs every case through the evaluator and a real SQLite database. |
+| No input panics, and printing a query gives a query that parses to the same tree. | Four fuzz targets, run on every push and for longer every week. |
+| A compiled program is safe to share between goroutines. | Race-detector runs of concurrent `Match` and `Validate`. |
+| A record cannot crash the evaluator. | `eval/robust_test.go` matches against channels, functions, nil pointers, NaN, cyclic maps and other values a real record should never hold. |
+| The host's own functions cannot crash it either. | A panic inside a function registered with `WithFunctions` becomes an error from that call. |
+| It behaves the same everywhere Go runs. | CI runs the tests on Linux, macOS and Windows, on the oldest supported Go and the newest, and on a 32-bit build. |
+
+Limits that apply to every query: 256 bytes unless `WithMaxLength` says otherwise, `parser.MaxNesting` (128) levels of nesting, and ±`eval.MaxCalendarDays` for day arithmetic. A query runs in time proportional to its length and the size of the record; there are no loops, no recursion and no user-defined functions in the language.
+
+Until the first tagged release the Go API may still change between commits; pin a commit. From `v1.0.0` on, versions follow semantic versioning: the grammar, the error codes, the JSON tree and the exported Go API only change incompatibly in a major version. See `SECURITY.md` for what counts as a vulnerability and how to report one.
+
 ## Operators
 
 | Operator | Allowed Types | Description |
@@ -467,7 +518,7 @@ Codegen via `Visitor[T]` is the consumer's responsibility — the library does n
 
 ## Strengths
 
-- **URL-native syntax** — `state=draft AND total>50000` works directly in `?q=` params. No quotes, no `==`, no `&&`.
+- **URL-native syntax** — `state=draft AND total>50000` works directly in `?q=` params. No quotes, no `==`, no `&&` (writing `==`, `=>` or `<>` is a parse error, not a comparison against the text `=draft`).
 - **Zero dependencies** — stdlib only. Compiles to WASM without issues.
 - **Compile-time type safety** — `CompileFor[T]` catches field name typos and type mismatches before any data is evaluated.
 - **Multi-target code generation** — one AST, many outputs. The `Visitor[T]` pattern makes it trivial to generate SQL, JSON, React components, or filter functions.
@@ -477,8 +528,8 @@ Codegen via `Visitor[T]` is the consumer's responsibility — the library does n
 - **Struct binding** — `query:"field_name"` tags on Go structs auto-generate field configs.
 - **Round-trip fidelity** — `ast.String(ast.Parse(q)) == q` for all normalized queries.
 - **TypeScript package** — full type definitions, visitor pattern, and WASM loader for browser/Node.js.
-- **C shared library** — `clients/ffi` builds `libquery` for any language with a C FFI; it runs the same engine as the Go and JS clients.
-- **Cross-language conformance** — the Go and JS/WASM clients run one shared corpus in CI, so grammar drift between implementations fails the build.
+- **Any other language** — a C shared library (`clients/ffi`) exposes the same engine with the same JSON contract to anything that can call C.
+- **Cross-language conformance** — the Go API, the JavaScript client over WASM and a Python runner over the C library all run one shared corpus in CI, so drift between them fails the build.
 
 ## Scope
 

@@ -140,7 +140,7 @@ func run(args []string, stdout, stderr *os.File) int {
 		printUsage(stdout)
 		return 0
 	default:
-		fmt.Fprintf(stderr, "unknown command: %s\n\n", args[0])
+		_, _ = fmt.Fprintf(stderr, "unknown command: %s\n\n", args[0])
 		printUsage(stderr)
 		return 1
 	}
@@ -160,8 +160,8 @@ func runExplain(args []string, stdout, stderr *os.File) int {
 	}
 
 	if fs.NArg() == 0 {
-		fmt.Fprintln(stderr, "error: missing query expression")
-		fmt.Fprintln(stderr, "usage: query explain \"<expression>\" [--json] [--tokens] [--schema <path>] [--positions]")
+		_, _ = fmt.Fprintln(stderr, "error: missing query expression")
+		_, _ = fmt.Fprintln(stderr, "usage: query explain \"<expression>\" [--json] [--tokens] [--schema <path>] [--positions]")
 		return 1
 	}
 
@@ -176,9 +176,9 @@ func runExplain(args []string, stdout, stderr *os.File) int {
 		}
 		for _, tok := range tokens {
 			if *positions {
-				fmt.Fprintf(stdout, "%-10s %-20s [%d:%d]\n", tok.Type, tok.Value, tok.Pos.Offset, tok.Pos.Length)
+				_, _ = fmt.Fprintf(stdout, "%-10s %-20s [%d:%d]\n", tok.Type, tok.Value, tok.Pos.Offset, tok.Pos.Length)
 			} else {
-				fmt.Fprintf(stdout, "%-10s %s\n", tok.Type, tok.Value)
+				_, _ = fmt.Fprintf(stdout, "%-10s %s\n", tok.Type, tok.Value)
 			}
 		}
 		return 0
@@ -195,12 +195,12 @@ func runExplain(args []string, stdout, stderr *os.File) int {
 	if *schemaPath != "" {
 		fields, err := loadSchema(*schemaPath)
 		if err != nil {
-			fmt.Fprintf(stderr, "error: %s\n", err)
+			_, _ = fmt.Fprintf(stderr, "error: %s\n", err)
 			return 1
 		}
 		v := validate.New(fields)
 		if err := v.Validate(expr); err != nil {
-			fmt.Fprintln(stderr, err)
+			_, _ = fmt.Fprintln(stderr, err)
 			return 1
 		}
 	}
@@ -214,7 +214,7 @@ func runExplain(args []string, stdout, stderr *os.File) int {
 	// --json mode
 	if *jsonFlag {
 		if err := output.Format(stdout, expr, output.JSONOutput, opts...); err != nil {
-			fmt.Fprintf(stderr, "error: encoding JSON: %s\n", err)
+			_, _ = fmt.Fprintf(stderr, "error: encoding JSON: %s\n", err)
 			return 1
 		}
 		return 0
@@ -222,7 +222,7 @@ func runExplain(args []string, stdout, stderr *os.File) int {
 
 	// Default: tree view
 	if err := output.Format(stdout, expr, output.TreeOutput, opts...); err != nil {
-		fmt.Fprintf(stderr, "error: rendering tree: %s\n", err)
+		_, _ = fmt.Fprintf(stderr, "error: rendering tree: %s\n", err)
 		return 1
 	}
 	return 0
@@ -231,16 +231,16 @@ func runExplain(args []string, stdout, stderr *os.File) int {
 func printErrors(query string, err error, stderr *os.File) {
 	errs := parser.Errors(err)
 	if len(errs) == 0 {
-		fmt.Fprintf(stderr, "error: %s\n", err)
+		_, _ = fmt.Fprintf(stderr, "error: %s\n", err)
 		return
 	}
 
 	for _, e := range errs {
 		// The code is what a client keys its own wording off, so printing it
 		// here is how someone writing one finds the identifier to switch on.
-		fmt.Fprintf(stderr, "error [%s]: %s\n", e.Code, e.Message)
-		fmt.Fprintf(stderr, "  %s\n", query)
-		fmt.Fprintf(stderr, "  %s\n", caret(query, e.Position))
+		_, _ = fmt.Fprintf(stderr, "error [%s]: %s\n", e.Code, e.Message)
+		_, _ = fmt.Fprintf(stderr, "  %s\n", query)
+		_, _ = fmt.Fprintf(stderr, "  %s\n", caret(query, e.Position))
 	}
 }
 
@@ -266,10 +266,10 @@ func caret(query string, pos token.Position) string {
 }
 
 func printUsage(w *os.File) {
-	fmt.Fprintln(w, "Usage: query <command> [arguments]")
-	fmt.Fprintln(w)
-	fmt.Fprintln(w, "Commands:")
-	fmt.Fprintln(w, "  explain    Parse a query expression and visualize the AST")
-	fmt.Fprintln(w)
-	fmt.Fprintln(w, "Run 'query explain --help' for flag details.")
+	_, _ = fmt.Fprintln(w, "Usage: query <command> [arguments]")
+	_, _ = fmt.Fprintln(w)
+	_, _ = fmt.Fprintln(w, "Commands:")
+	_, _ = fmt.Fprintln(w, "  explain    Parse a query expression and visualize the AST")
+	_, _ = fmt.Fprintln(w)
+	_, _ = fmt.Fprintln(w, "Run 'query explain --help' for flag details.")
 }

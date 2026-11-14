@@ -367,13 +367,13 @@ func tempFiles(t *testing.T) (stdout, stderr *os.File) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { stdout.Close() })
+	t.Cleanup(func() { _ = stdout.Close() })
 
 	stderr, err = os.Create(filepath.Join(dir, "stderr"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { stderr.Close() })
+	t.Cleanup(func() { _ = stderr.Close() })
 	return stdout, stderr
 }
 

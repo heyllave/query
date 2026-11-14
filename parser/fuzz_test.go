@@ -32,6 +32,7 @@ func FuzzParse(f *testing.F) {
 		"x NOT IN (a, b)", "lower(x) IN (a, b*)", "f(x) NOT IN (1)", "a (b)", "f(a) (b)",
 		"a\u00a0b", "x=a\u3000b", "[\"a\u00a0b\"]=1", "ip=10.0.0.1/24", "d>f(d, 1-8)",
 		"n>10*-3", "n>10--3", `n>abs(["cpu limit"])`, "f((A))", `f(["true"])`, "f(in)",
+		"n>abs([a]-[b])", "n>min(len([a])+1, 9)", "f([a]*2)=1", "f(g(a)%2, [b])", "f([a]+)", "f(g(+1)", "f([a]+1, 9)>2", "a==b", "a=>5", "x=f(a.b, c.d)", "x>len(labels.team)+1", "x=f(a..b)", "x=f(.a)", "n=𑑑", "n>٣", "d=٣d", `a="=b"`, `a IN (=b, ">c")`,
 		// Selectors after values and negations.
 		"A>0 @(A)", "(A!>0 @(A))", "email=a@b.com",
 		// Floats with a bare dot and ranges touching dots.
@@ -65,7 +66,7 @@ func FuzzParse(f *testing.F) {
 
 // FuzzParseValue checks the value grammar the same way.
 func FuzzParseValue(f *testing.F) {
-	for _, s := range []string{"1+2", "now()-7d", "upper(name)", "(1+2)*3", "1/0", "len(tags)", "[base]*1.1", `"a"%2`, "-5", "+3.5"} {
+	for _, s := range []string{"1+2", "now()-7d", "upper(name)", "(1+2)*3", "1/0", "len(tags)", "[base]*1.1", `"a"%2`, "-5", "+3.5", "abs([a]-[b])", "min(f([a])+1, 9)", "A([A.A])", "f(a.b/c, d.e)+1", "(𑑑)", "𑑑", "n=٣"} {
 		f.Add(s)
 	}
 	f.Fuzz(func(t *testing.T, s string) {
