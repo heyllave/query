@@ -1,6 +1,7 @@
 // Package conformance runs the shared cross-language corpus (corpus.json)
-// against the real Go query engine. The same corpus is run by the JavaScript and
-// C-library clients, so any grammar drift between implementations fails a build.
+// against the real Go query engine. The same corpus is run by the JavaScript
+// client over WASM and by a Python runner over the C library, so any grammar
+// drift between implementations fails a build.
 package conformance
 
 import (
@@ -11,35 +12,47 @@ import (
 
 	"github.com/heyllave/query/ast"
 	"github.com/heyllave/query/eval"
+	"github.com/heyllave/query/internal/bridgejson"
 	"github.com/heyllave/query/parser"
 	"github.com/heyllave/query/validate"
 )
 
 type corpus struct {
-	Version   int                               `json:"version"`
-	FieldSets map[string][]validate.FieldConfig `json:"fieldSets"`
-	Cases     []testCase                        `json:"cases"`
+	Version   int                  `json:"version"`
+	FieldSets map[string]fieldList `json:"fieldSets"`
+	Cases     []testCase           `json:"cases"`
 }
 
 type testCase struct {
-	ID           string                 `json:"id"`
-	Desc         string                 `json:"desc"`
-	Op           string                 `json:"op"`
-	Query        string                 `json:"query"`
-	FieldSet     string                 `json:"fieldSet"`
-	Fields       []validate.FieldConfig `json:"fields"`
-	Record       map[string]any         `json:"record"`
-	ExpectMatch  *bool                  `json:"expectMatch"`
-	ExpectValue  *float64               `json:"expectValue"`
-	ExpectError  *bool                  `json:"expectError"`
-	ExpectAst    string                 `json:"expectAst"`
-	ExpectString string                 `json:"expectString"`
-	ExpectCode   string                 `json:"expectCode"`
-	Tolerance    float64                `json:"tolerance"`
+	ID           string         `json:"id"`
+	Desc         string         `json:"desc"`
+	Op           string         `json:"op"`
+	Query        string         `json:"query"`
+	FieldSet     string         `json:"fieldSet"`
+	Fields       fieldList      `json:"fields"`
+	Record       map[string]any `json:"record"`
+	ExpectMatch  *bool          `json:"expectMatch"`
+	ExpectValue  *float64       `json:"expectValue"`
+	ExpectError  *bool          `json:"expectError"`
+	ExpectAst    string         `json:"expectAst"`
+	ExpectString string         `json:"expectString"`
+	ExpectCode   string         `json:"expectCode"`
+	Tolerance    float64        `json:"tolerance"`
+}
+
+// fieldList decodes a field config the way every bridge does, so the Go run
+// reads the corpus exactly as the other clients do: types by name or number,
+// and the default operators for a field that lists none.
+type fieldList []validate.FieldConfig
+
+func (l *fieldList) UnmarshalJSON(data []byte) error {
+	fields, err := bridgejson.ParseFields(string(data))
+	*l = fields
+	return err
 }
 
 // expectedCaseCount guards against a stale/truncated corpus silently passing.
-const expectedCaseCount = 43
+const expectedCaseCount = 135
 
 func loadCorpus(t *testing.T) corpus {
 	t.Helper()
@@ -81,7 +94,7 @@ func runCase(t *testing.T, c corpus, tc testCase) {
 		checkErr(t, tc, err)
 		checkCode(t, tc, err)
 		if err == nil && tc.ExpectAst != "" {
-			// AST type is asserted loosely (presence + no error); the JS
+			// AST type is asserted loosely (presence + no error); the other
 			// runners do the structural type check against the JSON shape.
 			if expr == nil {
 				t.Errorf("expected an AST, got nil")

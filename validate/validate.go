@@ -19,6 +19,7 @@ const (
 	ErrOperatorNotAllowed                  // operator not permitted for field
 	ErrTypeMismatch                        // value type incompatible with field type
 	ErrCustomRule                          // error raised by a custom [AstValidator]
+	ErrFunctionNotAllowed                  // function outside [WithAllowedFunctions]
 )
 
 // Code is the stable machine identifier for a kind, the counterpart of the
@@ -31,6 +32,8 @@ func (k ErrorKind) Code() string {
 		return "operatorNotAllowed"
 	case ErrTypeMismatch:
 		return "typeMismatch"
+	case ErrFunctionNotAllowed:
+		return "functionNotAllowed"
 	default:
 		return "customRule"
 	}
@@ -129,6 +132,22 @@ func WithAllowedOps(ops ...Op) Option {
 	}
 }
 
+// WithAllowedFunctions restricts queries to the named functions; called with
+// no names it refuses every function call. Without this option the validator
+// accepts any function name, because which functions exist is up to whoever
+// evaluates or translates the tree. A consumer that turns the tree into SQL or
+// another language should list exactly the functions it can translate, so an
+// unknown call is a validation error with a position rather than something its
+// own code generator has to catch.
+func WithAllowedFunctions(names ...string) Option {
+	return func(v *Validator) {
+		v.allowedFuncs = make(map[string]bool, len(names))
+		for _, name := range names {
+			v.allowedFuncs[name] = true
+		}
+	}
+}
+
 // Validator validates a parsed AST against field configurations. A Validator
 // is safe for concurrent use; each call to [Validator.Validate] collects its
 // errors privately.
@@ -138,6 +157,7 @@ type Validator struct {
 	custom        AstValidator
 	allowedFields map[string]bool
 	allowedOps    map[Op]bool
+	allowedFuncs  map[string]bool
 	errors        ErrorList
 }
 
@@ -177,6 +197,13 @@ func (v *Validator) Validate(expr ast.Expression) error {
 	w := *v
 	w.errors = nil
 	w.validate(expr)
+	if w.allowedFuncs != nil {
+		for _, fc := range ast.Calls(expr) {
+			if !w.allowedFuncs[fc.Name] {
+				w.addError(ErrFunctionNotAllowed, fc.Position, "", "", "function %q is not allowed", fc.Name)
+			}
+		}
+	}
 	if w.custom != nil && expr != nil {
 		if err := w.custom.ValidateCustomRules(expr); err != nil {
 			w.appendCustomErr(expr, err)

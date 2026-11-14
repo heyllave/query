@@ -827,6 +827,15 @@ func (p *parser) parseFuncCall() *ast.FuncCallExpr {
 func (p *parser) parseFuncArg() *ast.FuncArg {
 	tok := p.peek()
 
+	// Arithmetic that opens with a bracketed field or a call, abs([a]-[b]) or
+	// min(len(name)+1, 9): the whole argument is a value expression.
+	if p.argIsArithmetic() {
+		if val := p.parseValue(); val != nil {
+			return &ast.FuncArg{Value: val}
+		}
+		return nil
+	}
+
 	// Nested function call: func(...)
 	if tok.Type == token.Ident && p.peekAt(1).Type == token.LParen {
 		call := p.parseFuncCall()
@@ -856,6 +865,34 @@ func (p *parser) parseFuncArg() *ast.FuncArg {
 	p.errors.add(newError(CodeExpectedValue, ErrUnexpectedToken, tok.Pos,
 		"expected function argument, got %s", tok))
 	return nil
+}
+
+// argIsArithmetic reports whether the argument at the cursor is a bracketed
+// field or a call that an arithmetic operator follows.
+func (p *parser) argIsArithmetic() bool {
+	end := 1
+	switch tok := p.peek(); {
+	case tok.Type == token.FieldRef:
+	case tok.Type == token.Ident && p.peekAt(1).Type == token.LParen:
+		depth := 0
+		for ; ; end++ {
+			switch p.peekAt(end).Type { //nolint:exhaustive // only brackets matter
+			case token.LParen:
+				depth++
+			case token.RParen:
+				depth--
+			case token.EOF:
+				return false
+			}
+			if depth == 0 {
+				break
+			}
+		}
+		end++
+	default:
+		return false
+	}
+	return p.peekAt(end).Type.IsArithmetic()
 }
 
 // funcCallString renders a function call back to source form. Used for Value.Raw

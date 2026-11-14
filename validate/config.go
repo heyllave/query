@@ -1,7 +1,9 @@
 package validate
 
 import (
+	"encoding/json"
 	"fmt"
+	"strings"
 
 	"github.com/heyllave/query/ast"
 )
@@ -36,6 +38,51 @@ func (t FieldValueType) String() string {
 		return fieldValueTypeNames[t]
 	}
 	return fmt.Sprintf("FieldValueType(%d)", t)
+}
+
+// UnmarshalJSON reads a field type written either as its name ("decimal") or
+// as its number (2), so a field config can come from a client in any language
+// without that client knowing the numbering. An unknown name or number is an
+// error rather than a silent text field.
+func (t *FieldValueType) UnmarshalJSON(data []byte) error {
+	var name string
+	if err := json.Unmarshal(data, &name); err == nil {
+		for i, known := range fieldValueTypeNames {
+			if strings.EqualFold(name, known) {
+				*t = FieldValueType(i)
+				return nil
+			}
+		}
+		return fmt.Errorf("unknown field type %q", name)
+	}
+	var n int
+	if err := json.Unmarshal(data, &n); err != nil {
+		return fmt.Errorf("field type must be a name or a number, got %s", data)
+	}
+	if n < 0 || n >= len(fieldValueTypeNames) {
+		return fmt.Errorf("unknown field type %d", n)
+	}
+	*t = FieldValueType(n)
+	return nil
+}
+
+// DefaultOps returns the operators that make sense for a field type: the set
+// a field gets when its config names none.
+func DefaultOps(t FieldValueType) []Op {
+	switch t {
+	case TypeText:
+		return TextOps
+	case TypeInteger, TypeDecimal:
+		return NumericOps
+	case TypeBoolean:
+		return BoolOps
+	case TypeDate, TypeDatetime:
+		return DateOps
+	case TypeDuration:
+		return DurationOps
+	default:
+		return nil
+	}
 }
 
 // Op represents a query operator.

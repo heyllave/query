@@ -1,25 +1,43 @@
 //go:build cshared
 
-// Command libquery is the cgo c-shared bridge for the query language: a plain
-// C library any language with a C FFI can load. It mirrors the WASM/JS bridge
-// function-for-function and shares the JSON contract via internal/bridgejson,
-// so native and web callers behave identically.
+// Command libquery is the C shared-library build of the query language: the
+// way in for any language that can call C (Python, Ruby, Java, C#, Rust,
+// Swift, ...). It mirrors the WASM bridge function for function and answers
+// with the same JSON envelopes, both produced by internal/bridgejson, so a
+// native client and a JavaScript one cannot drift apart.
 //
-// Build (clang because the CI runner has no gcc):
+// Build:
 //
-//	CGO_ENABLED=1 CC=clang go build -buildmode=c-shared \
-//	    -tags cshared -o libquery.so ./clients/ffi
+//	make -C clients/ffi build      # libquery.so / .dylib and libquery.h
 //
 // The build tag keeps this package — which uses cgo and package main — out of
-// `go build ./...` even when CGO_ENABLED=1, so the pure-Go library and the WASM
-// target are unaffected.
+// `go build ./...`, so the pure-Go library and the WASM target are unaffected.
+//
+// # Calling convention
+//
+// Every function takes one NUL-terminated UTF-8 JSON object and returns one:
+//
+//	QueryParse            {"query", "maxLength"?}       -> {"result": ast}
+//	QueryValidate         {"ast", "fields"}             -> {"valid": bool, ...}
+//	QueryStringify        {"ast"}                       -> {"result": string}
+//	QueryParseAndValidate {"query", "fields"}           -> {"result": ast}
+//	QueryMatch            {"query", "fields", "record"} -> {"result": bool}
+//	QueryEval             {"query", "fields", "record"} -> {"result": value}
+//
+// A failure answers {"error": message} with "errors" (parse) or
+// "validationErrors" (validation) listing each failure's stable code and span.
+// No call returns NULL and no call aborts the process.
 //
 // # Memory ownership
 //
-// Each exported function takes a NUL-terminated UTF-8 JSON request string that
-// the caller owns (the caller frees its own input). Each returns a malloc'd
-// NUL-terminated UTF-8 JSON response that the CALLER must free exactly once with
-// QueryFree. Never free an input with QueryFree; never free a response twice.
+// The caller owns the request string and frees it its own way. Each response
+// is malloc'd here and must be freed exactly once with QueryFree. Never pass a
+// request to QueryFree; never free a response twice.
+//
+// # Threads
+//
+// Every function is safe to call from any number of threads at once; the
+// library keeps no state between calls.
 package main
 
 /*
@@ -29,207 +47,96 @@ import "C"
 
 import (
 	"encoding/json"
-	"fmt"
 	"unsafe"
 
-	"github.com/heyllave/query/ast"
-	"github.com/heyllave/query/eval"
 	"github.com/heyllave/query/internal/bridgejson"
-	"github.com/heyllave/query/parser"
-	"github.com/heyllave/query/validate"
 )
 
 func main() {}
 
-// respond marshals an envelope to a freshly-malloc'd C string owned by the caller.
-func respond(obj map[string]any) *C.char {
-	b, err := json.Marshal(obj)
+// request is the decoded JSON object a call was made with.
+type request map[string]json.RawMessage
+
+// str reads a string member; anything else reads as "".
+func (r request) str(key string) string {
+	var s string
+	_ = json.Unmarshal(r[key], &s)
+	return s
+}
+
+// raw hands a member on as JSON text, or fallback when it is absent.
+func (r request) raw(key, fallback string) string {
+	if v, ok := r[key]; ok {
+		return string(v)
+	}
+	return fallback
+}
+
+// call decodes the request, runs fn and returns its envelope as a malloc'd C
+// string the caller frees with QueryFree.
+func call(req *C.char, fn func(request) bridgejson.Envelope) *C.char {
+	env := bridgejson.Guard(func() bridgejson.Envelope {
+		if req == nil {
+			return bridgejson.Fail("invalid request JSON")
+		}
+		var r request
+		if err := json.Unmarshal([]byte(C.GoString(req)), &r); err != nil || r == nil {
+			return bridgejson.Fail("invalid request JSON")
+		}
+		return fn(r)
+	})
+	b, err := json.Marshal(env)
 	if err != nil {
-		// Fall back to a minimal hand-built error so a marshal failure still
-		// yields a parseable envelope rather than a null pointer.
-		return C.CString(`{"error":"internal: failed to encode response"}`)
+		b, _ = json.Marshal(bridgejson.Fail("result is not representable in JSON: " + err.Error()))
 	}
 	return C.CString(string(b))
 }
 
-func errResp(msg string) *C.char { return respond(map[string]any{"error": msg}) }
-
-// guard runs an exported entry point and turns a Go panic into an error
-// envelope. A panic that escaped a c-shared library would abort the host
-// process, which no query is allowed to do.
-func guard(fn func() *C.char) (result *C.char) {
-	defer func() {
-		if r := recover(); r != nil {
-			result = errResp(fmt.Sprintf("internal error: %v", r))
-		}
-	}()
-	return fn()
-}
-
-// parseReq decodes a request JSON object into a generic map.
-func parseReq(req *C.char) (map[string]any, bool) {
-	var m map[string]any
-	if err := json.Unmarshal([]byte(C.GoString(req)), &m); err != nil {
-		return nil, false
-	}
-	return m, true
-}
-
-func reqString(m map[string]any, key string) string {
-	if s, ok := m[key].(string); ok {
-		return s
-	}
-	return ""
-}
-
-// reqJSON re-encodes a sub-object of the request (e.g. fields, record, ast) back
-// to a JSON string so it can flow through the same decoders the WASM bridge uses.
-func reqJSON(m map[string]any, key string) string {
-	v, ok := m[key]
-	if !ok {
-		return ""
-	}
-	b, err := json.Marshal(v)
-	if err != nil {
-		return ""
-	}
-	return string(b)
-}
-
 //export QueryParse
 func QueryParse(req *C.char) *C.char {
-	return guard(func() *C.char {
-		m, ok := parseReq(req)
-		if !ok {
-			return errResp("invalid request JSON")
+	return call(req, func(r request) bridgejson.Envelope {
+		maxLen := bridgejson.DefaultMaxLength
+		if v, ok := r["maxLength"]; ok {
+			if err := json.Unmarshal(v, &maxLen); err != nil {
+				return bridgejson.Fail("maxLength must be an integer")
+			}
 		}
-		maxLen := 256
-		if f, ok := m["maxLength"].(float64); ok {
-			maxLen = int(f)
-		}
-		expr, err := parser.Parse(reqString(m, "query"), maxLen)
-		if err != nil {
-			return errResp(err.Error())
-		}
-		return respond(map[string]any{"result": bridgejson.AstToJSON(expr)})
+		return bridgejson.Parse(r.str("query"), maxLen)
 	})
 }
 
 //export QueryValidate
 func QueryValidate(req *C.char) *C.char {
-	return guard(func() *C.char {
-		m, ok := parseReq(req)
-		if !ok {
-			return errResp("invalid request JSON")
-		}
-		expr, err := bridgejson.JSONToAST(reqJSON(m, "ast"))
-		if err != nil {
-			return errResp("invalid AST: " + err.Error())
-		}
-		fields, err := bridgejson.ParseFields(reqJSON(m, "fields"))
-		if err != nil {
-			return errResp(err.Error())
-		}
-		v := validate.New(fields)
-		if err := v.Validate(expr); err != nil {
-			out := map[string]any{"valid": false, "errors": []string{err.Error()}}
-			if list := bridgejson.ValidationErrors(err); len(list) > 0 {
-				out["validationErrors"] = list
-			}
-			return respond(out)
-		}
-		return respond(map[string]any{"valid": true})
+	return call(req, func(r request) bridgejson.Envelope {
+		return bridgejson.Validate(r.raw("ast", ""), r.raw("fields", "[]"))
 	})
 }
 
 //export QueryStringify
 func QueryStringify(req *C.char) *C.char {
-	return guard(func() *C.char {
-		m, ok := parseReq(req)
-		if !ok {
-			return errResp("invalid request JSON")
-		}
-		expr, err := bridgejson.JSONToAST(reqJSON(m, "ast"))
-		if err != nil {
-			return errResp("invalid AST: " + err.Error())
-		}
-		return respond(map[string]any{"result": ast.String(expr)})
+	return call(req, func(r request) bridgejson.Envelope {
+		return bridgejson.Stringify(r.raw("ast", ""))
 	})
 }
 
 //export QueryParseAndValidate
 func QueryParseAndValidate(req *C.char) *C.char {
-	return guard(func() *C.char {
-		m, ok := parseReq(req)
-		if !ok {
-			return errResp("invalid request JSON")
-		}
-		expr, err := parser.Parse(reqString(m, "query"), 256)
-		if err != nil {
-			return errResp(err.Error())
-		}
-		fields, err := bridgejson.ParseFields(reqJSON(m, "fields"))
-		if err != nil {
-			return errResp(err.Error())
-		}
-		if err := validate.New(fields).Validate(expr); err != nil {
-			out := map[string]any{"error": err.Error()}
-			if list := bridgejson.ValidationErrors(err); len(list) > 0 {
-				out["validationErrors"] = list
-			}
-			return respond(out)
-		}
-		return respond(map[string]any{"result": bridgejson.AstToJSON(expr)})
+	return call(req, func(r request) bridgejson.Envelope {
+		return bridgejson.ParseAndValidate(r.str("query"), r.raw("fields", "[]"))
 	})
 }
 
 //export QueryMatch
 func QueryMatch(req *C.char) *C.char {
-	return guard(func() *C.char {
-		m, ok := parseReq(req)
-		if !ok {
-			return errResp("invalid request JSON")
-		}
-		fields, err := bridgejson.ParseFields(reqJSON(m, "fields"))
-		if err != nil {
-			return errResp(err.Error())
-		}
-		record, ok := m["record"].(map[string]any)
-		if !ok {
-			record = map[string]any{}
-		}
-		prog, err := eval.Compile(reqString(m, "query"), fields)
-		if err != nil {
-			return errResp(err.Error())
-		}
-		return respond(map[string]any{"result": prog.Match(record)})
+	return call(req, func(r request) bridgejson.Envelope {
+		return bridgejson.Match(r.str("query"), r.raw("fields", "[]"), r.raw("record", "{}"))
 	})
 }
 
 //export QueryEval
 func QueryEval(req *C.char) *C.char {
-	return guard(func() *C.char {
-		m, ok := parseReq(req)
-		if !ok {
-			return errResp("invalid request JSON")
-		}
-		fields, err := bridgejson.ParseFields(reqJSON(m, "fields"))
-		if err != nil {
-			return errResp(err.Error())
-		}
-		record, ok := m["record"].(map[string]any)
-		if !ok {
-			record = map[string]any{}
-		}
-		prog, err := eval.CompileValue(reqString(m, "query"), fields)
-		if err != nil {
-			return errResp(err.Error())
-		}
-		v, err := prog.Eval(record)
-		if err != nil {
-			return errResp(err.Error())
-		}
-		return respond(map[string]any{"result": v})
+	return call(req, func(r request) bridgejson.Envelope {
+		return bridgejson.Eval(r.str("query"), r.raw("fields", "[]"), r.raw("record", "{}"))
 	})
 }
 

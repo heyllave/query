@@ -2,8 +2,8 @@
 
 GOROOT := $(shell go env GOROOT)
 
-# The npm package loads query.wasm + wasm_exec.js
-# from the npm client directory, so emit them there.
+# The npm package loads query.wasm + wasm_exec.js from its own directory, so
+# emit them there.
 NPM := ../clients/npm
 
 # -trimpath and -s -w keep build paths and debug tables out of the binary, so

@@ -22,6 +22,11 @@ type lexer struct {
 	// IN list, inside which every element is lexed in value mode.
 	expectInList bool
 	inList       bool
+	// parens records, for each '(' open in field position, whether it opened
+	// a function call's arguments; argValue is set while lexing an operand in
+	// one, where a ',' ends the value as it does in an IN list.
+	parens   []bool
+	argValue bool
 }
 
 // Lex tokenizes the input query string and returns the token stream.
@@ -70,6 +75,7 @@ func (l *lexer) run() {
 
 		if l.afterOperator {
 			l.lexValue()
+			l.argValue = false
 			continue
 		}
 
@@ -81,6 +87,7 @@ func (l *lexer) run() {
 		}
 		switch {
 		case ch == '(':
+			l.parens = append(l.parens, !l.expectInList && l.afterName())
 			l.emit(token.LParen, "(")
 			l.pos++
 			if l.expectInList {
@@ -92,6 +99,9 @@ func (l *lexer) run() {
 			l.emit(token.RParen, ")")
 			l.pos++
 			l.inList = false
+			if n := len(l.parens); n > 0 {
+				l.parens = l.parens[:n-1]
+			}
 		case ch == ',':
 			l.emit(token.Comma, ",")
 			l.pos++
@@ -108,6 +118,7 @@ func (l *lexer) run() {
 			l.emit(arithTokenFor(ch), string(ch))
 			l.pos++
 			l.afterOperator = true
+			l.argValue = len(l.parens) > 0 && l.parens[len(l.parens)-1]
 		case ch == '[':
 			// Bracketed field name in field position: ["labels.x/y"]=1.
 			l.lexFieldRef()
@@ -422,6 +433,16 @@ func (l *lexer) afterListSep() bool {
 	return t == token.LParen || t == token.Comma
 }
 
+// afterName reports whether the previous token is a name ending exactly at
+// l.pos, which makes a '(' here the start of a call's arguments.
+func (l *lexer) afterName() bool {
+	if len(l.tokens) == 0 {
+		return false
+	}
+	prev := l.tokens[len(l.tokens)-1]
+	return prev.Type == token.Ident && prev.Pos.Offset+prev.Pos.Length == l.pos
+}
+
 // continuesArith reports whether an arithmetic operator at l.pos (reached in
 // field position, so after whitespace) continues the value that precedes it:
 // the previous token ends a value primary and a primary begins after the
@@ -509,6 +530,16 @@ func (l *lexer) lexValue() {
 	if ch == '[' {
 		l.lexFieldRef()
 		return
+	}
+
+	// A second operator where the value belongs: state==draft, total=>5,
+	// a<>b. Read as a string these would compare against "=draft" or ">5"
+	// without a word of complaint, so they are refused; a value that really
+	// starts with one of these characters is written in quotes.
+	if ch == '=' || ch == '<' || ch == '>' {
+		l.errors.add(newError(CodeUnexpectedChar, ErrSyntax, token.Position{Offset: l.pos, Length: 1},
+			"unexpected %q where a value belongs: operators are single (=, !=, >, >=, <, <=); quote the value if it starts with %q",
+			string(ch), string(ch)))
 	}
 
 	// Otherwise: unquoted string with possible wildcards. A bareword field
@@ -719,7 +750,7 @@ func (l *lexer) lexUnquotedStringValue() {
 		if l.spaceWidth(l.pos) > 0 || ch == ')' || ch == '[' || ch == ']' {
 			break
 		}
-		if ch == ',' && l.inList {
+		if ch == ',' && (l.inList || l.argValue) {
 			break
 		}
 		if ch == '.' && l.peek(1) == '.' {
@@ -822,6 +853,10 @@ func (l *lexer) lexFuncCallBody() {
 		case ch == '[':
 			// Bracketed field name as an argument: abs([cpu-limit]).
 			l.lexFieldRef()
+		case ch == '.' && l.peek(1) != '.':
+			// A dotted field path as an argument: lower(labels.team).
+			l.emit(token.Dot, ".")
+			l.pos++
 		case isArithOpChar(ch) && l.afterValue():
 			// An operator after a complete operand: addDays(d, 1-8).
 			l.emit(arithTokenFor(ch), string(ch))
@@ -1137,7 +1172,7 @@ func isDateLiteral(s string) bool {
 				return false
 			}
 		default:
-			if !unicode.IsDigit(ch) {
+			if ch < '0' || ch > '9' {
 				return false
 			}
 		}
@@ -1204,7 +1239,7 @@ func isDurationLiteral(s string) bool {
 		return false
 	}
 	for _, ch := range s[:len(s)-1] {
-		if !unicode.IsDigit(ch) {
+		if ch < '0' || ch > '9' {
 			return false
 		}
 	}
@@ -1223,7 +1258,7 @@ func isIntegerLiteral(s string) bool {
 		return false
 	}
 	for _, ch := range s[start:] {
-		if !unicode.IsDigit(ch) {
+		if ch < '0' || ch > '9' {
 			return false
 		}
 	}
@@ -1250,7 +1285,7 @@ func isFloatLiteral(s string) bool {
 			hasDot = true
 			continue
 		}
-		if !unicode.IsDigit(ch) {
+		if ch < '0' || ch > '9' {
 			return false
 		}
 	}

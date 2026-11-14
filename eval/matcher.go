@@ -322,7 +322,7 @@ func valueFromAny(v any) *ast.Value {
 	case time.Duration:
 		return &ast.Value{Type: ast.ValueDuration, Raw: x.String(), Duration: x}
 	case []any:
-		return &ast.Value{Type: ast.ValueList, Raw: fmt.Sprint(x), List: x}
+		return &ast.Value{Type: ast.ValueList, Raw: sprint(x), List: x}
 	case nil:
 		return nil
 	default:
@@ -335,9 +335,9 @@ func valueFromAny(v any) *ast.Value {
 		// Typed slices ([]string, []int, …) are preserved as lists so value
 		// expressions can return collections; everything else stringifies.
 		if elems, ok := toSlice(x); ok {
-			return &ast.Value{Type: ast.ValueList, Raw: fmt.Sprint(x), List: elems}
+			return &ast.Value{Type: ast.ValueList, Raw: sprint(x), List: elems}
 		}
-		s := fmt.Sprint(x)
+		s := sprint(x)
 		return &ast.Value{Type: ast.ValueString, Raw: s, Str: s}
 	}
 }
@@ -537,7 +537,7 @@ func stringifyActual(v any) string {
 	case time.Duration:
 		return x.String()
 	default:
-		return fmt.Sprint(v)
+		return sprint(v)
 	}
 }
 

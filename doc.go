@@ -16,7 +16,8 @@
 //
 // The command in cmd/query explains a query's tokens and tree, and the
 // wasm and clients directories hold the JavaScript binding and a C shared
-// library, which run the same engine.
+// library for every other language, which run the same engine and the same
+// conformance corpus.
 //
 // # Basic usage
 //

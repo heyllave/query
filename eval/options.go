@@ -1,6 +1,10 @@
 package eval
 
-import "github.com/heyllave/query/validate"
+import (
+	"fmt"
+
+	"github.com/heyllave/query/validate"
+)
 
 type options struct {
 	maxLength     int
@@ -49,13 +53,18 @@ func WithAllowedFields(fields ...string) Option {
 
 // WithFunctions registers custom functions available in query expressions.
 // These are merged with the built-in functions (lower, upper, now, etc.).
+//
+// A registered function is host code running on query-controlled arguments,
+// so a panic inside one is contained: the call reports an error instead,
+// which makes the comparison it feeds false and [ValueProgram.Eval] fail,
+// rather than taking down the goroutine that called Match.
 func WithFunctions(funcs ...Func) Option {
 	return func(o *options) {
 		if o.funcs == nil {
 			o.funcs = make(FuncRegistry)
 		}
 		for _, f := range funcs {
-			o.funcs.Register(f)
+			o.funcs.Register(contained(f))
 		}
 	}
 }
@@ -72,4 +81,22 @@ func WithNoBuiltins() Option {
 // overrides the static field config.
 func WithCustomValidator(cv validate.AstValidator) Option {
 	return func(o *options) { o.customVal = cv }
+}
+
+// contained wraps a caller-supplied function so that a panic, or a function
+// registered without an implementation, surfaces as an error from the call.
+func contained(f Func) Func {
+	call, name := f.Call, f.Name
+	f.Call = func(args ...any) (result any, err error) {
+		if call == nil {
+			return nil, fmt.Errorf("function %s has no implementation", name)
+		}
+		defer func() {
+			if r := recover(); r != nil {
+				result, err = nil, fmt.Errorf("function %s panicked: %v", name, r)
+			}
+		}()
+		return call(args...)
+	}
+	return f
 }

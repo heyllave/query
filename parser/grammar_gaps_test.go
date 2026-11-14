@@ -42,6 +42,9 @@ func TestParse_Reprint(t *testing.T) {
 		{"cidr is one string", "ip=10.0.0.1/24", `ip="10.0.0.1/24"`},
 		{"float still divides", "n>1.5/2", "n>1.5/2"},
 		// Arithmetic in arguments and signed operands.
+		{"argument opening with a bracketed field", "n>abs([a]-[b])", "n>abs(([a]-[b]))"},
+		{"argument opening with a call", "n>min(len(a)+1, 9)", "n>min((len(a)+1), 9)"},
+		{"field-side argument arithmetic", "round([a]/3)=2", "round(([a]/3))=2"},
 		{"arithmetic argument", "d>addDays(d, 1-8)", "d>addDays(d, (1-8))"},
 		{"spaced arithmetic argument", "d>addDays(d, 2 * 3 + 1)", "d>addDays(d, (2*3+1))"},
 		{"arithmetic argument in field position", "addDays(d, 1-8)>d", "addDays(d, (1-8))>d"},

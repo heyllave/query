@@ -1,0 +1,359 @@
+state=draft AND total>50000
+=invalid
+state=draft
+nope=x
+total:100..500
+total=100..500
+state:draft
+state IN (draft, sent)
+total!>500
+state="draft
+state>draft
+state="needs review"
+state="42"
+state IN (draft, sent) AND total>5
+NOT state IN (draft, sent)
+items@any(total>5)
+created>now()-7d
+state=dra*
+total>100000
+total>[base]
+total>=[base]*2
+cpu>[cpu_limit]
+unknown_field=x
+42
+3.14
+6*7
+(50000+1000)*1.1
+9/2
+[base]*2
+[base]
+5/0
+total>3
+total=3
+state=90210
+cpu=0
+len(state)>3
+len(state)!>5
+state!=dr*
+labels.dev=jane
+state
+total>10-3
+total>10 - 3
+total>abs(-5)
+cpu IN (-1, 4)
+state IN (dr*, paid)
+created_at>=2026-01-01T10:00:00Z
+created_at<2026-01-01
+lenght(state)>3
+lower(state, state)=a
+state=10-3
+state=550e8400-e29b-41d4-a716-446655440000
+lower(state)=draft
+state=a\(b
+state=a\*
+true=1
+"foo bar"=1
+labels.example.com/team=x
+AND foo
+created_at=2026-09-28
+created_at:2026-09-01..2026-09-30
+created_at=2026-09-28T13:45:12Z
+café
+state=café
+state NOT IN (draft, void)
+lower(state) IN (draft, void)
+state (total>1 OR total<0)
+state total>1
+state=10.0.0.1/24
+labels.example.com/team=core
+cpu=abs(1-8)
+startsWith(secret, "a")
+len(secret)>2
+lower(secret)=abc
+(((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((a
+name=checkout-*
+name=checkout-pr-7505
+name=*-pr-*
+labels.team=payments
+labels.app.kubernetes.io/name=checkout
+labels.signadot.com/owner=dana@example.com
+labels.tier=backend
+NOT labels.tier=backend
+labels.team
+labels.tier
+labels.env IN (preview, staging)
+labels.env NOT IN (prod, staging)
+labels.tier NOT IN (prod)
+labels.pr=7505
+labels.zero=7
+labels.zero=007
+labels.version=1.2.3
+labels.version=1.2.*
+labels.commit=3f2a9c1
+labels.sha=0e12345
+labels.short=100000
+labels.build=2026-03-10
+labels.dur=7d
+labels.dur=1w
+labels.flag=true
+labels.pr>7000
+labels.team=Payments
+labels.team=payments labels.env=prod
+namespace=payments AND ready=true AND replicas>=2
+status!=failed AND (cluster=staging-* OR cluster=dev-*)
+created_at>=2026-03-01 AND created_at<2026-04-01
+created_at:2026-03-01..2026-03-31
+created_at<now()
+created_at>2026-03-11
+ttl>1d
+ttl<1d
+cpu>=0.75 AND cpu<1
+replicas:1..5
+contains(lower(name), "pr-7505")
+secret=1
+owner=dana*
+owner=dana@example.com
+ready=yes
+replicas>two
+state=issued
+state=DRAFT
+state!=draft
+customer=""
+customer="Eve O'Brien"
+notes="quote \"rush\""
+customer=Mary-Jane*
+notes=_
+email=alice@example.com
+email=alice@EXAMPLE.org
+notes=東京
+customer="日本 太郎"
+customer=Alice Johnson
+customer=alice*
+customer=*son
+customer=*o*
+customer=*
+notes=*
+customer!=j*
+notes!=*a*
+notes=*%*
+notes=100%*
+customer=*_*
+notes=a\*b
+notes=a\**
+email=*@example.COM
+customer=日本*
+customer=álvaro*
+customer=a*e
+total=3.5
+total=3.9
+total<4
+total<=0
+total<-1
+total!=50
+total!>50
+total>99999999
+qty=1000000
+qty>=100
+qty=0
+total:3..4
+total:5..1
+total >= 10 - 3
+total>=[qty]*2
+total>[qty]
+total=abc
+zip=90210
+zip=00123
+zip=1
+zip=""
+zip="100-0001"
+zip=100-0001
+len(notes)=0
+len(zip)=5
+len(customer)>10
+lower(customer)=alice*
+upper(state)=PAID
+trim(notes)=refund
+len(notes)>3
+lenght(customer)>3
+lower(customer, state)=a
+paid=true
+paid!=true
+paid=yes
+customer
+notes
+zip
+NOT notes
+country=US
+country!=US
+NOT country=US
+country IN (ES, IE, JP)
+created_at!=2026-09-28
+created_at<2026-09-28
+created_at<=2026-09-28
+created_at>2026-09-28
+created_at>=2026-09-28
+created_at:2026-01-15..2026-01-15
+created_at:2026-01-01..2026-01-31
+created_at=2026-03-15T09:00:01Z
+created_at>=2026-01-15T23:59:59Z AND created_at<2026-02-01
+created_at="2026-09-28"
+created_at=2026-02-30
+created_at=yesterday
+state IN (draft, void)
+state IN (dr*, void)
+state=draft OR state=void AND paid=true
+(state=draft OR state=void) AND paid=true
+state=draft paid=false
+state!=draft AND NOT paid=true
+NOT (state=draft OR paid=true)
+NOT NOT state=void
+state=draft and not paid=true or state=void
+paid=false total>1 qty>=1 state!=void customer=* created_at>2026-01-01
+lower(state)=paid AND email=*@example.* AND total>5
+nope=1
+customer>a
+total=1*
+state=
+AND state=draft
+(state=draft
+customer="Alice
+country NOT IN (ES, IE, JP)
+lower(state) IN (paid, void)
+lower(state) NOT IN (draft, issued, paid)
+notes (state=draft OR state=void)
+state IN ()
+total
+state=draft OR state=issued
+NOT state=draft
+-state=draft
+(state=draft OR state=issued) AND total>=100
+a b c
+a OR b c
+a AND (b OR NOT c)
+total>1
+total>=1
+total<1
+total<=1
+total!>1
+total!>=1
+total!<1
+total!<=1
+total:1..5
+total:1.5..2.5
+created_at:2026-01-01..2026-12-31
+created_at>=2026-01-01T10:30:00Z
+created_at>now()-7d
+created_at<today()
+ttl>90m
+ttl=1w
+name=John*
+name=*son
+name=*oh*
+name=J*n
+name="John Smith"
+name="say \"hi\""
+name="a*b"
+name=a\*b
+name=""
+state IN (draft, issued)
+state in (draft)
+state NOT IN (draft, issued)
+lower(name) IN (ab, cd)
+labels.team=core
+labels."odd key"=x
+[cpu limit]>5
+["cpu limit"]>5
+[and]=1
+total>[base]*1.1
+total>=[base]+[cpu]
+total>(1+2)*3
+total>10*-3
+total>10%3
+n>1+2*3-4/5
+lower(name)=john
+len(name)>5
+contains(name, "urgent")
+startsWith(name, "a")
+year(created_at)=2026
+addDays(created_at, 7)>now()
+round(total, 2)=10.5
+abs([total]-[base])>5
+min(len(name)+1, 9)>2
+items@(sku=abc)
+items@(qty>2 AND sku=a*)
+NOT items@(sku=abc)
+ready=true
+ready=false
+ready!=true
+id=550e8400-e29b-41d4-a716-446655440000
+email=a@b.com
+ip=10.0.0.1/24
+version=1.2.3
+path=/var/log/app.log
+url="https://example.com/a?b=c"
+phone="555-1234"
+name=José
+name=日本語
+tag=a_b-c.d
+n=-5
+n=+5
+n=1e5
+n=0.5
+n=.5
+d=30m
+d=1h
+d=7d
+d=2w
+date=2026-03-10
+tire_size
+=broken
+state==draft
+state=draft)
+state IN (a
+name="unclosed
+total>
+total:1..
+[unclosed>1
+[]=1
+state=draft AND
+state=draft OR OR a=1
+lower(name=x
+lower()=x
+f(,)=1
+a=1 @
+1h30m>d
+d>1h30m
+name='single'
+and
+or
+not
+3
+total>1 2
+&&
+a && b
+a || b
+a == b
+!a
+name="=x"
+name=">5"
+name="<5"
+a=>5
+a=<5
+a<>5
+a>>5
+a>==1
+a:=1
+x IN (=a)
+min([a]+1, 9)>2
+f([a] + 1 , [b] * 2)=1
+n>abs([a]-[b])
+x=lower(labels.team)
+x=lower([labels.team])
+x=lower(labels.example.com/team)
+x>len(labels.team)+1
+x=f(a.b, c.d)
+x=f(a.)
+n=٣
+n>٣
+d=٣d

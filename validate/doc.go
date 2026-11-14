@@ -35,6 +35,11 @@
 // and per field. A field that allows only = can therefore be tested for
 // equality and nothing else.
 //
+// The validator accepts any function name unless [WithAllowedFunctions] lists
+// the permitted ones: which functions exist is up to whoever evaluates or
+// translates the tree. A consumer that generates SQL or another language from
+// a validated tree should list exactly the functions it can translate.
+//
 // Domain-specific rules plug in via the [AstValidator] interface and the
 // [WithCustomValidator] option. See the interface docs for semantics.
 package validate

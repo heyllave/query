@@ -1,4 +1,4 @@
-.PHONY: build clean
+.PHONY: build test clean
 
 # Host shared-library extension.
 UNAME_S := $(shell uname -s)
@@ -25,6 +25,11 @@ endif
 build:
 	CGO_ENABLED=1 CC=$(CC) go build -buildmode=c-shared -trimpath -tags cshared \
 		-o libquery.$(EXT) .
+
+# Run the shared conformance corpus through the library from another language
+# (Python's ctypes, standard library only), the way a real binding would.
+test: build
+	python3 conformance_test.py ./libquery.$(EXT)
 
 clean:
 	rm -f libquery.so libquery.dylib libquery.dll libquery.h

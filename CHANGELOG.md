@@ -10,9 +10,28 @@ semantic versioning once the first tag is cut.
 
 - The Dart and Flutter clients (`clients/flutter`, `clients/flutter_plugin`)
   and their Android and iOS builds. `clients/ffi` stays, as a plain C shared
-  library for any language.
+  library for any language; it is built and tested on its own.
 
 ### Fixed
+
+- `state==draft`, `total=>5` and `a<>b` are parse errors. They used to compare
+  against the text `=draft` or `>5` without complaint. A value that really
+  starts with `=`, `<` or `>` is written in quotes.
+- A record value that reaches itself (a map stored inside itself) no longer
+  overflows the stack when compared as text; a value too deep or too large to
+  print compares as missing.
+- A panic inside a function registered with `WithFunctions`, or one registered
+  without an implementation, is an error from that call instead of a crash.
+- Dotted field paths work in function calls on the value side
+  (`x=lower(labels.team)`), and `x=lower([labels.team])` prints in a form that
+  parses back.
+- Arithmetic in a function argument may open with a bracketed field or a call
+  (`abs([a]-[b])`, `min(len(name)+1, 9)`), on either side of a comparison.
+- Only ASCII digits make a number; a digit from another script is text.
+- `Match` and `Eval` through the WASM and C bridges report the same coded
+  `errors` and `validationErrors` as `parseAndValidate`, and both bridges
+  reject a field config with a nameless or repeated field or an unknown
+  operator instead of accepting it silently.
 
 - Numeric comparisons are exact: an integer literal no longer truncates a
   decimal record value (`price>3` is true for 3.5, `price=3` is false for 3.9).
@@ -73,7 +92,7 @@ semantic versioning once the first tag is cut.
   values that would not lex back bare are quoted, names outside the identifier
   alphabet print as `["name"]`, and a function-wrapped qualifier prints its
   function.
-- The WASM and FFI bridges turn a Go panic into an error envelope instead of
+- The WASM and C bridges turn a Go panic into an error envelope instead of
   tearing down the host.
 - `examples/sql` validates against a schema and allowlists columns and
   functions; unknown names are errors, never interpolated.
@@ -93,6 +112,15 @@ semantic versioning once the first tag is cut.
 
 ### Added
 
+- `validate.WithAllowedFunctions`, for consumers that translate the tree and
+  must refuse functions they cannot translate (`functionNotAllowed`).
+- `validate.DefaultOps`, and field configs in JSON may name their type
+  (`"type": "decimal"`) and omit `allowedOps` to get the defaults for it.
+- A golden file of several hundred queries that pins the grammar, the printed
+  form, the JSON tree and the error codes; a resource-listing scenario set in
+  the shared corpus; a Python runner that drives the C library through the
+  corpus; CI on macOS, Windows, the newest Go and a 32-bit build, with a
+  coverage floor and a weekly long fuzz run. See *Stability* in the README.
 - Datetime literals (`created_at>=2026-01-01T10:00:00Z`); quoted timestamps on
   date fields are read as dates.
 - Signed literals and wildcards in function arguments and `IN` lists; arithmetic

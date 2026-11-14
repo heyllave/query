@@ -311,3 +311,57 @@ func TestErrorKind_CodeAndError(t *testing.T) {
 		t.Errorf("two-error ErrorList.Error() = %q", got)
 	}
 }
+
+func TestValidate_AllowedFunctions(t *testing.T) {
+	tests := []struct {
+		name    string
+		allowed []string
+		query   string
+		refused []string
+	}{
+		{"listed function", []string{"lower"}, "lower(state)=draft", nil},
+		{"unlisted function on the field side", []string{"lower"}, "upper(state)=DRAFT", []string{"upper"}},
+		{"unlisted function on the value side", []string{"lower"}, "total>=abs(total)", []string{"abs"}},
+		{"unlisted function nested in a listed one", []string{"lower"}, "lower(trim(state))=draft", []string{"trim"}},
+		{"unlisted predicate function", []string{"lower"}, `startsWith(state, "d")`, []string{"startsWith"}},
+		{"function inside NOT and a group", []string{"lower"}, "NOT (len(state)>2 OR lower(state)=a)", []string{"len"}},
+		{"every unlisted call is reported", []string{}, "lower(state)=a AND total>abs(total)", []string{"lower", "abs"}},
+		{"empty list refuses all functions", []string{}, "lower(state)=draft", []string{"lower"}},
+		{"empty list leaves plain queries alone", []string{}, "state=draft AND total>5", nil},
+		{"names are case-sensitive", []string{"lower"}, "LOWER(state)=draft", []string{"LOWER"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			v := New(optFields, WithAllowedFunctions(tt.allowed...))
+
+			err := v.Validate(mustParse(t, tt.query))
+
+			var got []string
+			var list ErrorList
+			if errors.As(err, &list) {
+				for _, e := range list {
+					if e.Kind != ErrFunctionNotAllowed {
+						t.Errorf("unexpected error: %v", e)
+						continue
+					}
+					if e.Kind.Code() != "functionNotAllowed" {
+						t.Errorf("code = %q", e.Kind.Code())
+					}
+					name := tt.query[e.Position.Offset:]
+					got = append(got, name[:strings.IndexByte(name, '(')])
+				}
+			}
+			if strings.Join(got, ",") != strings.Join(tt.refused, ",") {
+				t.Errorf("refused %v at their positions, want %v (err: %v)", got, tt.refused, err)
+			}
+		})
+	}
+}
+
+func TestValidate_FunctionsUnrestrictedByDefault(t *testing.T) {
+	err := New(optFields).Validate(mustParse(t, "anything(state)=draft"))
+
+	if err != nil {
+		t.Errorf("without WithAllowedFunctions any name validates, got %v", err)
+	}
+}

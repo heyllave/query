@@ -4,248 +4,73 @@ package main
 
 import (
 	"encoding/json"
-	"fmt"
 	"syscall/js"
 
-	"github.com/heyllave/query/ast"
-	"github.com/heyllave/query/eval"
 	"github.com/heyllave/query/internal/bridgejson"
-	"github.com/heyllave/query/parser"
-	"github.com/heyllave/query/validate"
 )
 
-// guard wraps a bridge function so a Go panic becomes an error envelope
-// instead of tearing down the WASM instance (and with it every later call
-// from the page). A panic here is a library bug; the message says so.
-func guard(fn func(js.Value, []js.Value) any) func(js.Value, []js.Value) any {
-	return func(this js.Value, args []js.Value) (result any) {
-		defer func() {
-			if r := recover(); r != nil {
-				result = jsResult(nil, fmt.Sprintf("internal error: %v", r))
+// bridge adapts a call to a JavaScript function. need is how many leading
+// arguments are required, all strings; the envelope comes from
+// internal/bridgejson, which the C bridge shares, so every client sees the
+// same shapes. A Go panic becomes an error envelope instead of tearing down
+// the WASM instance (and with it every later call from the page).
+func bridge(name string, need int, call func(args []js.Value) bridgejson.Envelope) js.Func {
+	return js.FuncOf(func(_ js.Value, args []js.Value) any {
+		return toJSValue(bridgejson.Guard(func() bridgejson.Envelope {
+			if len(args) < need {
+				return bridgejson.Fail(name + ": missing arguments")
 			}
-		}()
-		return fn(this, args)
-	}
+			for _, a := range args[:need] {
+				if a.Type() != js.TypeString {
+					return bridgejson.Fail(name + ": arguments must be strings")
+				}
+			}
+			return call(args)
+		}))
+	})
 }
 
-// jsParse parses a query string and returns the AST as a JSON object.
-//
-// JS signature: queryParse(query: string, maxLength?: number) => { ast?: object, error?: string }
-func jsParse(_ js.Value, args []js.Value) any {
-	if len(args) < 1 {
-		return jsResult(nil, "queryParse requires a query string argument")
-	}
-	q := args[0].String()
-	maxLen := 256
-	if len(args) > 1 && !args[1].IsUndefined() {
+// jsParse is queryParse(query, maxLength?).
+func jsParse(args []js.Value) bridgejson.Envelope {
+	maxLen := bridgejson.DefaultMaxLength
+	if len(args) > 1 && args[1].Type() == js.TypeNumber {
 		maxLen = args[1].Int()
 	}
-
-	expr, err := parser.Parse(q, maxLen)
-	if err != nil {
-		return jsParseResult(err)
-	}
-
-	node := astToJSON(expr)
-	return jsResult(node, "")
+	return bridgejson.Parse(args[0].String(), maxLen)
 }
 
-// jsValidate validates a JSON AST against field configurations.
-//
-// JS signature: queryValidate(astJSON: string, fieldsJSON: string) => { valid: boolean, errors?: string[] }
-func jsValidate(_ js.Value, args []js.Value) any {
-	if len(args) < 2 {
-		return jsResult(nil, "queryValidate requires ast and fields arguments")
-	}
-
-	astJSON := args[0].String()
-	fieldsJSON := args[1].String()
-
-	expr, err := jsonToAST(astJSON)
-	if err != nil {
-		return jsResult(nil, "invalid AST: "+err.Error())
-	}
-
-	var fields []validate.FieldConfig
-	if err := json.Unmarshal([]byte(fieldsJSON), &fields); err != nil {
-		return jsResult(nil, "invalid fields config: "+err.Error())
-	}
-
-	v := validate.New(fields)
-	if err := v.Validate(expr); err != nil {
-		result := map[string]any{
-			"valid":  false,
-			"errors": []string{err.Error()},
-		}
-		if list := bridgejson.ValidationErrors(err); len(list) > 0 {
-			result["validationErrors"] = list
-		}
-		return toJSValue(result)
-	}
-	return toJSValue(map[string]any{"valid": true})
+// jsValidate is queryValidate(astJSON, fieldsJSON).
+func jsValidate(args []js.Value) bridgejson.Envelope {
+	return bridgejson.Validate(args[0].String(), args[1].String())
 }
 
-// jsStringify converts a JSON AST back to a query string.
-//
-// JS signature: queryStringify(astJSON: string) => { query?: string, error?: string }
-func jsStringify(_ js.Value, args []js.Value) any {
-	if len(args) < 1 {
-		return jsResult(nil, "queryStringify requires an AST argument")
-	}
-
-	expr, err := jsonToAST(args[0].String())
-	if err != nil {
-		return jsResult(nil, "invalid AST: "+err.Error())
-	}
-
-	return jsResult(ast.String(expr), "")
+// jsStringify is queryStringify(astJSON).
+func jsStringify(args []js.Value) bridgejson.Envelope {
+	return bridgejson.Stringify(args[0].String())
 }
 
-// jsParseAndValidate parses and validates in one call.
-//
-// JS signature: queryParseAndValidate(query: string, fieldsJSON: string)
-//
-//	=> { result?: object, error?: string, errors?: ParseError[], validationErrors?: ValidationError[] }
-func jsParseAndValidate(_ js.Value, args []js.Value) any {
-	if len(args) < 2 {
-		return jsResult(nil, "queryParseAndValidate requires query and fields arguments")
-	}
-
-	q := args[0].String()
-	fieldsJSON := args[1].String()
-
-	expr, err := parser.Parse(q, 256)
-	if err != nil {
-		return jsParseResult(err)
-	}
-
-	var fields []validate.FieldConfig
-	if err := json.Unmarshal([]byte(fieldsJSON), &fields); err != nil {
-		return jsResult(nil, "invalid fields config: "+err.Error())
-	}
-
-	v := validate.New(fields)
-	if err := v.Validate(expr); err != nil {
-		return jsValidationResult(err)
-	}
-
-	node := astToJSON(expr)
-	return jsResult(node, "")
+// jsParseAndValidate is queryParseAndValidate(query, fieldsJSON).
+func jsParseAndValidate(args []js.Value) bridgejson.Envelope {
+	return bridgejson.ParseAndValidate(args[0].String(), args[1].String())
 }
 
-// jsMatch compiles a boolean predicate and evaluates it against a record.
-//
-// JS signature: queryMatch(query: string, fieldsJSON: string, recordJSON: string)
-//
-//	=> { result?: boolean, error?: string }
-func jsMatch(_ js.Value, args []js.Value) any {
-	if len(args) < 3 {
-		return jsResult(nil, "queryMatch requires query, fields, and record arguments")
-	}
-
-	fields, err := bridgejson.ParseFields(args[1].String())
-	if err != nil {
-		return jsResult(nil, err.Error())
-	}
-	var record map[string]any
-	if err := json.Unmarshal([]byte(args[2].String()), &record); err != nil {
-		return jsResult(nil, "invalid record: "+err.Error())
-	}
-
-	prog, err := eval.Compile(args[0].String(), fields)
-	if err != nil {
-		return jsResult(nil, err.Error())
-	}
-	return jsResult(prog.Match(record), "")
+// jsMatch is queryMatch(query, fieldsJSON, recordJSON).
+func jsMatch(args []js.Value) bridgejson.Envelope {
+	return bridgejson.Match(args[0].String(), args[1].String(), args[2].String())
 }
 
-// jsEval compiles a value expression and evaluates it against a record,
-// returning the computed value.
-//
-// JS signature: queryEval(query: string, fieldsJSON: string, recordJSON: string)
-//
-//	=> { result?: any, error?: string }
-func jsEval(_ js.Value, args []js.Value) any {
-	if len(args) < 3 {
-		return jsResult(nil, "queryEval requires query, fields, and record arguments")
-	}
-
-	fields, err := bridgejson.ParseFields(args[1].String())
-	if err != nil {
-		return jsResult(nil, err.Error())
-	}
-	var record map[string]any
-	if err := json.Unmarshal([]byte(args[2].String()), &record); err != nil {
-		return jsResult(nil, "invalid record: "+err.Error())
-	}
-
-	prog, err := eval.CompileValue(args[0].String(), fields)
-	if err != nil {
-		return jsResult(nil, err.Error())
-	}
-	v, err := prog.Eval(record)
-	if err != nil {
-		return jsResult(nil, err.Error())
-	}
-	return jsResult(v, "")
+// jsEval is queryEval(query, fieldsJSON, recordJSON).
+func jsEval(args []js.Value) bridgejson.Envelope {
+	return bridgejson.Eval(args[0].String(), args[1].String(), args[2].String())
 }
 
-// jsResult creates a {result, error} JS object. The raw Go result is stored
-// directly so the single toJSValue marshal at the end serializes the whole
-// object once — wrapping it in a js.Value here would leave an opaque value that
-// re-marshals to {}.
-func jsResult(result any, errMsg string) any {
-	obj := map[string]any{}
-	if errMsg != "" {
-		obj["error"] = errMsg
-	}
-	if result != nil {
-		obj["result"] = result
-	}
-	return toJSValue(obj)
-}
-
-// jsParseResult creates a {result, error, errors} JS object for a parse
-// failure. `error` stays the joined English message; `errors` carries each
-// failure as {code, kind, message, offset, length}, which is what a client
-// needs to render its own wording and underline the offending span. A failure
-// that is not a parse error still reports its message, with no `errors`.
-func jsParseResult(err error) any {
-	obj := map[string]any{"error": err.Error()}
-	parsed := parser.Errors(err)
-	if len(parsed) == 0 {
-		return toJSValue(obj)
-	}
-	list := make([]map[string]any, len(parsed))
-	for i, e := range parsed {
-		list[i] = map[string]any{
-			"code":    string(e.Code),
-			"kind":    e.Kind.String(),
-			"message": e.Message,
-			"offset":  e.Position.Offset,
-			"length":  e.Position.Length,
-		}
-	}
-	obj["errors"] = list
-	return toJSValue(obj)
-}
-
-// jsValidationResult creates a {error, validationErrors} JS object for a query
-// that parsed but failed validation: `error` stays the joined English message,
-// `validationErrors` carries each failure's code, span, field and operator.
-func jsValidationResult(err error) any {
-	obj := map[string]any{"error": err.Error()}
-	if list := bridgejson.ValidationErrors(err); len(list) > 0 {
-		obj["validationErrors"] = list
-	}
-	return toJSValue(obj)
-}
-
-// toJSValue converts a Go value to a js.Value by marshaling through JSON.
-func toJSValue(v any) js.Value {
-	data, err := json.Marshal(v)
+// toJSValue converts an envelope to a JavaScript object by way of JSON, so a
+// value JSON cannot carry (NaN, an infinity) becomes an error rather than a
+// malformed object.
+func toJSValue(env bridgejson.Envelope) js.Value {
+	data, err := json.Marshal(env)
 	if err != nil {
-		return js.ValueOf(map[string]any{"error": err.Error()})
+		data, _ = json.Marshal(bridgejson.Fail("result is not representable in JSON: " + err.Error()))
 	}
 	return js.Global().Get("JSON").Call("parse", string(data))
 }

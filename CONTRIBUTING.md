@@ -1,16 +1,22 @@
 # Contributing
 
 Thanks for looking at this. The library is small, has no dependencies, and is
-tested from two languages, so most changes are quick to make and quick to
-verify. This page is the checklist.
+tested from three languages (Go, JavaScript and Python through the C library),
+so most changes are quick to make and quick to verify. This page is the checklist.
 
 ## Ground rules
 
 - **Zero dependencies.** The Go library uses the standard library only. A
   change that adds a `require` to `go.mod` will not be merged.
-- **The grammar is shared.** The JavaScript client and the C library run the
-  same engine through WASM and FFI, and the corpus in `conformance/corpus.json`
-  runs against Go and JavaScript. A grammar change is a change to that corpus too.
+- **The grammar is shared.** The JavaScript client runs the same engine
+  through WASM and every other language through the C library in
+  `clients/ffi`. The same corpus in `conformance/corpus.json` runs against all
+  of them. A grammar change is a change to that corpus too.
+- **The grammar is pinned.** `internal/bridgejson/testdata/golden.jsonl`
+  records what several hundred queries parse to. If your change alters a line
+  of it, a query somebody already uses now means something else: regenerate
+  with `go test ./internal/bridgejson -run TestGolden -update`, read the diff,
+  and say in the pull request why each changed line is right.
 - **Consumers generate code.** The library parses, validates and evaluates. SQL,
   JSON or React output is the consumer's visitor; `examples/` shows how.
 - **Conventions** for imports, tests and commits are in `CLAUDE.md` and apply
@@ -24,10 +30,14 @@ make check      # gofmt, vet, lint, tests with -race
 make examples   # every example program runs as documented
 make sqltest    # every corpus case through the evaluator and a real SQLite
 make fuzz       # 30s per fuzz target (set FUZZTIME=5m for a longer run)
-make wasm       # the WASM build and its JavaScript tests
+make wasm       # the WASM build; then `npm test` in clients/npm
+make -C clients/ffi test   # the C library, driven from Python
 ```
 
-CI runs the same steps.
+CI runs the same steps, then the tests again on macOS, Windows, the newest Go
+and a 32-bit build, and fails if coverage of the library drops below 90%. A
+fuzz failure writes its input under `testdata/fuzz`; add it to the seed list in
+the fuzz test, with the fix, rather than committing the generated file.
 
 ## What a change needs
 
@@ -36,7 +46,9 @@ CI runs the same steps.
 | Grammar or lexer behaviour | a case in `conformance/corpus.json`, the syntax table in `README.md`, and a seed in `parser/fuzz_test.go` if the shape was ever wrong |
 | A built-in function | its `Arity`, a row in the README's function table, and a nil-argument case in `eval/coerce_test.go` |
 | Evaluation semantics | a case in `eval/review_regress_test.go` or `conformance/corpus.json`, and one in `conformance/sql/testdata/cases.json` when SQL should agree |
-| The JSON AST shape | `internal/bridgejson` and the TypeScript types in `clients/npm/src` |
+| The JSON AST shape | `internal/bridgejson`, the TypeScript types in `clients/npm/src`, and the golden file |
+| A bridge call | `internal/bridgejson/api.go` only; `wasm/bridge.go` and `clients/ffi/cshared.go` stay thin wrappers |
+| A new query form worth keeping | a line in `internal/bridgejson/testdata/queries.txt`, then `-update` |
 | Anything user-visible | a line under *Unreleased* in `CHANGELOG.md` |
 
 ## The SQL differential corpus
