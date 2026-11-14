@@ -6,6 +6,8 @@ Pure Go query language library. Handles lexing, parsing, AST construction, valid
 
 Zero external dependencies. Compiles to WebAssembly.
 
+**Documentation and a live playground: <https://heyllave.github.io/query/>**
+
 A query has **two result domains**:
 
 - **Boolean predicate** (the default) — `state=draft AND total>50000` evaluates to `true`/`false` against a record. Compile with `eval.Compile` and run with `Match`.

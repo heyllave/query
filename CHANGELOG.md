@@ -118,6 +118,8 @@ semantic versioning once the first tag is cut.
 
 ### Added
 
+- A documentation site with a live playground, built from `docs/` and
+  published to GitHub Pages (<https://heyllave.github.io/query/>).
 - `validate.WithAllowedFunctions`, for consumers that translate the tree and
   must refuse functions they cannot translate (`functionNotAllowed`).
 - `validate.DefaultOps`, and field configs in JSON may name their type

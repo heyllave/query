@@ -1,0 +1,82 @@
+name: Docs
+
+# Builds the documentation site in docs/ and, on main, publishes it to GitHub
+# Pages. The playground page runs the real engine, so the job compiles
+# query.wasm and places it beside the pages.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "docs/**"
+      - "wasm/**"
+      - "internal/bridgejson/**"
+      - "ast/**"
+      - "parser/**"
+      - "validate/**"
+      - "eval/**"
+      - "token/**"
+      - ".github/workflows/pages.yml"
+  pull_request:
+    paths:
+      - "docs/**"
+      - ".github/workflows/pages.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pages-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: Build the site
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Build the engine for the playground
+        run: |
+          make -C wasm build
+          mkdir -p docs/assets
+          cp clients/npm/query.wasm docs/assets/query.wasm
+          cp clients/npm/src/wasm_exec.js docs/assets/wasm_exec.js
+
+      - name: Build with Jekyll
+        uses: actions/jekyll-build-pages@v1
+        with:
+          source: ./docs
+          destination: ./_site
+
+      - name: Check the playground has its engine
+        run: |
+          test -s _site/assets/query.wasm
+          test -s _site/assets/wasm_exec.js
+          test -s _site/playground/index.html
+
+      - name: Upload the site
+        if: github.event_name != 'pull_request'
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: ./_site
+
+  deploy:
+    name: Publish to GitHub Pages
+    if: github.event_name != 'pull_request'
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4
