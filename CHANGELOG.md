@@ -12,6 +12,24 @@ semantic versioning once the first tag is cut.
   and their Android and iOS builds. `clients/ffi` stays, as a plain C shared
   library for any language; it is built and tested on its own.
 
+### Security
+
+- A tree sent to `validate` or `stringify` through the WASM and C bridges is
+  held to what the parser could have built. A selector name outside `first`,
+  `last`, `any`, `all`, `none` and the anonymous form, an unknown operator and
+  a `list` value are errors; before, such text was printed as written, so a
+  tree could validate and then print as a wider query naming fields it was
+  never checked against (`"selector": "first OR secret=a*"`).
+- The same trees are bound in size. A value, field function or field name
+  longer than the default query limit (256 bytes), or a tree whose JSON is
+  over 1 MiB, fails with the `queryTooLong` code. These used to be parsed
+  with no limit.
+- `ast.WildcardToLike` documents that its result needs `ESCAPE '\'` in the
+  `LIKE` clause, and `docs/sql.md`, `examples/sql` and the npm example now
+  write it. Without the clause, SQLite, Oracle and SQL Server read an escaped
+  `%` or `_` in the pattern as a wildcard again. If you copied the earlier
+  example, add the clause.
+
 ### Fixed
 
 - `state==draft`, `total=>5` and `a<>b` are parse errors. They used to compare
