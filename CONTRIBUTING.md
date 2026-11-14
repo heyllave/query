@@ -1,16 +1,16 @@
 # Contributing
 
 Thanks for looking at this. The library is small, has no dependencies, and is
-tested from three languages, so most changes are quick to make and quick to
+tested from two languages, so most changes are quick to make and quick to
 verify. This page is the checklist.
 
 ## Ground rules
 
 - **Zero dependencies.** The Go library uses the standard library only. A
   change that adds a `require` to `go.mod` will not be merged.
-- **The grammar is shared.** The JavaScript and Dart clients run the same
-  engine through WASM and FFI, and the same corpus in `conformance/corpus.json`
-  runs against all three. A grammar change is a change to that corpus too.
+- **The grammar is shared.** The JavaScript client and the C library run the
+  same engine through WASM and FFI, and the corpus in `conformance/corpus.json`
+  runs against Go and JavaScript. A grammar change is a change to that corpus too.
 - **Consumers generate code.** The library parses, validates and evaluates. SQL,
   JSON or React output is the consumer's visitor; `examples/` shows how.
 - **Conventions** for imports, tests and commits are in `CLAUDE.md` and apply
@@ -27,7 +27,7 @@ make fuzz       # 30s per fuzz target (set FUZZTIME=5m for a longer run)
 make wasm       # the WASM build and its JavaScript tests
 ```
 
-CI runs the same steps plus the Dart client and an Android build.
+CI runs the same steps.
 
 ## What a change needs
 
@@ -36,7 +36,7 @@ CI runs the same steps plus the Dart client and an Android build.
 | Grammar or lexer behaviour | a case in `conformance/corpus.json`, the syntax table in `README.md`, and a seed in `parser/fuzz_test.go` if the shape was ever wrong |
 | A built-in function | its `Arity`, a row in the README's function table, and a nil-argument case in `eval/coerce_test.go` |
 | Evaluation semantics | a case in `eval/review_regress_test.go` or `conformance/corpus.json`, and one in `conformance/sql/testdata/cases.json` when SQL should agree |
-| The JSON AST shape | `internal/bridgejson`, the TypeScript types in `clients/npm/src`, and the Dart types in `clients/flutter/lib` |
+| The JSON AST shape | `internal/bridgejson` and the TypeScript types in `clients/npm/src` |
 | Anything user-visible | a line under *Unreleased* in `CHANGELOG.md` |
 
 ## The SQL differential corpus

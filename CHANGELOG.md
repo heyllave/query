@@ -6,6 +6,12 @@ semantic versioning once the first tag is cut.
 
 ## Unreleased
 
+### Removed
+
+- The Dart and Flutter clients (`clients/flutter`, `clients/flutter_plugin`)
+  and their Android and iOS builds. `clients/ffi` stays, as a plain C shared
+  library for any language.
+
 ### Fixed
 
 - Numeric comparisons are exact: an integer literal no longer truncates a

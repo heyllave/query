@@ -1,5 +1,5 @@
 // Runs the shared cross-language corpus (/conformance/corpus.json) against the
-// query WASM build. The Go and Dart clients run the same file, so grammar drift
+// query WASM build. The Go client runs the same file, so grammar drift
 // between implementations becomes a failing build.
 
 import test from "node:test";

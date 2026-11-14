@@ -1,9 +1,9 @@
 //go:build cshared
 
-// Command libquery is the cgo c-shared bridge for the query language, consumed
-// by the Dart/Flutter client over dart:ffi on native platforms. It mirrors the
-// WASM/JS bridge function-for-function and shares the JSON contract via
-// internal/bridgejson, so the native and web clients behave identically.
+// Command libquery is the cgo c-shared bridge for the query language: a plain
+// C library any language with a C FFI can load. It mirrors the WASM/JS bridge
+// function-for-function and shares the JSON contract via internal/bridgejson,
+// so native and web callers behave identically.
 //
 // Build (clang because the CI runner has no gcc):
 //
@@ -56,7 +56,7 @@ func errResp(msg string) *C.char { return respond(map[string]any{"error": msg}) 
 
 // guard runs an exported entry point and turns a Go panic into an error
 // envelope. A panic that escaped a c-shared library would abort the host
-// process (the Flutter app), which no query is allowed to do.
+// process, which no query is allowed to do.
 func guard(fn func() *C.char) (result *C.char) {
 	defer func() {
 		if r := recover(); r != nil {

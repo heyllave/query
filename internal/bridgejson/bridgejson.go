@@ -2,7 +2,7 @@
 // foreign-language bridges (WASM/JS and cgo/FFI). It converts between the AST
 // and a stable JSON representation and decodes field configs, so every bridge
 // produces and accepts identical shapes — the single source of truth that keeps
-// the JavaScript and Dart clients from drifting apart.
+// the JavaScript and C clients from drifting apart.
 //
 // It carries no build tag and depends only on the pure-Go library packages, so
 // it compiles in every target (host, WASM, cgo).

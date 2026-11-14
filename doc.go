@@ -15,8 +15,8 @@
 //     ([eval.CompileValue]) and run it against maps or structs
 //
 // The command in cmd/query explains a query's tokens and tree, and the
-// wasm and clients directories hold the JavaScript and Dart bindings, which
-// run the same engine and the same conformance corpus.
+// wasm and clients directories hold the JavaScript binding and a C shared
+// library, which run the same engine.
 //
 // # Basic usage
 //

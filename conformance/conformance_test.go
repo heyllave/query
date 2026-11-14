@@ -1,6 +1,6 @@
 // Package conformance runs the shared cross-language corpus (corpus.json)
 // against the real Go query engine. The same corpus is run by the JavaScript and
-// Dart clients, so any grammar drift between implementations fails a build.
+// C-library clients, so any grammar drift between implementations fails a build.
 package conformance
 
 import (
@@ -81,7 +81,7 @@ func runCase(t *testing.T, c corpus, tc testCase) {
 		checkErr(t, tc, err)
 		checkCode(t, tc, err)
 		if err == nil && tc.ExpectAst != "" {
-			// AST type is asserted loosely (presence + no error); the JS/Dart
+			// AST type is asserted loosely (presence + no error); the JS
 			// runners do the structural type check against the JSON shape.
 			if expr == nil {
 				t.Errorf("expected an AST, got nil")
