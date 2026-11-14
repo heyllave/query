@@ -357,3 +357,6 @@
 {"query":"n=٣","print":"n=٣","ast":{"type":"qualifier","op":"=","field":["n"],"value":{"type":"string","raw":"٣","value":"٣"}}}
 {"query":"n>٣","print":"n>٣","ast":{"type":"qualifier","op":">","field":["n"],"value":{"type":"string","raw":"٣","value":"٣"}}}
 {"query":"d=٣d","print":"d=٣d","ast":{"type":"qualifier","op":"=","field":["d"],"value":{"type":"string","raw":"٣d","value":"٣d"}}}
+{"query":"n>2*[unit-price]","print":"n>2*[unit-price]","ast":{"type":"qualifier","op":">","field":["n"],"value":{"type":"arithmetic","raw":"2*[unit-price]","value":null}}}
+{"query":"n>abs(([a]))","print":"n>abs(a)","ast":{"type":"qualifier","op":">","field":["n"],"value":{"type":"function","raw":"abs(a)","value":null}}}
+{"query":"total>=1.5*[base]-[discount]","print":"total>=1.5*[base]-[discount]","ast":{"type":"qualifier","op":">=","field":["total"],"value":{"type":"arithmetic","raw":"1.5*[base]-[discount]","value":null}}}

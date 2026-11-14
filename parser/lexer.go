@@ -612,6 +612,15 @@ func (l *lexer) isArithValueAhead() bool {
 			}
 			i = j
 			continue
+		case c == '[':
+			// A bracketed field is a primary whatever its name holds, so
+			// 2*[unit-price] is arithmetic and the name is not a bareword.
+			end := l.skipFieldRef(i)
+			if end < 0 {
+				return false
+			}
+			i = end
+			continue
 		case isDigit(c):
 			// A digit run with more than one dot (10.0.0.1, 1.2.3) is an
 			// address or a version, not a number, so 10.0.0.1/24 is one
@@ -678,6 +687,25 @@ func (l *lexer) skipCall(open int) int {
 		}
 	}
 	return len(l.input)
+}
+
+// skipFieldRef returns the index of the ']' that closes the field reference
+// opening at l.input[open], skipping a quoted name inside it, or -1 when it
+// never closes.
+func (l *lexer) skipFieldRef(open int) int {
+	for i := open + 1; i < len(l.input); i++ {
+		switch l.input[i] {
+		case '"':
+			for i++; i < len(l.input) && l.input[i] != '"'; i++ {
+				if l.input[i] == '\\' {
+					i++
+				}
+			}
+		case ']':
+			return i
+		}
+	}
+	return -1
 }
 
 func isDurationSuffix(c byte) bool {

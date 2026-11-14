@@ -357,3 +357,6 @@ x=f(a.)
 n=٣
 n>٣
 d=٣d
+n>2*[unit-price]
+n>abs(([a]))
+total>=1.5*[base]-[discount]
