@@ -1,0 +1,75 @@
+---
+title: Playground
+nav_order: 2
+permalink: /playground/
+layout: default
+---
+
+<h1>Playground</h1>
+
+<p>
+  Type a query. It is parsed, validated and matched against the record in your
+  browser, by the same engine the Go module uses, compiled to WebAssembly.
+  Nothing is sent to a server.
+</p>
+
+<style>
+  .pg label { display: block; font-weight: 600; margin: 1rem 0 0.25rem; }
+  .pg input[type="text"], .pg textarea {
+    width: 100%; box-sizing: border-box; padding: 0.5rem 0.6rem;
+    font-family: SFMono-Regular, Menlo, Consolas, monospace; font-size: 0.85rem;
+    border: 1px solid #c9c9d4; border-radius: 4px; background: #fff; color: #27262b;
+  }
+  .pg textarea { min-height: 13rem; resize: vertical; }
+  .pg .pg-cols { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 1rem; }
+  @media (max-width: 40rem) { .pg .pg-cols { grid-template-columns: minmax(0, 1fr); } }
+  .pg .pg-examples { margin: 0.5rem 0 0; display: flex; flex-wrap: wrap; gap: 0.4rem; }
+  .pg .pg-examples button {
+    font-family: SFMono-Regular, Menlo, Consolas, monospace; font-size: 0.75rem;
+    padding: 0.2rem 0.5rem; border: 1px solid #c9c9d4; border-radius: 4px;
+    background: #f5f6fa; color: #27262b; cursor: pointer;
+  }
+  .pg .pg-verdict {
+    margin: 1rem 0 0; padding: 0.6rem 0.8rem; border-radius: 4px;
+    border: 1px solid #c9c9d4; background: #f5f6fa; font-weight: 600;
+  }
+  .pg .pg-verdict[data-state="yes"] { border-color: #2c8a4b; background: #e9f7ee; color: #17602f; }
+  .pg .pg-verdict[data-state="no"] { border-color: #8a8a99; }
+  .pg .pg-verdict[data-state="error"] { border-color: #c9372c; background: #fdecea; color: #8f1d14; }
+  .pg pre { margin: 0; padding: 0.6rem 0.8rem; overflow: auto; max-height: 24rem; font-size: 0.8rem; }
+  .pg .pg-mark { white-space: pre-wrap; word-break: break-all; }
+  .pg .pg-mark mark { background: #f9c9c4; color: inherit; border-bottom: 2px solid #c9372c; }
+  .pg ul.pg-errors { margin: 0.5rem 0 0; padding-left: 1.2rem; }
+  .pg ul.pg-errors code { font-size: 0.8rem; }
+</style>
+
+<div class="pg">
+  <label for="pg-query">Query</label>
+  <input id="pg-query" type="text" spellcheck="false" autocomplete="off" autocapitalize="off"
+         value="labels.team=payments AND replicas>=2 AND created_at>=2026-01-01">
+  <div class="pg-examples" id="pg-examples" aria-label="Example queries"></div>
+
+  <div class="pg-verdict" id="pg-verdict" role="status" aria-live="polite">Loading the engine…</div>
+  <pre class="pg-mark" id="pg-mark" hidden></pre>
+  <ul class="pg-errors" id="pg-errors" hidden></ul>
+
+  <div class="pg-cols">
+    <div>
+      <label for="pg-fields">Fields (JSON)</label>
+      <textarea id="pg-fields" spellcheck="false"></textarea>
+    </div>
+    <div>
+      <label for="pg-record">Record (JSON)</label>
+      <textarea id="pg-record" spellcheck="false"></textarea>
+    </div>
+  </div>
+
+  <label for="pg-printed">Printed form</label>
+  <pre id="pg-printed"></pre>
+
+  <label for="pg-tree">Tree (JSON)</label>
+  <pre id="pg-tree"></pre>
+</div>
+
+<script src="{{ '/assets/wasm_exec.js' | relative_url }}"></script>
+<script src="{{ '/assets/playground.js' | relative_url }}" data-wasm="{{ '/assets/query.wasm' | relative_url }}"></script>

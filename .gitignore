@@ -28,3 +28,8 @@ clients/npm/src/wasm_exec.js
 
 # The C shared library and its header (built per platform, not committed)
 clients/ffi/libquery.*
+
+# Docs site (built by .github/workflows/pages.yml)
+docs/_site/
+docs/.jekyll-cache/
+docs/assets/wasm_exec.js
