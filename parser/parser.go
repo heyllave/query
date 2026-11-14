@@ -856,7 +856,7 @@ func (p *parser) parseFuncArg() *ast.FuncArg {
 	// Literal value (use the value lexing for after-operator tokens)
 	val := p.parseValue()
 	if val != nil {
-		return &ast.FuncArg{Value: val}
+		return plainArg(val)
 	}
 
 	// parseValue has already reported the missing value on every path that
@@ -865,6 +865,20 @@ func (p *parser) parseFuncArg() *ast.FuncArg {
 	p.errors.add(newError(CodeExpectedValue, ErrUnexpectedToken, tok.Pos,
 		"expected function argument, got %s", tok))
 	return nil
+}
+
+// plainArg turns a parsed value into an argument. A paren group around a lone
+// field or call, f(([a])) or f((g(x))), is that field or call, so it takes
+// the same shape as f([a]) and f(g(x)) and prints the same way.
+func plainArg(val *ast.Value) *ast.FuncArg {
+	switch {
+	case val.Type == ast.ValueFieldRef:
+		field := val.Field
+		return &ast.FuncArg{Field: &field}
+	case val.Type == ast.ValueFunc && val.Func != nil:
+		return &ast.FuncArg{Call: val.Func}
+	}
+	return &ast.FuncArg{Value: val}
 }
 
 // argIsArithmetic reports whether the argument at the cursor is a bracketed

@@ -28,6 +28,12 @@ semantic versioning once the first tag is cut.
 - Arithmetic in a function argument may open with a bracketed field or a call
   (`abs([a]-[b])`, `min(len(name)+1, 9)`), on either side of a comparison.
 - Only ASCII digits make a number; a digit from another script is text.
+- Arithmetic that opens with a number and continues with a bracketed field
+  (`total>2*[unit-price]`) parses without spaces or a paren group; the number
+  and operator used to be read as text.
+- A paren group around a lone field or call in a function argument
+  (`abs(([a]))`) is that field or call, so it prints in a form that parses
+  back to the same text.
 - `Match` and `Eval` through the WASM and C bridges report the same coded
   `errors` and `validationErrors` as `parseAndValidate`, and both bridges
   reject a field config with a nameless or repeated field or an unknown

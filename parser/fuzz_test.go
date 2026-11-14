@@ -66,7 +66,7 @@ func FuzzParse(f *testing.F) {
 
 // FuzzParseValue checks the value grammar the same way.
 func FuzzParseValue(f *testing.F) {
-	for _, s := range []string{"1+2", "now()-7d", "upper(name)", "(1+2)*3", "1/0", "len(tags)", "[base]*1.1", `"a"%2`, "-5", "+3.5", "abs([a]-[b])", "min(f([a])+1, 9)", "A([A.A])", "f(a.b/c, d.e)+1", "(𑑑)", "𑑑", "n=٣"} {
+	for _, s := range []string{"1+2", "now()-7d", "upper(name)", "(1+2)*3", "1/0", "len(tags)", "[base]*1.1", `"a"%2`, "-5", "+3.5", "abs([a]-[b])", "min(f([a])+1, 9)", "A([A.A])", "A(([A]))", "0%[a]", "2*[\"a ] b\"]+1", "A(((f(x))), ([a.b]))", "f(a.b/c, d.e)+1", "(𑑑)", "𑑑", "n=٣"} {
 		f.Add(s)
 	}
 	f.Fuzz(func(t *testing.T, s string) {
