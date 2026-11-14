@@ -19,27 +19,7 @@ func Compile(q string, fields []validate.FieldConfig, opts ...Option) (*Program,
 		opt(&o)
 	}
 
-	// Build function registry
-	funcs := make(FuncRegistry)
-	if !o.noBuiltins {
-		for k, v := range BuiltinFunctions() {
-			funcs[k] = v
-		}
-	}
-	for k, v := range o.funcs {
-		funcs[k] = v
-	}
-
-	// Restrict fields if specified
-	activeFields := fields
-	if len(o.allowedFields) > 0 {
-		activeFields = filterFields(fields, o.allowedFields)
-	}
-
-	// Restrict operators if specified
-	if len(o.allowedOps) > 0 {
-		activeFields = restrictOps(activeFields, o.allowedOps)
-	}
+	funcs := o.registry()
 
 	// Parse
 	expr, err := parser.Parse(q, o.maxLength)
@@ -47,19 +27,8 @@ func Compile(q string, fields []validate.FieldConfig, opts ...Option) (*Program,
 		return nil, fmt.Errorf("parse: %w", err)
 	}
 
-	// Check depth
-	if o.maxDepth > 0 && ast.Depth(expr) > o.maxDepth {
-		return nil, fmt.Errorf("query depth %d exceeds maximum of %d", ast.Depth(expr), o.maxDepth)
-	}
-
-	// Validate (skip validation for function-call-only expressions)
-	var vopts []validate.Option
-	if o.customVal != nil {
-		vopts = append(vopts, validate.WithCustomValidator(o.customVal))
-	}
-	v := validate.New(activeFields, vopts...)
-	if err := v.Validate(expr); err != nil {
-		return nil, fmt.Errorf("validate: %w", err)
+	if err := o.check(expr, fields, funcs); err != nil {
+		return nil, err
 	}
 
 	// Compile the matcher
@@ -74,35 +43,47 @@ func Compile(q string, fields []validate.FieldConfig, opts ...Option) (*Program,
 	}, nil
 }
 
-func filterFields(all []validate.FieldConfig, allowed []string) []validate.FieldConfig {
-	set := make(map[string]bool, len(allowed))
-	for _, f := range allowed {
-		set[f] = true
-	}
-	var result []validate.FieldConfig
-	for _, f := range all {
-		if set[f.Name] {
-			result = append(result, f)
+// registry assembles the function registry: the builtins unless disabled,
+// overlaid with the functions registered through WithFunctions.
+func (o *options) registry() FuncRegistry {
+	funcs := make(FuncRegistry)
+	if !o.noBuiltins {
+		for k, v := range BuiltinFunctions() {
+			funcs[k] = v
 		}
 	}
-	return result
+	for k, v := range o.funcs {
+		funcs[k] = v
+	}
+	return funcs
 }
 
-func restrictOps(fields []validate.FieldConfig, allowed []validate.Op) []validate.FieldConfig {
-	set := make(map[validate.Op]bool, len(allowed))
-	for _, op := range allowed {
-		set[op] = true
+// check runs the compile-time checks shared by Compile and CompileValue: the
+// depth limit, validation against the field configs (with the allowed-field
+// and allowed-operator restrictions enforced inside the validator so they
+// also bind a custom validator), and function existence and arity.
+func (o *options) check(expr ast.Expression, fields []validate.FieldConfig, funcs FuncRegistry) error {
+	if o.maxDepth > 0 && ast.Depth(expr) > o.maxDepth {
+		return fmt.Errorf("query depth %d exceeds maximum of %d", ast.Depth(expr), o.maxDepth)
 	}
-	result := make([]validate.FieldConfig, len(fields))
-	for i, f := range fields {
-		result[i] = f
-		var ops []validate.Op
-		for _, op := range f.AllowedOps {
-			if set[op] {
-				ops = append(ops, op)
-			}
-		}
-		result[i].AllowedOps = ops
+
+	var vopts []validate.Option
+	if o.customVal != nil {
+		vopts = append(vopts, validate.WithCustomValidator(o.customVal))
 	}
-	return result
+	if len(o.allowedFields) > 0 {
+		vopts = append(vopts, validate.WithAllowedFields(o.allowedFields...))
+	}
+	if len(o.allowedOps) > 0 {
+		vopts = append(vopts, validate.WithAllowedOps(o.allowedOps...))
+	}
+	v := validate.New(fields, vopts...)
+	if err := v.Validate(expr); err != nil {
+		return fmt.Errorf("validate: %w", err)
+	}
+
+	if err := checkCalls(expr, funcs); err != nil {
+		return fmt.Errorf("validate: %w", err)
+	}
+	return nil
 }

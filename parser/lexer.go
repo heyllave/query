@@ -1,9 +1,11 @@
 package parser
 
 import (
+	"math"
 	"strings"
 	"time"
 	"unicode"
+	"unicode/utf8"
 
 	"github.com/heyllave/query/token"
 )
@@ -16,6 +18,10 @@ type lexer struct {
 	tokens        []token.Token
 	errors        ErrorList
 	afterOperator bool
+	// expectInList is set right after an IN keyword; the next '(' opens an
+	// IN list, inside which every element is lexed in value mode.
+	expectInList bool
+	inList       bool
 }
 
 // Lex tokenizes the input query string and returns the token stream.
@@ -68,16 +74,43 @@ func (l *lexer) run() {
 		}
 
 		ch := l.input[l.pos]
+		if ch != '(' {
+			// Only a '(' directly after IN opens a list; anything else means
+			// the word was a field name (IN=1, IN x(...)).
+			l.expectInList = false
+		}
 		switch {
 		case ch == '(':
 			l.emit(token.LParen, "(")
 			l.pos++
+			if l.expectInList {
+				l.expectInList = false
+				l.inList = true
+				l.afterOperator = true
+			}
 		case ch == ')':
 			l.emit(token.RParen, ")")
 			l.pos++
+			l.inList = false
 		case ch == ',':
 			l.emit(token.Comma, ",")
 			l.pos++
+			if l.inList {
+				l.afterOperator = true
+			}
+		case (ch == '-' || ch == '+') && isDigit(l.peek(1)) && l.afterListSep():
+			// Signed literal in an argument or IN-list slot: addDays(d, -7).
+			l.lexNumericLiteral()
+		case isArithOpChar(ch) && l.continuesArith():
+			// An arithmetic operator after whitespace continues the preceding
+			// value: `total>10 - 3`. The operand that follows is lexed in value
+			// mode so the parser sees the same token stream as `10-3`.
+			l.emit(arithTokenFor(ch), string(ch))
+			l.pos++
+			l.afterOperator = true
+		case ch == '[':
+			// Bracketed field name in field position: ["labels.x/y"]=1.
+			l.lexFieldRef()
 		case ch == '@':
 			l.emit(token.At, "@")
 			l.pos++
@@ -139,9 +172,12 @@ func (l *lexer) run() {
 		case isDigit(ch):
 			l.lexNumericLiteral()
 		default:
-			l.errors.add(newError(CodeUnexpectedChar, ErrSyntax, token.Position{Offset: l.pos, Length: 1},
-				"unexpected character %q", string(ch)))
-			l.pos++
+			// Report the whole rune, not its first byte, so the message
+			// shows what was typed and the span covers it.
+			_, width := utf8.DecodeRuneInString(l.input[l.pos:])
+			l.errors.add(newError(CodeUnexpectedChar, ErrSyntax, token.Position{Offset: l.pos, Length: width},
+				"unexpected character %q", l.input[l.pos:l.pos+width]))
+			l.pos += width
 		}
 	}
 
@@ -150,9 +186,7 @@ func (l *lexer) run() {
 
 func (l *lexer) lexIdentOrKeyword() {
 	start := l.pos
-	for l.pos < len(l.input) && isIdentChar(l.input[l.pos]) {
-		l.pos++
-	}
+	l.pos = l.identEnd(l.pos)
 	word := l.input[start:l.pos]
 	pos := token.Position{Offset: start, Length: l.pos - start}
 
@@ -168,6 +202,7 @@ func (l *lexer) lexIdentOrKeyword() {
 		l.tokens = append(l.tokens, token.Token{Type: token.Not, Value: word, Pos: pos})
 	case "IN":
 		l.tokens = append(l.tokens, token.Token{Type: token.In, Value: word, Pos: pos})
+		l.expectInList = true
 	default:
 		// "true" and "false" are reserved boolean literals in any position —
 		// matching what classifyValue does for the after-operator path. Their
@@ -189,12 +224,18 @@ func (l *lexer) lexIdentOrKeyword() {
 //	IN(1d, 1w)                  // duration literals
 //	year=2026                   // (an after-operator value; goes through lexValue)
 //
-// Wildcards, unquoted strings, and signed numbers are NOT recognized here —
-// they remain reserved for the after-operator value path.
+// Wildcards and unquoted strings are NOT recognized here — they remain
+// reserved for the after-operator value path. A leading sign is consumed when
+// present (the callers only route here with a sign when a digit follows).
 func (l *lexer) lexNumericLiteral() {
 	start := l.pos
-	// Consume digits, hyphens (for dates), dots (for floats), and duration
-	// suffixes (d/h/m/w). The classifier below picks one interpretation.
+	if l.input[l.pos] == '-' || l.input[l.pos] == '+' {
+		l.pos++
+	}
+	digitsStart := l.pos
+	// Consume digits, hyphens at the two date positions (YYYY-MM-DD), dots
+	// (for floats), and duration suffixes (d/h/m/w). The classifier below
+	// picks one interpretation.
 	for l.pos < len(l.input) {
 		ch := l.input[l.pos]
 		if isDigit(ch) {
@@ -205,16 +246,16 @@ func (l *lexer) lexNumericLiteral() {
 			l.pos++
 			continue
 		}
-		if ch == '-' && l.pos+1 < len(l.input) && isDigit(l.input[l.pos+1]) {
-			// Hyphen-followed-by-digit appears only inside dates (YYYY-MM-DD).
-			// We only consume it if we're not yet past position 4 from start
-			// (i.e., the year portion) OR position 7 (month portion). Easier:
-			// consume any hyphen-digit run and let the classifier validate.
+		if ch == '-' && l.pos+1 < len(l.input) && isDigit(l.input[l.pos+1]) && digitsStart == start && isDatePrefix(l.input[digitsStart:l.pos]) {
+			// A hyphen is part of the literal only where a date has one, so
+			// 2026-01-01 stays a date while 10-3 is the subtraction 10 - 3.
+			// A signed number is never a date (+0000-0 is +0000 minus 0).
 			l.pos++
 			continue
 		}
-		// Trailing duration suffix.
-		if ch == 'd' || ch == 'h' || ch == 'w' || (ch == 'm' && !isIdentChar(l.peek(1))) {
+		// Trailing duration suffix: a single unit letter not followed by
+		// another letter (so 30m-1h is two durations, while 5min is a word).
+		if isDurationSuffix(ch) && !isIdentStart(l.peek(1)) {
 			l.pos++
 			break
 		}
@@ -310,11 +351,15 @@ func (l *lexer) lexFieldRef() {
 		nameStart := l.pos
 		for l.pos < len(l.input) {
 			c := l.input[l.pos]
-			if isIdentChar(c) || c == '.' {
+			if c == '.' {
 				l.pos++
 				continue
 			}
-			break
+			end := l.identEnd(l.pos)
+			if end == l.pos {
+				break
+			}
+			l.pos = end
 		}
 		name = l.input[nameStart:l.pos]
 	}
@@ -343,6 +388,92 @@ func (l *lexer) lexFieldRef() {
 	})
 	// A field reference is a complete value.
 	l.afterOperator = false
+}
+
+// isDatePrefix reports whether the digits lexed so far are the part of a date
+// literal that precedes a hyphen: the year (YYYY) or year and month (YYYY-MM).
+func isDatePrefix(s string) bool {
+	switch len(s) {
+	case 4:
+		return allDigits(s)
+	case 7:
+		return s[4] == '-' && allDigits(s[:4]) && allDigits(s[5:])
+	default:
+		return false
+	}
+}
+
+func allDigits(s string) bool {
+	for i := 0; i < len(s); i++ {
+		if !isDigit(s[i]) {
+			return false
+		}
+	}
+	return len(s) > 0
+}
+
+// afterListSep reports whether the previous token opened an argument or
+// IN-list slot ('(' or ','), where a signed numeric literal is permitted.
+func (l *lexer) afterListSep() bool {
+	if len(l.tokens) == 0 {
+		return false
+	}
+	t := l.tokens[len(l.tokens)-1].Type
+	return t == token.LParen || t == token.Comma
+}
+
+// continuesArith reports whether an arithmetic operator at l.pos (reached in
+// field position, so after whitespace) continues the value that precedes it:
+// the previous token ends a value primary and a primary begins after the
+// operator and any whitespace.
+func (l *lexer) continuesArith() bool {
+	if len(l.tokens) == 0 {
+		return false
+	}
+	if !l.afterValue() {
+		return false
+	}
+	i := l.pos + 1
+	for i < len(l.input) && l.spaceWidth(i) > 0 {
+		i += l.spaceWidth(i)
+	}
+	if i >= len(l.input) {
+		return false
+	}
+	return l.beginsPrimary(i)
+}
+
+// afterValue reports whether the previous token ends a value primary, so an
+// arithmetic operator here is binary rather than a sign.
+func (l *lexer) afterValue() bool {
+	if len(l.tokens) == 0 {
+		return false
+	}
+	prev := l.tokens[len(l.tokens)-1]
+	return prev.Type.IsValueEnd() || (prev.Type == token.String && prev.Quoted)
+}
+
+func isArithOpChar(ch byte) bool {
+	return ch == '+' || ch == '-' || ch == '*' || ch == '/' || ch == '%'
+}
+
+func arithTokenFor(ch byte) token.Type {
+	switch ch {
+	case '+':
+		return token.Plus
+	case '-':
+		return token.Minus
+	case '*':
+		return token.Mul
+	case '/':
+		return token.Div
+	default:
+		return token.Mod
+	}
+}
+
+func isSpace(ch byte) bool {
+	return ch == ' ' || ch == '\t' || ch == '\n' || ch == '\r'
 }
 
 func (l *lexer) lexValue() {
@@ -394,6 +525,11 @@ func (l *lexer) lexValue() {
 //   - an unambiguous arithmetic operator with operand characters on both sides
 //     ("50000*1.1", "now()-7d") — single-sided operators like `202*` remain
 //     wildcards.
+//
+// A value run that contains a bareword — letters that are neither a function
+// call nor a duration suffix — is never arithmetic: it is an unquoted string
+// such as a UUID (550e8400-e29b-...) or a version (1.2.3-beta), even when a
+// two-sided operator appears somewhere inside it.
 func (l *lexer) isArithValueAhead() bool {
 	if l.pos >= len(l.input) {
 		return false
@@ -408,54 +544,113 @@ func (l *lexer) isArithValueAhead() bool {
 	}
 	// Function-call primary: <ident>(
 	if isIdentStart(ch) {
-		end := l.pos
-		for end < len(l.input) && isIdentChar(l.input[end]) {
-			end++
-		}
+		end := l.identEnd(l.pos)
 		if end < len(l.input) && l.input[end] == '(' {
 			return true
 		}
 	}
-	// Otherwise scan ahead looking for a two-sided arithmetic operator.
+	// Otherwise scan the run: reject on a bareword, accept on a two-sided
+	// arithmetic operator.
 	depth := 0
+	found := false
 	for i := l.pos; i < len(l.input); i++ {
 		c := l.input[i]
 		if depth == 0 {
-			if c == ' ' || c == '\t' || c == '\n' || c == '\r' || c == ')' || c == ',' {
-				return false
+			if l.spaceWidth(i) > 0 || c == ')' || c == ',' {
+				break
 			}
 			if c == '.' && i+1 < len(l.input) && l.input[i+1] == '.' {
-				return false
+				break
 			}
 		}
-		if c == '(' {
+		switch {
+		case c == '(':
 			depth++
 			continue
-		}
-		if c == ')' {
+		case c == ')':
 			depth--
 			continue
-		}
-		if c == '+' || c == '/' || c == '%' {
-			if l.hasOperandsAround(i) {
-				return true
+		case c == '"':
+			// Skip a quoted string primary.
+			j := i + 1
+			for j < len(l.input) && l.input[j] != '"' {
+				if l.input[j] == '\\' {
+					j++
+				}
+				j++
 			}
-		}
-		if c == '-' && i > l.pos {
-			// Mid-value `-` is subtraction only with operands on both sides.
-			// Leading `-` (unary) doesn't count — startsArithValue handles
-			// signed-numeric primaries via the digit path.
-			if l.hasOperandsAround(i) {
-				return true
+			i = j
+			continue
+		case isDigit(c):
+			// A digit run with more than one dot (10.0.0.1, 1.2.3) is an
+			// address or a version, not a number, so 10.0.0.1/24 is one
+			// string rather than a division.
+			end, dots := i, 0
+			for end < len(l.input) && (isDigit(l.input[end]) ||
+				(l.input[end] == '.' && end+1 < len(l.input) && isDigit(l.input[end+1]))) {
+				if l.input[end] == '.' {
+					dots++
+				}
+				end++
 			}
+			if dots > 1 {
+				return false
+			}
+			i = end - 1
+			continue
+		case isIdentStart(c):
+			if isDurationSuffix(c) && i > l.pos && isDigit(l.input[i-1]) && (i+1 >= len(l.input) || !isIdentStart(l.input[i+1])) {
+				// Duration suffix on a number: 7d, 30m, also in 30m-1h.
+				continue
+			}
+			end := l.identEnd(i)
+			if end < len(l.input) && l.input[end] == '(' {
+				// Function call: a primary. Its arguments are the call's
+				// business (field names are fine there), so skip to the
+				// matching ')'.
+				i = l.skipCall(end) - 1
+				continue
+			}
+			return false // bareword → unquoted string
 		}
-		if c == '*' {
+		if c == '+' || c == '/' || c == '%' || c == '*' || (c == '-' && i > l.pos) {
+			// A leading `-` is a sign, not subtraction; every other operator
+			// counts only with operands on both sides.
 			if l.hasOperandsAround(i) {
-				return true
+				found = true
 			}
 		}
 	}
-	return false
+	return found
+}
+
+// skipCall returns the index just past the ')' that closes the call body
+// opening at l.input[open] (or len(input) when unclosed), skipping quoted
+// strings inside it.
+func (l *lexer) skipCall(open int) int {
+	depth := 0
+	for i := open; i < len(l.input); i++ {
+		switch l.input[i] {
+		case '"':
+			for i++; i < len(l.input) && l.input[i] != '"'; i++ {
+				if l.input[i] == '\\' {
+					i++
+				}
+			}
+		case '(':
+			depth++
+		case ')':
+			depth--
+			if depth == 0 {
+				return i + 1
+			}
+		}
+	}
+	return len(l.input)
+}
+
+func isDurationSuffix(c byte) bool {
+	return c == 'd' || c == 'h' || c == 'w' || c == 'm'
 }
 
 // hasOperandsAround reports whether the byte at position i is bracketed by
@@ -485,20 +680,20 @@ func (l *lexer) endsPrimary(i int) bool {
 	return false
 }
 
-// beginsPrimary reports whether l.input[i] starts a value primary: a digit,
-// an opening paren, an opening field-ref bracket, or the start of a
-// function-call identifier.
+// beginsPrimary reports whether l.input[i] starts a value primary: a digit or
+// signed digit, an opening paren, an opening field-ref bracket, or the start
+// of a function-call identifier.
 func (l *lexer) beginsPrimary(i int) bool {
 	c := l.input[i]
-	if isDigit(c) || c == '(' || c == '[' {
+	if isDigit(c) || c == '(' || c == '[' || c == '"' {
 		return true
+	}
+	if (c == '-' || c == '+') && i+1 < len(l.input) && isDigit(l.input[i+1]) {
+		return true // signed number: 10*-3
 	}
 	if isIdentStart(c) {
 		// Treat as primary only if it's a function call.
-		end := i
-		for end < len(l.input) && isIdentChar(l.input[end]) {
-			end++
-		}
+		end := l.identEnd(i)
 		if end < len(l.input) && l.input[end] == '(' {
 			return true
 		}
@@ -508,14 +703,23 @@ func (l *lexer) beginsPrimary(i int) bool {
 
 // lexUnquotedStringValue lexes the unquoted-string value form used for
 // bareword strings and wildcard patterns. Stops at whitespace, ')', or '..'.
+//
+// Escapes: \* \\ \( \) stand for the literal character. A value with an
+// unescaped star is a wildcard pattern and its token value is in pattern
+// form (see encodePattern), so a literal star or backslash stays
+// distinguishable from a wildcard star.
 func (l *lexer) lexUnquotedStringValue() {
 	start := l.pos
 	var buf strings.Builder
 	hasWildcard := false
+	var literalStars []int // byte offsets in buf of escaped stars
 
 	for l.pos < len(l.input) {
 		ch := l.input[l.pos]
-		if ch == ' ' || ch == '\t' || ch == '\n' || ch == '\r' || ch == ')' || ch == '[' || ch == ']' {
+		if l.spaceWidth(l.pos) > 0 || ch == ')' || ch == '[' || ch == ']' {
+			break
+		}
+		if ch == ',' && l.inList {
 			break
 		}
 		if ch == '.' && l.peek(1) == '.' {
@@ -525,6 +729,9 @@ func (l *lexer) lexUnquotedStringValue() {
 			next := l.input[l.pos+1]
 			switch next {
 			case '*', '\\', '(', ')':
+				if next == '*' {
+					literalStars = append(literalStars, buf.Len())
+				}
 				buf.WriteByte(next)
 				l.pos += 2
 				continue
@@ -539,6 +746,9 @@ func (l *lexer) lexUnquotedStringValue() {
 
 	raw := l.input[start:l.pos]
 	value := buf.String()
+	if hasWildcard {
+		value = encodePattern(value, literalStars)
+	}
 	pos := token.Position{Offset: start, Length: l.pos - start}
 
 	if len(value) == 0 {
@@ -546,7 +756,33 @@ func (l *lexer) lexUnquotedStringValue() {
 	}
 
 	tok := l.classifyValue(raw, value, hasWildcard, pos)
+	if raw != value {
+		tok.Raw = raw
+	}
 	l.tokens = append(l.tokens, tok)
+}
+
+// encodePattern writes a decoded wildcard value in pattern form: a
+// backslash becomes `\\`, a literal star (one that was escaped in the source,
+// at the given byte offsets of value) becomes `\*`, and a bare `*` stays a
+// wildcard. ast.DecodePattern reverses it; the matcher and SQL lowering read
+// the pattern form so a literal backslash can never be mistaken for the
+// escape of a star.
+func encodePattern(value string, literalStars []int) string {
+	var b strings.Builder
+	next := 0
+	for i := 0; i < len(value); i++ {
+		switch {
+		case next < len(literalStars) && literalStars[next] == i:
+			b.WriteString(`\*`)
+			next++
+		case value[i] == '\\':
+			b.WriteString(`\\`)
+		default:
+			b.WriteByte(value[i])
+		}
+	}
+	return b.String()
 }
 
 // lexFuncCallBody lexes everything from the opening `(` of a function call
@@ -558,6 +794,7 @@ func (l *lexer) lexFuncCallBody() {
 	if l.pos >= len(l.input) || l.input[l.pos] != '(' {
 		return
 	}
+	l.start = l.pos
 	l.emit(token.LParen, "(")
 	l.pos++
 	depth := 1
@@ -566,6 +803,7 @@ func (l *lexer) lexFuncCallBody() {
 		if l.pos >= len(l.input) {
 			break
 		}
+		l.start = l.pos
 		ch := l.input[l.pos]
 		switch {
 		case ch == '(':
@@ -581,15 +819,23 @@ func (l *lexer) lexFuncCallBody() {
 			l.pos++
 		case ch == '"':
 			l.lexQuotedString()
-		case isDigit(ch):
+		case ch == '[':
+			// Bracketed field name as an argument: abs([cpu-limit]).
+			l.lexFieldRef()
+		case isArithOpChar(ch) && l.afterValue():
+			// An operator after a complete operand: addDays(d, 1-8).
+			l.emit(arithTokenFor(ch), string(ch))
+			l.pos++
+		case isDigit(ch), (ch == '-' || ch == '+') && isDigit(l.peek(1)):
 			l.lexNumericLiteral()
 		case isIdentStart(ch):
 			l.lexIdentOrKeyword()
 		default:
+			_, width := utf8.DecodeRuneInString(l.input[l.pos:])
 			l.errors.add(newError(CodeUnexpectedChar, ErrSyntax,
-				token.Position{Offset: l.pos, Length: 1},
-				"unexpected character %q in function arguments", string(ch)))
-			l.pos++
+				token.Position{Offset: l.pos, Length: width},
+				"unexpected character %q in function arguments", l.input[l.pos:l.pos+width]))
+			l.pos += width
 		}
 	}
 }
@@ -615,6 +861,7 @@ func (l *lexer) lexArithValueExpr() {
 		if l.pos >= len(l.input) {
 			break
 		}
+		l.start = l.pos
 		ch := l.input[l.pos]
 
 		// At depth 0, certain markers end the value expression.
@@ -719,9 +966,7 @@ func (l *lexer) lexArithPrimary() bool {
 	}
 	if isIdentStart(ch) {
 		start := l.pos
-		for l.pos < len(l.input) && isIdentChar(l.input[l.pos]) {
-			l.pos++
-		}
+		l.pos = l.identEnd(l.pos)
 		word := l.input[start:l.pos]
 		pos := token.Position{Offset: start, Length: l.pos - start}
 		if l.pos < len(l.input) && l.input[l.pos] == '(' {
@@ -751,8 +996,8 @@ func (l *lexer) classifyValue(raw, value string, hasWildcard bool, pos token.Pos
 	if value == "true" || value == "false" {
 		return token.Token{Type: token.Boolean, Value: value, Pos: pos}
 	}
-	if isDateLiteral(value) {
-		if _, err := time.Parse("2006-01-02", value); err != nil {
+	if isDateLiteral(value) || isDatetimeLiteral(value) {
+		if _, err := ParseDateLiteral(value); err != nil {
 			l.errors.add(newError(CodeInvalidDate, ErrInvalidDate, pos, "invalid date %q", value))
 		}
 		return token.Token{Type: token.Date, Value: value, Pos: pos}
@@ -771,12 +1016,51 @@ func (l *lexer) classifyValue(raw, value string, hasWildcard bool, pos token.Pos
 
 func (l *lexer) skipWhitespace() {
 	for l.pos < len(l.input) {
-		ch := l.input[l.pos]
-		if ch != ' ' && ch != '\t' && ch != '\n' && ch != '\r' {
+		w := l.spaceWidth(l.pos)
+		if w == 0 {
 			break
 		}
-		l.pos++
+		l.pos += w
 	}
+}
+
+// spaceWidth returns the byte width of the whitespace character at i, or 0
+// when there is none. Unicode spaces count: a no-break space pasted between
+// two words separates them like an ordinary one instead of gluing them into
+// a single term.
+func (l *lexer) spaceWidth(i int) int {
+	c := l.input[i]
+	if c < utf8.RuneSelf {
+		if isSpace(c) {
+			return 1
+		}
+		return 0
+	}
+	if r, w := utf8.DecodeRuneInString(l.input[i:]); unicode.IsSpace(r) {
+		return w
+	}
+	return 0
+}
+
+// identEnd returns the index just past the identifier characters starting at
+// i. A non-ASCII rune continues an identifier unless it is whitespace.
+func (l *lexer) identEnd(i int) int {
+	for i < len(l.input) {
+		c := l.input[i]
+		if c < utf8.RuneSelf {
+			if !isIdentChar(c) {
+				break
+			}
+			i++
+			continue
+		}
+		r, w := utf8.DecodeRuneInString(l.input[i:])
+		if unicode.IsSpace(r) {
+			break
+		}
+		i += w
+	}
+	return i
 }
 
 func (l *lexer) emit(typ token.Type, value string) {
@@ -795,32 +1079,51 @@ func (l *lexer) peek(offset int) byte {
 	return l.input[idx]
 }
 
+// isIdentStart reports whether ch may begin an identifier: an ASCII letter,
+// '_', or any byte of a multi-byte UTF-8 sequence, so a non-ASCII word such
+// as café or 日本 is one bare term rather than a run of unexpected bytes.
 func isIdentStart(ch byte) bool {
-	return (ch >= 'a' && ch <= 'z') || (ch >= 'A' && ch <= 'Z') || ch == '_'
+	return (ch >= 'a' && ch <= 'z') || (ch >= 'A' && ch <= 'Z') || ch == '_' || ch >= utf8.RuneSelf
 }
 
+// isIdentChar reports whether ch may continue an identifier. Hyphens and
+// slashes are included so hyphenated names and label keys such as
+// labels.example.com/team lex as one field segment.
 func isIdentChar(ch byte) bool {
-	return isIdentStart(ch) || (ch >= '0' && ch <= '9') || ch == '-'
+	return isIdentStart(ch) || (ch >= '0' && ch <= '9') || ch == '-' || ch == '/'
 }
 
 func isDigit(ch byte) bool {
 	return ch >= '0' && ch <= '9'
 }
 
+// isValidWildcard reports whether s is a prefix (foo*), suffix (*foo) or
+// contains (*foo*) pattern. An escaped star (`\*`) is a literal and does not
+// count.
 func isValidWildcard(s string) bool {
-	idx := strings.Index(s, "*")
-	if idx == -1 {
+	stars := 0
+	first, last := false, false
+	for i := 0; i < len(s); i++ {
+		if s[i] == '\\' && i+1 < len(s) {
+			i++
+			continue
+		}
+		if s[i] == '*' {
+			stars++
+			first = first || i == 0
+			last = i == len(s)-1
+		}
+	}
+	switch stars {
+	case 0:
 		return true
+	case 1:
+		return first || last
+	case 2:
+		return first && last
+	default:
+		return false
 	}
-	stripped := strings.ReplaceAll(s, "*", "")
-	stars := len(s) - len(stripped)
-	if stars == 1 {
-		return s[0] == '*' || s[len(s)-1] == '*'
-	}
-	if stars == 2 {
-		return s[0] == '*' && s[len(s)-1] == '*'
-	}
-	return false
 }
 
 func isDateLiteral(s string) bool {
@@ -840,6 +1143,56 @@ func isDateLiteral(s string) bool {
 		}
 	}
 	return true
+}
+
+// isDatetimeLiteral reports whether s has the shape of an RFC 3339 timestamp
+// (YYYY-MM-DDTHH:MM:SS with optional fraction and zone) or the same with a
+// space separator. ParseDateLiteral decides whether it is a valid instant.
+func isDatetimeLiteral(s string) bool {
+	if len(s) < 19 || !isDateLiteral(s[:10]) {
+		return false
+	}
+	if s[10] != 'T' && s[10] != 't' && s[10] != ' ' {
+		return false
+	}
+	for i := 11; i < len(s); i++ {
+		c := s[i]
+		if !isDigit(c) && c != ':' && c != '.' && c != '+' && c != '-' && c != 'Z' && c != 'z' {
+			return false
+		}
+	}
+	return true
+}
+
+// dateLayouts are the literal forms ParseDateLiteral accepts, from the most
+// to the least specific.
+var dateLayouts = []string{
+	time.RFC3339Nano,
+	"2006-01-02T15:04:05",
+	"2006-01-02 15:04:05Z07:00",
+	"2006-01-02 15:04:05",
+	"2006-01-02",
+}
+
+// IsDayLiteral reports whether s is a date literal without a time part
+// (YYYY-MM-DD), which denotes a whole day rather than an instant.
+func IsDayLiteral(s string) bool { return isDateLiteral(s) }
+
+// ParseDateLiteral parses a date (2026-01-01) or datetime literal
+// (2026-01-01T10:00:00Z, 2026-01-01T10:00:00, 2026-01-01 10:00:00). A date
+// without a time is midnight UTC; a datetime without a zone is UTC.
+func ParseDateLiteral(s string) (time.Time, error) {
+	var firstErr error
+	for _, layout := range dateLayouts {
+		t, err := time.Parse(layout, s)
+		if err == nil {
+			return t, nil
+		}
+		if firstErr == nil {
+			firstErr = err
+		}
+	}
+	return time.Time{}, firstErr
 }
 
 func isDurationLiteral(s string) bool {
@@ -910,24 +1263,30 @@ func ParseDuration(s string) (time.Duration, error) {
 	if len(s) < 2 {
 		return 0, newError(CodeInvalidDuration, ErrInvalidDuration, token.Position{}, "invalid duration %q", s)
 	}
-	numStr := s[:len(s)-1]
-	n := 0
-	for _, r := range numStr {
-		if r < '0' || r > '9' {
-			return 0, newError(CodeInvalidDuration, ErrInvalidDuration, token.Position{}, "invalid duration %q", s)
-		}
-		n = n*10 + int(r-'0')
-	}
+	var unit time.Duration
 	switch s[len(s)-1] {
 	case 'm':
-		return time.Duration(n) * time.Minute, nil
+		unit = time.Minute
 	case 'h':
-		return time.Duration(n) * time.Hour, nil
+		unit = time.Hour
 	case 'd':
-		return time.Duration(n) * 24 * time.Hour, nil
+		unit = 24 * time.Hour
 	case 'w':
-		return time.Duration(n) * 7 * 24 * time.Hour, nil
+		unit = 7 * 24 * time.Hour
 	default:
 		return 0, newError(CodeInvalidDuration, ErrInvalidDuration, token.Position{}, "invalid duration suffix in %q", s)
 	}
+	// A count too large for time.Duration is an error, never a wrapped value.
+	limit := int64(math.MaxInt64 / unit)
+	var n int64
+	for _, r := range s[:len(s)-1] {
+		if r < '0' || r > '9' {
+			return 0, newError(CodeInvalidDuration, ErrInvalidDuration, token.Position{}, "invalid duration %q", s)
+		}
+		n = n*10 + int64(r-'0')
+		if n > limit {
+			return 0, newError(CodeInvalidDuration, ErrInvalidDuration, token.Position{}, "duration %q is out of range", s)
+		}
+	}
+	return time.Duration(n) * unit, nil
 }

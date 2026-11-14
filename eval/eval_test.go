@@ -1,6 +1,7 @@
 package eval
 
 import (
+	"errors"
 	"testing"
 	"time"
 
@@ -304,14 +305,11 @@ func TestCompile_FuncCall_CustomFunction(t *testing.T) {
 }
 
 func TestCompile_FuncCall_NoBuiltins(t *testing.T) {
-	// With no builtins, lower() isn't registered, so the function call
-	// can't resolve — the match should return false.
-	prog, err := Compile("lower(name)=john", testFields, WithNoBuiltins())
-	if err != nil {
-		t.Fatalf("compile: %v", err)
-	}
-	if prog.Match(map[string]any{"name": "JOHN"}) {
-		t.Error("expected no match: lower() not registered")
+	// With no builtins, lower() isn't registered: that is a compile error,
+	// not a predicate that is silently false.
+	_, err := Compile("lower(name)=john", testFields, WithNoBuiltins())
+	if !errors.Is(err, ErrUnknownFunction) {
+		t.Fatalf("compile error = %v, want ErrUnknownFunction", err)
 	}
 }
 

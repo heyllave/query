@@ -87,6 +87,7 @@ func TestCodes_EveryCodeIsProducible(t *testing.T) {
 		parser.CodeInvalidFloat:     {input: "total>."},
 		parser.CodeUnclosedFuncArgs: {input: "upper("},
 		parser.CodeInvalidDuration:  {input: "5zz", duration: true},
+		parser.CodeNestingTooDeep:   {input: strings.Repeat("(", parser.MaxNesting+1) + "a"},
 	}
 
 	for _, code := range parser.Codes() {

@@ -67,20 +67,43 @@ func (v ValueType) String() string {
 
 // Value represents a typed value in a qualifier expression.
 type Value struct {
-	Type     ValueType
-	Raw      string        // original string from the query
-	Str      string        // for string values
-	Int      int64         // for integer values
-	Float    float64       // for float values
-	Bool     bool          // for boolean values
-	Date     time.Time     // for date values
+	Type  ValueType
+	Raw   string    // original string from the query
+	Str   string    // for string values
+	Int   int64     // for integer values
+	Float float64   // for float values
+	Bool  bool      // for boolean values
+	Date  time.Time // for date values
+	// DayOnly marks a date literal written without a time (2026-09-28). Such
+	// a literal denotes the whole UTC day [Date, Date+24h): `=` matches any
+	// instant in it, `<=` any instant before its end, `>` any instant at or
+	// after its end. A literal with a time (2026-09-28T10:00:00Z) is an
+	// instant.
+	DayOnly  bool
 	Duration time.Duration // for duration values
-	Wildcard bool          // true if the value contains wildcards
+	Wildcard bool          // true if the value is a pattern; Str is then in pattern form (`\*` literal star, `\\` backslash), see DecodePattern
 	Quoted   bool          // true if the string value came from a "..."-quoted literal
 	Func     *FuncCallExpr // for ValueFunc: function call resolved at match time
 	Arith    *ArithExpr    // for ValueArith: arithmetic expression resolved at match time
 	List     []any         // for ValueList: elements produced at match time
 	Field    FieldPath     // for ValueFieldRef: the referenced field path
+}
+
+// DecodePattern turns a wildcard value's Str (its pattern form, where `\\`
+// is a backslash and `\*` a literal star) into plain text with the wildcard
+// stars kept as `*`. It is for consumers that match patterns themselves;
+// WildcardToLike does the same for SQL.
+func DecodePattern(s string) string {
+	var b strings.Builder
+	for i := 0; i < len(s); i++ {
+		if s[i] == '\\' && i+1 < len(s) && (s[i+1] == '*' || s[i+1] == '\\') {
+			b.WriteByte(s[i+1])
+			i++
+			continue
+		}
+		b.WriteByte(s[i])
+	}
+	return b.String()
 }
 
 // ArithOp identifies a binary arithmetic operator inside an [ArithExpr]. The

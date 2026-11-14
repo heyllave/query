@@ -6,6 +6,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode/utf8"
 )
 
 // Func is a registered function that can be called from query expressions.
@@ -14,6 +15,49 @@ type Func struct {
 	Name string
 	// Call receives the resolved argument values and returns the result.
 	Call func(args ...any) (any, error)
+	// Arity bounds the argument count, checked at compile time so a call with
+	// the wrong number of arguments is a compile error rather than a predicate
+	// that is silently false. The zero value leaves the count unchecked.
+	Arity Arity
+}
+
+// Arity is the argument-count contract of a [Func]. Build one with
+// [Exactly], [AtLeast] or [Between]; the zero value means unchecked.
+type Arity struct {
+	min, max int
+	checked  bool
+}
+
+// Exactly is an arity of exactly n arguments.
+func Exactly(n int) Arity { return Arity{min: n, max: n, checked: true} }
+
+// AtLeast is an arity of n or more arguments.
+func AtLeast(n int) Arity { return Arity{min: n, max: -1, checked: true} }
+
+// Between is an arity of lo to hi arguments inclusive.
+func Between(lo, hi int) Arity { return Arity{min: lo, max: hi, checked: true} }
+
+// Check returns an error describing the mismatch when n arguments do not
+// satisfy the arity, or nil when they do or the arity is unchecked.
+func (a Arity) Check(name string, n int) error {
+	if !a.checked || (n >= a.min && (a.max < 0 || n <= a.max)) {
+		return nil
+	}
+	switch {
+	case a.max < 0:
+		return fmt.Errorf("%s() requires at least %d argument%s, got %d", name, a.min, plural(a.min), n)
+	case a.min == a.max:
+		return fmt.Errorf("%s() requires %d argument%s, got %d", name, a.min, plural(a.min), n)
+	default:
+		return fmt.Errorf("%s() requires %d to %d arguments, got %d", name, a.min, a.max, n)
+	}
+}
+
+func plural(n int) string {
+	if n == 1 {
+		return ""
+	}
+	return "s"
 }
 
 // FuncRegistry maps function names to their implementations.
@@ -35,71 +79,77 @@ func BuiltinFunctions() FuncRegistry {
 	r := make(FuncRegistry)
 
 	// String functions
-	r.Register(Func{Name: "lower", Call: fnLower})
-	r.Register(Func{Name: "upper", Call: fnUpper})
-	r.Register(Func{Name: "trim", Call: fnTrim})
-	r.Register(Func{Name: "len", Call: fnLen})
-	r.Register(Func{Name: "contains", Call: fnContains})
-	r.Register(Func{Name: "startsWith", Call: fnStartsWith})
-	r.Register(Func{Name: "endsWith", Call: fnEndsWith})
+	r.Register(Func{Name: "lower", Call: fnLower, Arity: Exactly(1)})
+	r.Register(Func{Name: "upper", Call: fnUpper, Arity: Exactly(1)})
+	r.Register(Func{Name: "trim", Call: fnTrim, Arity: Exactly(1)})
+	r.Register(Func{Name: "len", Call: fnLen, Arity: Exactly(1)})
+	r.Register(Func{Name: "contains", Call: fnContains, Arity: Exactly(2)})
+	r.Register(Func{Name: "startsWith", Call: fnStartsWith, Arity: Exactly(2)})
+	r.Register(Func{Name: "endsWith", Call: fnEndsWith, Arity: Exactly(2)})
 
 	// Numeric functions
-	r.Register(Func{Name: "abs", Call: fnAbs})
-	r.Register(Func{Name: "ceil", Call: fnCeil})
-	r.Register(Func{Name: "floor", Call: fnFloor})
-	r.Register(Func{Name: "round", Call: fnRound})
-	r.Register(Func{Name: "sqrt", Call: fnSqrt})
-	r.Register(Func{Name: "pow", Call: fnPow})
-	r.Register(Func{Name: "min", Call: fnMin})
-	r.Register(Func{Name: "max", Call: fnMax})
+	r.Register(Func{Name: "abs", Call: fnAbs, Arity: Exactly(1)})
+	r.Register(Func{Name: "ceil", Call: fnCeil, Arity: Exactly(1)})
+	r.Register(Func{Name: "floor", Call: fnFloor, Arity: Exactly(1)})
+	r.Register(Func{Name: "round", Call: fnRound, Arity: Between(1, 2)})
+	r.Register(Func{Name: "sqrt", Call: fnSqrt, Arity: Exactly(1)})
+	r.Register(Func{Name: "pow", Call: fnPow, Arity: Exactly(2)})
+	r.Register(Func{Name: "min", Call: fnMin, Arity: AtLeast(1)})
+	r.Register(Func{Name: "max", Call: fnMax, Arity: AtLeast(1)})
 
 	// Date/time functions
-	r.Register(Func{Name: "now", Call: fnNow})
-	r.Register(Func{Name: "today", Call: fnToday})
-	r.Register(Func{Name: "year", Call: fnYear})
-	r.Register(Func{Name: "month", Call: fnMonth})
-	r.Register(Func{Name: "day", Call: fnDay})
-	r.Register(Func{Name: "hour", Call: fnHour})
-	r.Register(Func{Name: "minute", Call: fnMinute})
-	r.Register(Func{Name: "second", Call: fnSecond})
-	r.Register(Func{Name: "weekday", Call: fnWeekday})
-	r.Register(Func{Name: "isBusinessDay", Call: fnIsBusinessDay})
-	r.Register(Func{Name: "daysAgo", Call: fnDaysAgo})
-	r.Register(Func{Name: "addDays", Call: fnAddDays})
-	r.Register(Func{Name: "addBusinessDays", Call: fnAddBusinessDays})
+	r.Register(Func{Name: "now", Call: fnNow, Arity: Exactly(0)})
+	r.Register(Func{Name: "today", Call: fnToday, Arity: Exactly(0)})
+	r.Register(Func{Name: "year", Call: fnYear, Arity: Exactly(1)})
+	r.Register(Func{Name: "month", Call: fnMonth, Arity: Exactly(1)})
+	r.Register(Func{Name: "day", Call: fnDay, Arity: Exactly(1)})
+	r.Register(Func{Name: "hour", Call: fnHour, Arity: Exactly(1)})
+	r.Register(Func{Name: "minute", Call: fnMinute, Arity: Exactly(1)})
+	r.Register(Func{Name: "second", Call: fnSecond, Arity: Exactly(1)})
+	r.Register(Func{Name: "weekday", Call: fnWeekday, Arity: Exactly(1)})
+	r.Register(Func{Name: "isBusinessDay", Call: fnIsBusinessDay, Arity: Between(1, 2)})
+	r.Register(Func{Name: "daysAgo", Call: fnDaysAgo, Arity: Exactly(1)})
+	r.Register(Func{Name: "addDays", Call: fnAddDays, Arity: Exactly(2)})
+	r.Register(Func{Name: "addBusinessDays", Call: fnAddBusinessDays, Arity: Between(2, 3)})
 
 	// List aggregations — value-producing reductions over a slice.
-	r.Register(Func{Name: "count", Call: fnCount})
-	r.Register(Func{Name: "sum", Call: fnSum})
-	r.Register(Func{Name: "avg", Call: fnAvg})
-	r.Register(Func{Name: "first", Call: fnFirst})
-	r.Register(Func{Name: "last", Call: fnLast})
+	r.Register(Func{Name: "count", Call: fnCount, Arity: Exactly(1)})
+	r.Register(Func{Name: "sum", Call: fnSum, Arity: Exactly(1)})
+	r.Register(Func{Name: "avg", Call: fnAvg, Arity: Exactly(1)})
+	r.Register(Func{Name: "first", Call: fnFirst, Arity: Exactly(1)})
+	r.Register(Func{Name: "last", Call: fnLast, Arity: Exactly(1)})
 
 	// Type coercions — evaluation-time coercion hints, not static casts.
-	r.Register(Func{Name: "int", Call: fnInt})
-	r.Register(Func{Name: "float", Call: fnFloat})
-	r.Register(Func{Name: "string", Call: fnString})
+	r.Register(Func{Name: "int", Call: fnInt, Arity: Exactly(1)})
+	r.Register(Func{Name: "float", Call: fnFloat, Arity: Exactly(1)})
+	r.Register(Func{Name: "string", Call: fnString, Arity: Exactly(1)})
 
 	// Logical helpers — cover the ternary/nullish gap without new syntax.
-	r.Register(Func{Name: "coalesce", Call: fnCoalesce})
-	r.Register(Func{Name: "if", Call: fnIf})
+	r.Register(Func{Name: "coalesce", Call: fnCoalesce, Arity: AtLeast(1)})
+	r.Register(Func{Name: "if", Call: fnIf, Arity: Between(2, 3)})
 
 	return r
 }
 
-// isIntKind reports whether v is an integer-kinded Go value. It operates on the
-// raw argument values a [Func] receives (not [ast.Value]), and is the basis for
-// the int64-vs-float64 result rule in abs/min/max/sum: a result stays int64
-// only when every contributing operand is integer-kinded, mirroring how
-// applyArith keeps integer arithmetic in int64 and promotes to float64 on any
-// float operand.
+// isIntKind reports whether v is an integer-kinded Go value (any signed or
+// unsigned width). It operates on the raw argument values a [Func] receives
+// (not [ast.Value]), and is the basis for the int64-vs-float64 result rule in
+// abs/min/max/sum: a result stays int64 only when every contributing operand
+// is integer-kinded, mirroring how applyArith keeps integer arithmetic in
+// int64 and promotes to float64 on any float operand.
 func isIntKind(v any) bool {
-	switch v.(type) {
-	case int, int32, int64:
-		return true
-	default:
-		return false
+	_, _, isInt, ok := numberOf(v)
+	return ok && isInt
+}
+
+// text returns the string form of a function argument, reporting false for a
+// nil argument (a missing field) so string functions resolve to no value
+// instead of operating on the text "<nil>".
+func text(v any) (string, bool) {
+	if v == nil {
+		return "", false
 	}
+	return stringifyActual(v), true
 }
 
 // fnCoalesce returns the first argument that is non-nil and non-empty.
@@ -135,37 +185,58 @@ func fnIf(args ...any) (any, error) {
 
 // --- String functions ---
 
+// String functions resolve to no value (nil) when their subject is nil, which
+// is what a missing field resolves to: lower(name) on a record without a name
+// is not the text "<nil>", so len(name)>3 does not match such a record.
+
 func fnLower(args ...any) (any, error) {
 	if len(args) != 1 {
 		return nil, fmt.Errorf("lower() requires 1 argument, got %d", len(args))
 	}
-	return strings.ToLower(fmt.Sprint(args[0])), nil
+	s, ok := text(args[0])
+	if !ok {
+		return nil, nil
+	}
+	return strings.ToLower(s), nil
 }
 
 func fnUpper(args ...any) (any, error) {
 	if len(args) != 1 {
 		return nil, fmt.Errorf("upper() requires 1 argument, got %d", len(args))
 	}
-	return strings.ToUpper(fmt.Sprint(args[0])), nil
+	s, ok := text(args[0])
+	if !ok {
+		return nil, nil
+	}
+	return strings.ToUpper(s), nil
 }
 
 func fnTrim(args ...any) (any, error) {
 	if len(args) != 1 {
 		return nil, fmt.Errorf("trim() requires 1 argument, got %d", len(args))
 	}
-	return strings.TrimSpace(fmt.Sprint(args[0])), nil
+	s, ok := text(args[0])
+	if !ok {
+		return nil, nil
+	}
+	return strings.TrimSpace(s), nil
 }
 
 func fnLen(args ...any) (any, error) {
 	if len(args) != 1 {
 		return nil, fmt.Errorf("len() requires 1 argument, got %d", len(args))
 	}
-	// A list reports its element count; anything else reports the length of its
-	// string form (so len() of a name is its character count).
+	// A list reports its element count; anything else reports the number of
+	// characters (runes) in its string form, so len() of "café" is 4, as a
+	// user and a SQL LENGTH() would both count it.
 	if elems, ok := toSlice(args[0]); ok {
 		return int64(len(elems)), nil
 	}
-	return int64(len(fmt.Sprint(args[0]))), nil
+	s, ok := text(args[0])
+	if !ok {
+		return nil, nil
+	}
+	return int64(utf8.RuneCountInString(s)), nil
 }
 
 // fnContains reports membership two ways. When the first argument is a list, it
@@ -176,39 +247,47 @@ func fnContains(args ...any) (any, error) {
 	if len(args) != 2 {
 		return nil, fmt.Errorf("contains() requires 2 arguments, got %d", len(args))
 	}
-	if elems, ok := toSlice(args[0]); ok {
-		needle := fmt.Sprint(args[1])
+	needle, ok := text(args[1])
+	if !ok {
+		return nil, nil
+	}
+	if elems, isList := toSlice(args[0]); isList {
 		for _, e := range elems {
-			if strings.EqualFold(fmt.Sprint(e), needle) {
+			if strings.EqualFold(stringifyActual(e), needle) {
 				return true, nil
 			}
 		}
 		return false, nil
 	}
-	return strings.Contains(
-		strings.ToLower(fmt.Sprint(args[0])),
-		strings.ToLower(fmt.Sprint(args[1])),
-	), nil
+	hay, ok := text(args[0])
+	if !ok {
+		return nil, nil
+	}
+	return strings.Contains(strings.ToLower(hay), strings.ToLower(needle)), nil
 }
 
 func fnStartsWith(args ...any) (any, error) {
 	if len(args) != 2 {
 		return nil, fmt.Errorf("startsWith() requires 2 arguments, got %d", len(args))
 	}
-	return strings.HasPrefix(
-		strings.ToLower(fmt.Sprint(args[0])),
-		strings.ToLower(fmt.Sprint(args[1])),
-	), nil
+	hay, ok1 := text(args[0])
+	prefix, ok2 := text(args[1])
+	if !ok1 || !ok2 {
+		return nil, nil
+	}
+	return strings.HasPrefix(strings.ToLower(hay), strings.ToLower(prefix)), nil
 }
 
 func fnEndsWith(args ...any) (any, error) {
 	if len(args) != 2 {
 		return nil, fmt.Errorf("endsWith() requires 2 arguments, got %d", len(args))
 	}
-	return strings.HasSuffix(
-		strings.ToLower(fmt.Sprint(args[0])),
-		strings.ToLower(fmt.Sprint(args[1])),
-	), nil
+	hay, ok1 := text(args[0])
+	suffix, ok2 := text(args[1])
+	if !ok1 || !ok2 {
+		return nil, nil
+	}
+	return strings.HasSuffix(strings.ToLower(hay), strings.ToLower(suffix)), nil
 }
 
 // --- Numeric functions ---
@@ -220,18 +299,21 @@ func fnAbs(args ...any) (any, error) {
 	if len(args) != 1 {
 		return nil, fmt.Errorf("abs() requires 1 argument, got %d", len(args))
 	}
-	switch args[0].(type) {
-	case int, int32, int64:
-		n := toInt64(args[0])
-		if n < 0 {
-			return -n, nil // abs(math.MinInt64) wraps, matching Go's two's complement
-		}
-		return n, nil
-	case float32, float64:
-		return math.Abs(toFloat64(args[0])), nil
-	default:
+	i, f, isInt, ok := numberOf(args[0])
+	switch {
+	case !ok:
 		// Non-numeric input has no magnitude; report zero as an integer.
 		return int64(0), nil
+	case isInt:
+		if i == math.MinInt64 {
+			return -float64(i), nil // the magnitude does not fit an int64
+		}
+		if i < 0 {
+			return -i, nil
+		}
+		return i, nil
+	default:
+		return math.Abs(f), nil
 	}
 }
 
@@ -265,7 +347,13 @@ func fnRound(args ...any) (any, error) {
 		return math.Round(x), nil
 	}
 	factor := math.Pow(10, float64(toInt64(args[1])))
-	return math.Round(x*factor) / factor, nil
+	r := math.Round(x*factor) / factor
+	if math.IsNaN(r) || math.IsInf(r, 0) {
+		// An absurd number of places overflows the scale factor; there is no
+		// meaningful result, so resolve to no value rather than NaN.
+		return nil, nil
+	}
+	return r, nil
 }
 
 // fnSqrt returns the square root of its argument as a float64. A negative input
@@ -358,12 +446,8 @@ func reduceMinMax(name string, args []any, wantMin bool) (any, error) {
 
 // isNumericKind reports whether v is an integer- or float-kinded Go value.
 func isNumericKind(v any) bool {
-	switch v.(type) {
-	case int, int32, int64, float32, float64:
-		return true
-	default:
-		return false
-	}
+	_, _, _, ok := numberOf(v)
+	return ok
 }
 
 // --- Date/time functions ---
@@ -383,11 +467,17 @@ func fnToday(args ...any) (any, error) {
 	return time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location()), nil
 }
 
+// Date component functions resolve to no value when the argument is nil or
+// not a date, rather than reporting the components of the zero time.
+
 func fnYear(args ...any) (any, error) {
 	if len(args) != 1 {
 		return nil, fmt.Errorf("year() requires 1 argument, got %d", len(args))
 	}
-	t := toTime(args[0])
+	t, ok := toTime(args[0])
+	if !ok {
+		return nil, nil
+	}
 	return int64(t.Year()), nil
 }
 
@@ -395,7 +485,10 @@ func fnMonth(args ...any) (any, error) {
 	if len(args) != 1 {
 		return nil, fmt.Errorf("month() requires 1 argument, got %d", len(args))
 	}
-	t := toTime(args[0])
+	t, ok := toTime(args[0])
+	if !ok {
+		return nil, nil
+	}
 	return int64(t.Month()), nil
 }
 
@@ -403,7 +496,10 @@ func fnDay(args ...any) (any, error) {
 	if len(args) != 1 {
 		return nil, fmt.Errorf("day() requires 1 argument, got %d", len(args))
 	}
-	t := toTime(args[0])
+	t, ok := toTime(args[0])
+	if !ok {
+		return nil, nil
+	}
 	return int64(t.Day()), nil
 }
 
@@ -411,8 +507,11 @@ func fnDaysAgo(args ...any) (any, error) {
 	if len(args) != 1 {
 		return nil, fmt.Errorf("daysAgo() requires 1 argument, got %d", len(args))
 	}
-	n := toInt64(args[0])
-	return time.Now().AddDate(0, 0, -int(n)), nil
+	n, ok := dayCount(args[0])
+	if !ok {
+		return nil, nil
+	}
+	return time.Now().AddDate(0, 0, -n), nil
 }
 
 // fnHour extracts the hour of day (0–23) from a date/time argument. With now()
@@ -421,7 +520,11 @@ func fnHour(args ...any) (any, error) {
 	if len(args) != 1 {
 		return nil, fmt.Errorf("hour() requires 1 argument, got %d", len(args))
 	}
-	return int64(toTime(args[0]).Hour()), nil
+	t, ok := toTime(args[0])
+	if !ok {
+		return nil, nil
+	}
+	return int64(t.Hour()), nil
 }
 
 // fnMinute extracts the minute of the hour (0–59) from a date/time argument.
@@ -429,7 +532,11 @@ func fnMinute(args ...any) (any, error) {
 	if len(args) != 1 {
 		return nil, fmt.Errorf("minute() requires 1 argument, got %d", len(args))
 	}
-	return int64(toTime(args[0]).Minute()), nil
+	t, ok := toTime(args[0])
+	if !ok {
+		return nil, nil
+	}
+	return int64(t.Minute()), nil
 }
 
 // fnSecond extracts the second of the minute (0–59) from a date/time argument.
@@ -437,19 +544,50 @@ func fnSecond(args ...any) (any, error) {
 	if len(args) != 1 {
 		return nil, fmt.Errorf("second() requires 1 argument, got %d", len(args))
 	}
-	return int64(toTime(args[0]).Second()), nil
+	t, ok := toTime(args[0])
+	if !ok {
+		return nil, nil
+	}
+	return int64(t.Second()), nil
 }
 
 // fnWeekday returns the day of the week as an integer, Sunday=0 through
 // Saturday=6 (Go's time.Weekday numbering, which matches cron). Combined with
 // now() it expresses day-of-week recurrence, e.g. weekday(now())>=1 AND
-// weekday(now())<=5 for weekdays. Note the zero time (an unparseable argument)
-// is a Monday and so returns 1, unlike hour/minute/second which return 0.
+// weekday(now())<=5 for weekdays.
 func fnWeekday(args ...any) (any, error) {
 	if len(args) != 1 {
 		return nil, fmt.Errorf("weekday() requires 1 argument, got %d", len(args))
 	}
-	return int64(toTime(args[0]).Weekday()), nil
+	t, ok := toTime(args[0])
+	if !ok {
+		return nil, nil
+	}
+	return int64(t.Weekday()), nil
+}
+
+// MaxCalendarDays bounds the day count accepted by daysAgo, addDays and
+// addBusinessDays: about 10,000 years, far beyond any real schedule and well
+// inside the range time.Time represents. A larger count resolves to no value.
+const MaxCalendarDays = 4_000_000
+
+// dayCount coerces a day-count argument, reporting false when it is not a
+// number or lies outside ±MaxCalendarDays.
+func dayCount(v any) (int, bool) {
+	i, f, isInt, ok := numberOf(v)
+	if !ok {
+		return 0, false
+	}
+	if !isInt {
+		if math.IsNaN(f) || f > MaxCalendarDays || f < -MaxCalendarDays {
+			return 0, false
+		}
+		i = int64(f)
+	}
+	if i > MaxCalendarDays || i < -MaxCalendarDays {
+		return 0, false
+	}
+	return int(i), true
 }
 
 // fnAddDays returns the date n calendar days after the given date (negative n
@@ -459,7 +597,15 @@ func fnAddDays(args ...any) (any, error) {
 	if len(args) != 2 {
 		return nil, fmt.Errorf("addDays() requires 2 arguments, got %d", len(args))
 	}
-	return toTime(args[0]).AddDate(0, 0, int(toInt64(args[1]))), nil
+	t, ok := toTime(args[0])
+	if !ok {
+		return nil, nil
+	}
+	n, ok := dayCount(args[1])
+	if !ok {
+		return nil, nil
+	}
+	return t.AddDate(0, 0, n), nil
 }
 
 // fnIsBusinessDay reports whether a date is a working day: a weekday
@@ -478,7 +624,11 @@ func fnIsBusinessDay(args ...any) (any, error) {
 	if len(args) == 2 {
 		holidays = holidaySet(args[1])
 	}
-	return isBusinessDay(toTime(args[0]), holidays), nil
+	t, ok := toTime(args[0])
+	if !ok {
+		return nil, nil
+	}
+	return isBusinessDay(t, holidays), nil
 }
 
 // fnAddBusinessDays returns the date n business days after the given date,
@@ -488,28 +638,63 @@ func fnIsBusinessDay(args ...any) (any, error) {
 //
 //	addBusinessDays(start, 3)              // skip weekends
 //	addBusinessDays(start, 3, holidays())  // skip weekends + holidays
+//
+// Whole weeks are skipped arithmetically wherever no holiday can fall, so the
+// cost depends on the span of the holiday calendar, never on the size of n.
 func fnAddBusinessDays(args ...any) (any, error) {
 	if len(args) < 2 || len(args) > 3 {
 		return nil, fmt.Errorf("addBusinessDays() requires 2 or 3 arguments, got %d", len(args))
 	}
 	var holidays map[string]bool
+	var lo, hi time.Time
 	if len(args) == 3 {
-		holidays = holidaySet(args[2])
+		holidays, lo, hi = holidayRange(args[2])
 	}
-	t := toTime(args[0])
-	n := int(toInt64(args[1]))
+	t, ok := toTime(args[0])
+	if !ok {
+		return nil, nil
+	}
+	n, ok := dayCount(args[1])
+	if !ok {
+		return nil, nil
+	}
 	step := 1
 	if n < 0 {
 		step = -1
 		n = -n
 	}
 	for n > 0 {
+		// Seven calendar days always hold five weekdays, so outside the
+		// holiday calendar whole weeks are skipped at once. At least one
+		// business day is left to walk, so the result lands on a business
+		// day exactly as the day-by-day walk would.
+		if n > 5 && pastHolidays(t, step, len(holidays), lo, hi) {
+			weeks := (n - 1) / 5
+			t = t.AddDate(0, 0, step*weeks*7)
+			n -= weeks * 5
+		}
 		t = t.AddDate(0, 0, step)
 		if isBusinessDay(t, holidays) {
 			n--
 		}
 	}
 	return t, nil
+}
+
+// holidayMargin pads the holiday calendar's bounds so a holiday expressed in
+// another time zone is never skipped over.
+const holidayMargin = 48 * time.Hour
+
+// pastHolidays reports whether no holiday can fall on any day from t onward in
+// the direction of step.
+func pastHolidays(t time.Time, step, count int, lo, hi time.Time) bool {
+	if count == 0 {
+		return true
+	}
+	if step > 0 {
+		return t.After(hi.Add(holidayMargin))
+	}
+	return t.Before(lo.Add(-holidayMargin))
 }
 
 // isBusinessDay reports whether t is a weekday (Monday–Friday) that is not in
@@ -526,15 +711,32 @@ func isBusinessDay(t time.Time, holidays map[string]bool) bool {
 // element is coerced to a date and keyed by its calendar day, so the time of day
 // and location do not affect matching. A non-list argument yields an empty set.
 func holidaySet(v any) map[string]bool {
+	set, _, _ := holidayRange(v)
+	return set
+}
+
+// holidayRange is holidaySet plus the earliest and latest holiday, which bound
+// the stretch of calendar addBusinessDays has to walk day by day.
+func holidayRange(v any) (set map[string]bool, lo, hi time.Time) {
 	elems, ok := toSlice(v)
 	if !ok {
-		return nil
+		return nil, lo, hi
 	}
-	set := make(map[string]bool, len(elems))
+	set = make(map[string]bool, len(elems))
 	for _, e := range elems {
-		set[dayKey(toTime(e))] = true
+		t, ok := toTime(e)
+		if !ok {
+			continue
+		}
+		if len(set) == 0 || t.Before(lo) {
+			lo = t
+		}
+		if len(set) == 0 || t.After(hi) {
+			hi = t
+		}
+		set[dayKey(t)] = true
 	}
-	return set
+	return set, lo, hi
 }
 
 // dayKey is the calendar-day identity of t (YYYY-MM-DD), used to compare dates
@@ -681,7 +883,17 @@ func fnInt(args ...any) (any, error) {
 	case nil:
 		return nil, nil
 	default:
-		return toInt64(v), nil
+		i, f, isInt, ok := numberOf(v)
+		if !ok {
+			return nil, nil
+		}
+		if !isInt {
+			if math.IsNaN(f) || math.IsInf(f, 0) || f >= math.MaxInt64 || f <= math.MinInt64 {
+				return nil, nil
+			}
+			return int64(f), nil
+		}
+		return i, nil
 	}
 }
 
@@ -710,7 +922,11 @@ func fnFloat(args ...any) (any, error) {
 	case nil:
 		return nil, nil
 	default:
-		return toFloat64(v), nil
+		_, f, _, ok := numberOf(v)
+		if !ok {
+			return nil, nil
+		}
+		return f, nil
 	}
 }
 
@@ -729,6 +945,6 @@ func fnString(args ...any) (any, error) {
 	case nil:
 		return "", nil
 	default:
-		return fmt.Sprint(v), nil
+		return stringifyActual(v), nil
 	}
 }

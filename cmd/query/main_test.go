@@ -406,7 +406,7 @@ func TestRunExplain_ErrorShowsCodeAndSpan(t *testing.T) {
 		{
 			name:      "single-character token gets a bare caret",
 			query:     "[unclosed",
-			wantCode:  "[unexpectedChar]",
+			wantCode:  "[unclosedFieldRef]",
 			wantPoint: "  ^",
 		},
 	}

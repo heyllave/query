@@ -4,6 +4,7 @@ package main
 
 import (
 	"encoding/json"
+	"fmt"
 	"syscall/js"
 
 	"github.com/heyllave/query/ast"
@@ -12,6 +13,20 @@ import (
 	"github.com/heyllave/query/parser"
 	"github.com/heyllave/query/validate"
 )
+
+// guard wraps a bridge function so a Go panic becomes an error envelope
+// instead of tearing down the WASM instance (and with it every later call
+// from the page). A panic here is a library bug; the message says so.
+func guard(fn func(js.Value, []js.Value) any) func(js.Value, []js.Value) any {
+	return func(this js.Value, args []js.Value) (result any) {
+		defer func() {
+			if r := recover(); r != nil {
+				result = jsResult(nil, fmt.Sprintf("internal error: %v", r))
+			}
+		}()
+		return fn(this, args)
+	}
+}
 
 // jsParse parses a query string and returns the AST as a JSON object.
 //

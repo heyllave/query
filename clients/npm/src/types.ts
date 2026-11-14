@@ -167,7 +167,7 @@ export type ParseErrorCode =
   | "invalidInteger"
   | "invalidFloat"
   | "unclosedFuncArgs"
-  | "expectedFuncArg";
+  | "nestingTooDeep";
 
 /**
  * One parse failure, with the span that caused it.

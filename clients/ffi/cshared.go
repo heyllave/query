@@ -29,6 +29,7 @@ import "C"
 
 import (
 	"encoding/json"
+	"fmt"
 	"unsafe"
 
 	"github.com/heyllave/query/ast"
@@ -52,6 +53,18 @@ func respond(obj map[string]any) *C.char {
 }
 
 func errResp(msg string) *C.char { return respond(map[string]any{"error": msg}) }
+
+// guard runs an exported entry point and turns a Go panic into an error
+// envelope. A panic that escaped a c-shared library would abort the host
+// process (the Flutter app), which no query is allowed to do.
+func guard(fn func() *C.char) (result *C.char) {
+	defer func() {
+		if r := recover(); r != nil {
+			result = errResp(fmt.Sprintf("internal error: %v", r))
+		}
+	}()
+	return fn()
+}
 
 // parseReq decodes a request JSON object into a generic map.
 func parseReq(req *C.char) (map[string]any, bool) {
@@ -85,127 +98,139 @@ func reqJSON(m map[string]any, key string) string {
 
 //export QueryParse
 func QueryParse(req *C.char) *C.char {
-	m, ok := parseReq(req)
-	if !ok {
-		return errResp("invalid request JSON")
-	}
-	maxLen := 256
-	if f, ok := m["maxLength"].(float64); ok {
-		maxLen = int(f)
-	}
-	expr, err := parser.Parse(reqString(m, "query"), maxLen)
-	if err != nil {
-		return errResp(err.Error())
-	}
-	return respond(map[string]any{"result": bridgejson.AstToJSON(expr)})
+	return guard(func() *C.char {
+		m, ok := parseReq(req)
+		if !ok {
+			return errResp("invalid request JSON")
+		}
+		maxLen := 256
+		if f, ok := m["maxLength"].(float64); ok {
+			maxLen = int(f)
+		}
+		expr, err := parser.Parse(reqString(m, "query"), maxLen)
+		if err != nil {
+			return errResp(err.Error())
+		}
+		return respond(map[string]any{"result": bridgejson.AstToJSON(expr)})
+	})
 }
 
 //export QueryValidate
 func QueryValidate(req *C.char) *C.char {
-	m, ok := parseReq(req)
-	if !ok {
-		return errResp("invalid request JSON")
-	}
-	expr, err := bridgejson.JSONToAST(reqJSON(m, "ast"))
-	if err != nil {
-		return errResp("invalid AST: " + err.Error())
-	}
-	fields, err := bridgejson.ParseFields(reqJSON(m, "fields"))
-	if err != nil {
-		return errResp(err.Error())
-	}
-	v := validate.New(fields)
-	if err := v.Validate(expr); err != nil {
-		out := map[string]any{"valid": false, "errors": []string{err.Error()}}
-		if list := bridgejson.ValidationErrors(err); len(list) > 0 {
-			out["validationErrors"] = list
+	return guard(func() *C.char {
+		m, ok := parseReq(req)
+		if !ok {
+			return errResp("invalid request JSON")
 		}
-		return respond(out)
-	}
-	return respond(map[string]any{"valid": true})
+		expr, err := bridgejson.JSONToAST(reqJSON(m, "ast"))
+		if err != nil {
+			return errResp("invalid AST: " + err.Error())
+		}
+		fields, err := bridgejson.ParseFields(reqJSON(m, "fields"))
+		if err != nil {
+			return errResp(err.Error())
+		}
+		v := validate.New(fields)
+		if err := v.Validate(expr); err != nil {
+			out := map[string]any{"valid": false, "errors": []string{err.Error()}}
+			if list := bridgejson.ValidationErrors(err); len(list) > 0 {
+				out["validationErrors"] = list
+			}
+			return respond(out)
+		}
+		return respond(map[string]any{"valid": true})
+	})
 }
 
 //export QueryStringify
 func QueryStringify(req *C.char) *C.char {
-	m, ok := parseReq(req)
-	if !ok {
-		return errResp("invalid request JSON")
-	}
-	expr, err := bridgejson.JSONToAST(reqJSON(m, "ast"))
-	if err != nil {
-		return errResp("invalid AST: " + err.Error())
-	}
-	return respond(map[string]any{"result": ast.String(expr)})
+	return guard(func() *C.char {
+		m, ok := parseReq(req)
+		if !ok {
+			return errResp("invalid request JSON")
+		}
+		expr, err := bridgejson.JSONToAST(reqJSON(m, "ast"))
+		if err != nil {
+			return errResp("invalid AST: " + err.Error())
+		}
+		return respond(map[string]any{"result": ast.String(expr)})
+	})
 }
 
 //export QueryParseAndValidate
 func QueryParseAndValidate(req *C.char) *C.char {
-	m, ok := parseReq(req)
-	if !ok {
-		return errResp("invalid request JSON")
-	}
-	expr, err := parser.Parse(reqString(m, "query"), 256)
-	if err != nil {
-		return errResp(err.Error())
-	}
-	fields, err := bridgejson.ParseFields(reqJSON(m, "fields"))
-	if err != nil {
-		return errResp(err.Error())
-	}
-	if err := validate.New(fields).Validate(expr); err != nil {
-		out := map[string]any{"error": err.Error()}
-		if list := bridgejson.ValidationErrors(err); len(list) > 0 {
-			out["validationErrors"] = list
+	return guard(func() *C.char {
+		m, ok := parseReq(req)
+		if !ok {
+			return errResp("invalid request JSON")
 		}
-		return respond(out)
-	}
-	return respond(map[string]any{"result": bridgejson.AstToJSON(expr)})
+		expr, err := parser.Parse(reqString(m, "query"), 256)
+		if err != nil {
+			return errResp(err.Error())
+		}
+		fields, err := bridgejson.ParseFields(reqJSON(m, "fields"))
+		if err != nil {
+			return errResp(err.Error())
+		}
+		if err := validate.New(fields).Validate(expr); err != nil {
+			out := map[string]any{"error": err.Error()}
+			if list := bridgejson.ValidationErrors(err); len(list) > 0 {
+				out["validationErrors"] = list
+			}
+			return respond(out)
+		}
+		return respond(map[string]any{"result": bridgejson.AstToJSON(expr)})
+	})
 }
 
 //export QueryMatch
 func QueryMatch(req *C.char) *C.char {
-	m, ok := parseReq(req)
-	if !ok {
-		return errResp("invalid request JSON")
-	}
-	fields, err := bridgejson.ParseFields(reqJSON(m, "fields"))
-	if err != nil {
-		return errResp(err.Error())
-	}
-	record, ok := m["record"].(map[string]any)
-	if !ok {
-		record = map[string]any{}
-	}
-	prog, err := eval.Compile(reqString(m, "query"), fields)
-	if err != nil {
-		return errResp(err.Error())
-	}
-	return respond(map[string]any{"result": prog.Match(record)})
+	return guard(func() *C.char {
+		m, ok := parseReq(req)
+		if !ok {
+			return errResp("invalid request JSON")
+		}
+		fields, err := bridgejson.ParseFields(reqJSON(m, "fields"))
+		if err != nil {
+			return errResp(err.Error())
+		}
+		record, ok := m["record"].(map[string]any)
+		if !ok {
+			record = map[string]any{}
+		}
+		prog, err := eval.Compile(reqString(m, "query"), fields)
+		if err != nil {
+			return errResp(err.Error())
+		}
+		return respond(map[string]any{"result": prog.Match(record)})
+	})
 }
 
 //export QueryEval
 func QueryEval(req *C.char) *C.char {
-	m, ok := parseReq(req)
-	if !ok {
-		return errResp("invalid request JSON")
-	}
-	fields, err := bridgejson.ParseFields(reqJSON(m, "fields"))
-	if err != nil {
-		return errResp(err.Error())
-	}
-	record, ok := m["record"].(map[string]any)
-	if !ok {
-		record = map[string]any{}
-	}
-	prog, err := eval.CompileValue(reqString(m, "query"), fields)
-	if err != nil {
-		return errResp(err.Error())
-	}
-	v, err := prog.Eval(record)
-	if err != nil {
-		return errResp(err.Error())
-	}
-	return respond(map[string]any{"result": v})
+	return guard(func() *C.char {
+		m, ok := parseReq(req)
+		if !ok {
+			return errResp("invalid request JSON")
+		}
+		fields, err := bridgejson.ParseFields(reqJSON(m, "fields"))
+		if err != nil {
+			return errResp(err.Error())
+		}
+		record, ok := m["record"].(map[string]any)
+		if !ok {
+			record = map[string]any{}
+		}
+		prog, err := eval.CompileValue(reqString(m, "query"), fields)
+		if err != nil {
+			return errResp(err.Error())
+		}
+		v, err := prog.Eval(record)
+		if err != nil {
+			return errResp(err.Error())
+		}
+		return respond(map[string]any{"result": v})
+	})
 }
 
 //export QueryFree

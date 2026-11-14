@@ -44,8 +44,8 @@ func (e *UnaryExpr) expr()               { _ = e }
 // QualifierExpr represents a field comparison: field op value.
 // For range expressions (field:start..end), EndValue is non-nil.
 type QualifierExpr struct {
-	Field     FieldPath     // e.g., ["labels", "dev"]
-	FieldFunc *FuncCallExpr // optional: function wrapping the field, e.g., lower(name)
+	Field     FieldPath     // e.g., ["labels", "dev"]; empty when FieldFunc is set
+	FieldFunc *FuncCallExpr // optional: function whose result is compared, e.g., lower(name); then Field is empty
 	Operator  token.Type    // comparison operator
 	Value     Value         // primary value
 	EndValue  *Value        // end value for range expressions

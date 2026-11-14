@@ -19,7 +19,8 @@ type options struct {
 type Option func(*options)
 
 // WithMaxLength sets the maximum allowed query string length.
-// A value of 0 disables length checking.
+// A value of 0 disables length checking; nesting stays bounded by
+// [parser.MaxNesting] either way.
 func WithMaxLength(n int) Option {
 	return func(o *options) {
 		o.maxLength = n

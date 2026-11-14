@@ -2,6 +2,8 @@ package ast
 
 import (
 	"strings"
+	"unicode"
+	"unicode/utf8"
 
 	"github.com/heyllave/query/token"
 )
@@ -34,24 +36,44 @@ func writeExpr(buf *strings.Builder, expr Expression) {
 		_, binary := e.Expr.(*BinaryExpr)
 		writeGrouped(buf, e.Expr, binary)
 	case *QualifierExpr:
-		buf.WriteString(e.Field.String())
+		if e.FieldFunc != nil {
+			writeFuncCall(buf, e.FieldFunc)
+		} else {
+			writeFieldName(buf, e.Field)
+		}
 		if e.EndValue != nil {
 			buf.WriteByte(':')
-			writeValue(buf, &e.Value)
-			buf.WriteString("..")
-			writeValue(buf, e.EndValue)
+			var start, end strings.Builder
+			writeValue(&start, &e.Value)
+			writeValue(&end, e.EndValue)
+			buf.WriteString(start.String())
+			// A printed boundary that touches a '.' would fuse with the
+			// range operator (`.0....0`), so pad it with spaces, which the
+			// lexer accepts around `..`. The decision uses the printed text,
+			// not Raw, so it is stable across re-parses.
+			if strings.HasSuffix(start.String(), ".") || strings.HasPrefix(end.String(), ".") {
+				buf.WriteString(" .. ")
+			} else {
+				buf.WriteString("..")
+			}
+			buf.WriteString(end.String())
 		} else {
 			buf.WriteString(token.OperatorSymbol(e.Operator))
 			writeValue(buf, &e.Value)
 		}
 	case *PresenceExpr:
-		buf.WriteString(e.Field.String())
+		writeFieldName(buf, e.Field)
 	case *GroupExpr:
 		buf.WriteByte('(')
 		writeExpr(buf, e.Expr)
 		buf.WriteByte(')')
 	case *SelectorExpr:
 		writeExpr(buf, e.Base)
+		if _, presence := e.Base.(*PresenceExpr); !presence {
+			// After a value the '@' needs a space, or an unquoted value such
+			// as an e-mail address would absorb it.
+			buf.WriteByte(' ')
+		}
 		buf.WriteByte('@')
 		switch {
 		case e.Selector != "" && e.Inner != nil:
@@ -73,6 +95,29 @@ func writeExpr(buf *strings.Builder, expr Expression) {
 		writeFuncCall(buf, e)
 	case *ValueExpr:
 		writeValue(buf, &e.Value)
+	}
+}
+
+// writeFieldName writes a field in field position: bare when every segment
+// is a plain identifier, otherwise in the quoted bracket form the parser
+// accepts there (["foo bar"]).
+func writeFieldName(buf *strings.Builder, fp FieldPath) {
+	if fieldRefNeedsQuote(fp) || (len(fp) > 0 && isReservedWord(fp[0])) {
+		buf.WriteString(FieldRefString(fp, true))
+		return
+	}
+	buf.WriteString(fp.String())
+}
+
+// isReservedWord reports whether s would lex as a keyword in field position
+// in a context where the parser cannot recover it as a name (a bare `not`
+// before another term reads as a negation).
+func isReservedWord(s string) bool {
+	switch strings.ToUpper(s) {
+	case "NOT", "AND", "OR", "IN", "TRUE", "FALSE":
+		return true
+	default:
+		return false
 	}
 }
 
@@ -105,14 +150,38 @@ func writeFuncCall(buf *strings.Builder, fc *FuncCallExpr) {
 		}
 		switch {
 		case arg.Field != nil:
-			buf.WriteString(arg.Field.String())
+			// Same forms as a field anywhere else, so a name written
+			// ["cpu limit"] does not print as two bare words.
+			writeFieldName(buf, *arg.Field)
 		case arg.Value != nil:
-			writeValue(buf, arg.Value)
+			switch {
+			case arg.Value.Type == ValueArith:
+				// Arithmetic is an argument only as a paren group.
+				buf.WriteByte('(')
+				writeValue(buf, arg.Value)
+				buf.WriteByte(')')
+			case arg.Value.Type == ValueString && !arg.Value.Wildcard && !arg.Value.Quoted && startsLikeName(arg.Value.Raw):
+				// A bare word in an argument is a field, so a string that
+				// was written as a paren group (f((draft))) is quoted.
+				writeQuotedString(buf, arg.Value.Str)
+			default:
+				writeValue(buf, arg.Value)
+			}
 		case arg.Call != nil:
 			writeFuncCall(buf, arg.Call)
 		}
 	}
 	buf.WriteByte(')')
+}
+
+// startsLikeName reports whether s begins the way an identifier does, so that
+// printed bare in a function argument it would be read as a field name.
+func startsLikeName(s string) bool {
+	if s == "" {
+		return false
+	}
+	c := s[0]
+	return c == '_' || (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || c >= utf8.RuneSelf
 }
 
 // writeValue serializes a Value to the buffer. Function-valued expressions
@@ -128,20 +197,135 @@ func writeValue(buf *strings.Builder, v *Value) {
 		return
 	}
 	if v.Type == ValueArith && v.Arith != nil {
+		// Arithmetic over a string operand only lexes inside a paren group
+		// (the bare form would read as an unquoted string), so wrap it.
+		grouped := hasStringOperand(v)
+		if grouped {
+			buf.WriteByte('(')
+		}
 		writeArithOperand(buf, v.Arith.Left, v.Arith.Op, true)
-		buf.WriteString(v.Arith.Op.String())
-		writeArithOperand(buf, v.Arith.Right, v.Arith.Op, false)
+		if v.Arith.Op == ArithSub && looksLikeDatePrefix(v.Arith.Left) {
+			// `2026-01-01` is a date: keep a subtraction whose left operand
+			// is four digits from fusing into one. The right side is grouped
+			// so a leading sign in it cannot read as a second operator.
+			buf.WriteString(" - (")
+			writeArithOperand(buf, v.Arith.Right, ArithAdd, true)
+			buf.WriteByte(')')
+		} else {
+			buf.WriteString(v.Arith.Op.String())
+			writeArithOperand(buf, v.Arith.Right, v.Arith.Op, false)
+		}
+		if grouped {
+			buf.WriteByte(')')
+		}
 		return
 	}
 	if v.Type == ValueFieldRef {
 		buf.WriteString(FieldRefString(v.Field, v.Quoted))
 		return
 	}
-	if v.Type == ValueString && v.Quoted {
+	if v.Type == ValueFloat {
+		// A float written as `5.` or `.5` is canonicalized so it re-lexes as
+		// a number in every position.
+		raw := v.Raw
+		if strings.HasSuffix(raw, ".") {
+			raw += "0"
+		}
+		if strings.HasPrefix(raw, ".") || strings.HasPrefix(raw, "-.") || strings.HasPrefix(raw, "+.") {
+			raw = strings.Replace(raw, ".", "0.", 1)
+		}
+		buf.WriteString(raw)
+		return
+	}
+	if v.Type == ValueString && v.Wildcard && len(v.Raw) > 0 && strings.IndexByte("=<>!:.", v.Raw[0]) >= 0 {
+		// A pattern that starts with an operator character would fuse with
+		// the operator before it (`>` + `=*` reads as `>=`); a space keeps
+		// them apart and is skipped by the lexer.
+		buf.WriteByte(' ')
+	}
+	if v.Type == ValueString && v.Wildcard && endsWithLoneBackslash(v.Raw) {
+		// A pattern cannot be quoted without losing its stars, so a trailing
+		// backslash is doubled; the lexer decodes `\\` back to one.
+		buf.WriteString(v.Raw + `\`)
+		return
+	}
+	if v.Type == ValueString && (v.Quoted || (!v.Wildcard && !unquotedSafe(v.Raw))) {
+		// A string that would not lex back as the same unquoted value (it is
+		// empty, or holds whitespace, an operator or a delimiter) is quoted.
 		writeQuotedString(buf, v.Str)
 		return
 	}
 	buf.WriteString(v.Raw)
+}
+
+// unquotedSafe reports whether raw re-lexes as a single unquoted string
+// value: non-empty, and free of whitespace, delimiters, comparison and
+// arithmetic operators. Hyphens, dots and slashes are safe; the lexer treats
+// a run containing letters as a bareword and leaves it whole.
+func unquotedSafe(raw string) bool {
+	if raw == "" {
+		return false
+	}
+	for i := 0; i < len(raw); i++ {
+		if raw[i] == '\\' {
+			if i+1 >= len(raw) {
+				// A trailing backslash would escape whatever follows the
+				// value when it is printed (`\)` or `\,`).
+				return false
+			}
+			switch raw[i+1] {
+			case '*', '\\', '(', ')':
+				i++ // an escape pair the lexer decodes
+				continue
+			}
+		}
+		switch raw[i] {
+		case ' ', '\t', '\n', '\r', '(', ')', '[', ']', '"', ',', '=', '<', '>', '!', ':', '+', '*', '/', '%':
+			return false
+		}
+		if raw[i] < 0x20 || raw[i] == 0x7f {
+			return false
+		}
+	}
+	return !hasUnicodeSpace(raw)
+}
+
+// hasUnicodeSpace reports whether s holds a non-ASCII whitespace rune (a
+// no-break space, an ideographic space). The lexer separates terms on those
+// like on an ordinary space, so text containing one must be quoted.
+func hasUnicodeSpace(s string) bool {
+	for _, r := range s {
+		if r >= utf8.RuneSelf && unicode.IsSpace(r) {
+			return true
+		}
+	}
+	return false
+}
+
+// endsWithLoneBackslash reports whether raw ends in a backslash that is not
+// itself escaped, which would escape the character printed after it.
+func endsWithLoneBackslash(raw string) bool {
+	n := 0
+	for i := len(raw) - 1; i >= 0 && raw[i] == '\\'; i-- {
+		n++
+	}
+	return n%2 == 1
+}
+
+// hasStringOperand reports whether an arithmetic value has a string literal
+// anywhere among its operands.
+func hasStringOperand(v *Value) bool {
+	if v == nil {
+		return false
+	}
+	switch v.Type { //nolint:exhaustive // other types are never string operands
+	case ValueString:
+		return true
+	case ValueArith:
+		return v.Arith != nil && (hasStringOperand(v.Arith.Left) || hasStringOperand(v.Arith.Right))
+	default:
+		return false
+	}
 }
 
 // writeArithOperand renders an arithmetic operand, wrapping it in parens when
@@ -150,19 +334,36 @@ func writeValue(buf *strings.Builder, v *Value) {
 // non-commutative parent (`-`, `/`, `%`) also needs parens when its operator
 // has equal precedence — `5-(2-1)` is not `5-2-1`.
 func writeArithOperand(buf *strings.Builder, v *Value, parentOp ArithOp, isLeft bool) {
+	if v != nil && !isLeft && leftmostSigned(v) {
+		// A right operand whose text begins with a sign (`5 - -3`, or a
+		// sub-expression starting with one) is grouped so the sign does not
+		// read as a second operator.
+		buf.WriteByte('(')
+		writeValue(buf, v)
+		buf.WriteByte(')')
+		return
+	}
+	if v != nil && v.Type == ValueString {
+		// A string operand only lexes inside arithmetic when quoted. A
+		// wildcard here is printed as literal text: arithmetic over a
+		// pattern never resolves, so nothing is lost.
+		text := v.Str
+		if v.Wildcard {
+			text = DecodePattern(text)
+		}
+		writeQuotedString(buf, text)
+		return
+	}
 	if v != nil && v.Type == ValueArith && v.Arith != nil {
 		childPrec := arithPrecedence(v.Arith.Op)
 		parentPrec := arithPrecedence(parentOp)
 		needParens := childPrec < parentPrec
 		if !needParens && !isLeft && childPrec == parentPrec {
-			// Non-commutative ops need right-side parens at equal precedence
-			// (`5-(2-1)` is not `5-2-1`). Commutative `+` and `*` don't.
-			switch parentOp {
-			case ArithSub, ArithDiv, ArithMod:
-				needParens = true
-			default:
-				// ArithAdd, ArithMul — commutative, no parens needed.
-			}
+			// A right child at equal precedence always keeps its parens:
+			// `5-(2-1)` is not `5-2-1`, `a*(b%c)` is not `a*b%c`, and even
+			// `a+(b+c)` is a different tree from `a+b+c`, which String must
+			// reproduce exactly.
+			needParens = true
 		}
 		if needParens {
 			buf.WriteByte('(')
@@ -172,6 +373,32 @@ func writeArithOperand(buf *strings.Builder, v *Value, parentOp ArithOp, isLeft 
 		}
 	}
 	writeValue(buf, v)
+}
+
+// looksLikeDatePrefix reports whether an operand's printed text ends in a
+// run of four digits (its rightmost leaf), the start of a date literal.
+func looksLikeDatePrefix(v *Value) bool {
+	for v != nil && v.Type == ValueArith && v.Arith != nil {
+		v = v.Arith.Right
+	}
+	if v == nil || v.Type != ValueInteger || len(v.Raw) != 4 {
+		return false
+	}
+	for i := 0; i < 4; i++ {
+		if v.Raw[i] < '0' || v.Raw[i] > '9' {
+			return false
+		}
+	}
+	return true
+}
+
+// leftmostSigned reports whether the printed text of v begins with a sign:
+// a signed numeric literal, or arithmetic whose leftmost leaf is one.
+func leftmostSigned(v *Value) bool {
+	for v != nil && v.Type == ValueArith && v.Arith != nil {
+		v = v.Arith.Left
+	}
+	return v != nil && (v.Type == ValueInteger || v.Type == ValueFloat) && len(v.Raw) > 0 && (v.Raw[0] == '-' || v.Raw[0] == '+')
 }
 
 func arithPrecedence(op ArithOp) int {
@@ -205,23 +432,24 @@ func FieldRefString(fp FieldPath, quoted bool) string {
 
 // fieldRefNeedsQuote reports whether a field path must use the quoted bracket
 // form because a segment is empty or contains a character outside the bare
-// identifier alphabet (letters, digits, underscore, hyphen; not leading digit).
+// identifier alphabet (ASCII letters, any non-ASCII rune that is not
+// whitespace, digits, underscore, hyphen, slash; not leading digit).
 func fieldRefNeedsQuote(fp FieldPath) bool {
 	if len(fp) == 0 {
 		return true
 	}
 	for _, seg := range fp {
-		if seg == "" {
+		if seg == "" || hasUnicodeSpace(seg) {
 			return true
 		}
 		for i := 0; i < len(seg); i++ {
 			c := seg[i]
-			isAlpha := c == '_' || (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z')
+			isAlpha := c == '_' || (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || c >= 0x80
 			isDigit := c >= '0' && c <= '9'
 			if i == 0 && !isAlpha {
 				return true
 			}
-			if !isAlpha && !isDigit && c != '-' {
+			if !isAlpha && !isDigit && c != '-' && c != '/' {
 				return true
 			}
 		}

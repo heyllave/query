@@ -108,7 +108,7 @@ func TestParse_ErrorPaths(t *testing.T) {
 		{"dot without field", "labels.=jane"},
 		{"extra token", "state=draft )"},
 		{"or missing right", "a=1 OR"},
-		{"not missing expr", "NOT"},
+		{"not missing expr", "NOT ("},
 		{"func leading comma", "f(,a)"},
 		{"func eof mid-args", "f(a,"},
 	}

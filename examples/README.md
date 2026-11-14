@@ -47,9 +47,9 @@ go run ./examples/explain
 
 | Directory | What it demonstrates |
 |-----------|---------------------|
-| [`sql/`](sql/) | SQL WHERE clause generation with parameterized queries ($1, $2) |
+| [`sql/`](sql/) | SQL WHERE clause generation: validated against a schema, columns and functions allowlisted, every literal a bound parameter ($1, $2) |
 | [`json/`](json/) | JSON AST serialization for APIs and frontends |
-| [`filter/`](filter/) | In-memory filter functions with wildcard matching |
+| [`filter/`](filter/) | In-memory filter functions with wildcard matching and left-side transforms (`lower(name)=john*`) |
 | [`functions/`](functions/) | Built-in function families — string, numeric math (abs/round/min/max), time-component (hour/weekday/addDays), list aggregation (count/sum/avg/first/last), type coercion — and custom function registration |
 | [`value/`](value/) | `CompileValue` / `Eval` — value-returning queries: arithmetic, functions over fields, time values, lists, and `ErrNoValue` handling |
 | [`rules/`](rules/) | Rule derivation — pair predicates with actions: first-match routing, collect-all tagging, and hybrid predicate-selects-value-computes |
@@ -60,6 +60,10 @@ go run ./examples/explain
 | [`customvalidator/`](customvalidator/) | `AstValidator` hook: per-tenant field denylists, cross-field rules, value ranges |
 | [`explain/`](explain/) | AST inspection: tokens, tree rendering, field extraction, error formatting |
 
+Every directory is run by `examples_test.go` the way the comment at the top of
+its `main.go` says (`go test ./examples/`), so an example that stops working
+fails the build. A new example needs an entry in that test's `cases` map.
+
 ## Pattern: Implementing a Visitor
 
 Every code generation target follows the same pattern — implement `ast.Visitor[T]`:
@@ -69,7 +73,7 @@ type myVisitor struct{ /* state */ }
 
 func (v *myVisitor) VisitBinary(e *ast.BinaryExpr) T    { /* ... */ }
 func (v *myVisitor) VisitUnary(e *ast.UnaryExpr) T      { /* ... */ }
-func (v *myVisitor) VisitQualifier(e *ast.QualifierExpr) T { /* ... */ }
+func (v *myVisitor) VisitQualifier(e *ast.QualifierExpr) T { /* Field, or FieldFunc when the left side is a call */ }
 func (v *myVisitor) VisitPresence(e *ast.PresenceExpr) T { /* ... */ }
 func (v *myVisitor) VisitGroup(e *ast.GroupExpr) T       { /* ... */ }
 func (v *myVisitor) VisitSelector(e *ast.SelectorExpr) T { /* ... */ }

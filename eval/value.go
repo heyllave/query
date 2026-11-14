@@ -56,40 +56,15 @@ func CompileValue(q string, fields []validate.FieldConfig, opts ...Option) (*Val
 		opt(&o)
 	}
 
-	funcs := make(FuncRegistry)
-	if !o.noBuiltins {
-		for k, v := range BuiltinFunctions() {
-			funcs[k] = v
-		}
-	}
-	for k, v := range o.funcs {
-		funcs[k] = v
-	}
-
-	activeFields := fields
-	if len(o.allowedFields) > 0 {
-		activeFields = filterFields(fields, o.allowedFields)
-	}
-	if len(o.allowedOps) > 0 {
-		activeFields = restrictOps(activeFields, o.allowedOps)
-	}
+	funcs := o.registry()
 
 	expr, err := parser.ParseValue(q, o.maxLength)
 	if err != nil {
 		return nil, fmt.Errorf("parse: %w", err)
 	}
 
-	if o.maxDepth > 0 && ast.Depth(expr) > o.maxDepth {
-		return nil, fmt.Errorf("query depth %d exceeds maximum of %d", ast.Depth(expr), o.maxDepth)
-	}
-
-	var vopts []validate.Option
-	if o.customVal != nil {
-		vopts = append(vopts, validate.WithCustomValidator(o.customVal))
-	}
-	v := validate.New(activeFields, vopts...)
-	if err := v.Validate(expr); err != nil {
-		return nil, fmt.Errorf("validate: %w", err)
+	if err := o.check(expr, fields, funcs); err != nil {
+		return nil, err
 	}
 
 	ve, ok := expr.(*ast.ValueExpr)
@@ -114,10 +89,7 @@ func CompileValue(q string, fields []validate.FieldConfig, opts ...Option) (*Val
 // The result is the typed Go value: int64, float64, string, bool, time.Time, or
 // time.Duration.
 func (p *ValueProgram) Eval(data map[string]any) (any, error) {
-	return p.EvalFunc(func(field string) (any, bool) {
-		v, ok := data[field]
-		return v, ok
-	})
+	return p.EvalFunc(MapAccessor(data))
 }
 
 // EvalFunc computes the value using a custom field accessor. The accessor

@@ -42,9 +42,12 @@ func Visit[T any](v Visitor[T], expr Expression) T {
 }
 
 // SQLOperator returns the SQL equivalent of a comparison operator token.
-// For wildcards, returns "LIKE". For presence, returns "IS NOT NULL".
+// For wildcards, returns "LIKE", or "NOT LIKE" when the operator is !=.
 func SQLOperator(op token.Type, wildcard bool) string {
 	if wildcard {
+		if op == token.Neq {
+			return "NOT LIKE"
+		}
 		return "LIKE"
 	}
 	switch op { //nolint:exhaustive // only comparison operators
@@ -70,10 +73,23 @@ func SQLOperator(op token.Type, wildcard bool) string {
 //	"John*"    → "John%"
 //	"*yota"    → "%yota"
 //	"*test*"   → "%test%"
+//	"a\\*b*"   → "a*b%"  (an escaped star is a literal star)
 func WildcardToLike(pattern string) string {
 	var buf []byte
 	for i := 0; i < len(pattern); i++ {
 		switch pattern[i] {
+		case '\\':
+			// Pattern form: `\*` is a literal star, `\\` a literal backslash,
+			// which LIKE needs escaped under ESCAPE '\'.
+			if i+1 < len(pattern) && pattern[i+1] == '*' {
+				buf = append(buf, '*')
+				i++
+				continue
+			}
+			if i+1 < len(pattern) && pattern[i+1] == '\\' {
+				i++
+			}
+			buf = append(buf, '\\', '\\')
 		case '*':
 			buf = append(buf, '%')
 		case '%', '_':
