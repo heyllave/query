@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "description": "Cross-language conformance corpus for the query language. Every client (Go, JS/WASM, Dart/FFI) runs these cases against the real engine so grammar drift becomes a failing build. Numeric expectations use tolerance; error checks are non-empty/substring (wording may change); expectCode names the parser failure code, which never changes once shipped.",
+  "description": "Cross-language conformance corpus for the query language. Every client (Go, JS/WASM, C library) runs these cases against the real engine so grammar drift becomes a failing build. Numeric expectations use tolerance; error checks are non-empty/substring (wording may change); expectCode names the parser failure code, which never changes once shipped.",
   "fieldSets": {
     "default": [
       { "Name": "state", "Type": 0, "AllowedOps": ["=", "!=", "*", "?"] },

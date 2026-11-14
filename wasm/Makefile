@@ -2,7 +2,7 @@
 
 GOROOT := $(shell go env GOROOT)
 
-# The Dart web backend and the npm package both load query.wasm + wasm_exec.js
+# The npm package loads query.wasm + wasm_exec.js
 # from the npm client directory, so emit them there.
 NPM := ../clients/npm
 
