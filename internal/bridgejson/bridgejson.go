@@ -260,14 +260,24 @@ func nodeToAST(n *AST) (ast.Expression, error) {
 		default:
 			return nil, fmt.Errorf("unknown selector %q", n.Selector)
 		}
-		sel := &ast.SelectorExpr{Selector: n.Selector}
-		if n.Base != nil {
-			base, err := nodeToAST(n.Base)
-			if err != nil {
-				return nil, err
-			}
-			sel.Base = base
+		// A selector binds to the single term before the '@'. A base of any
+		// other shape (a bare AND/OR/NOT, or none) would print as a query that
+		// groups differently from this tree, so it is refused rather than
+		// printed.
+		if n.Base == nil {
+			return nil, fmt.Errorf("selector needs a base expression")
 		}
+		switch n.Base.Type {
+		case "qualifier", "presence", "group", "selector":
+		default:
+			return nil, fmt.Errorf("selector base cannot be a %q node; wrap it in a group", n.Base.Type)
+		}
+		sel := &ast.SelectorExpr{Selector: n.Selector}
+		base, err := nodeToAST(n.Base)
+		if err != nil {
+			return nil, err
+		}
+		sel.Base = base
 		if n.Inner != nil {
 			inner, err := nodeToAST(n.Inner)
 			if err != nil {

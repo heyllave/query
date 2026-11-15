@@ -273,3 +273,22 @@ func TestJSONToAST_AcceptsTheTreeOfAQueryAtTheLengthLimit(t *testing.T) {
 		t.Errorf("JSONToAST refused a %d-byte tree of a %d-byte query: %v", len(data), len(q), err)
 	}
 }
+
+// A selector binds to the one term before its '@'. A tree whose selector hangs
+// off a bare OR (or off nothing) would print as a query that groups
+// differently, so the bridge refuses it instead of printing it.
+func TestJSONToAST_RefusesASelectorWhoseBaseIsNotASingleTerm(t *testing.T) {
+	qual := func(field string) string {
+		return `{"type":"qualifier","field":"` + field + `","operator":"=","value":{"type":"number","raw":"1","value":1}}`
+	}
+	for name, node := range map[string]string{
+		"binary base": `{"type":"selector","selector":"first","base":{"type":"binary","op":"OR","left":` + qual("a") + `,"right":` + qual("b") + `}}`,
+		"no base":     `{"type":"selector","selector":"first"}`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			if _, err := JSONToAST(node); err == nil {
+				t.Fatalf("JSONToAST accepted %s", node)
+			}
+		})
+	}
+}
