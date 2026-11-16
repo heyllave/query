@@ -8,8 +8,15 @@ library does.
 
 - **No input makes it panic, hang or run code.** The language has no loops, no
   assignment and no way to define a function. Parsing and evaluation are
-  bounded by the query length (256 bytes by default), by `parser.MaxNesting`
-  levels of nesting and by `eval.MaxCalendarDays` for day arithmetic.
+  bounded by the query length (256 characters by default), by
+  `parser.MaxNesting` levels of nesting and by `eval.MaxCalendarDays` for day
+  arithmetic.
+- **A tree is held to what the parser could have built.** The WASM and C
+  bridges accept a JSON tree for `validate` and `stringify`. A selector name,
+  an operator or a value shape the parser would not produce is refused, text
+  the tree carries as written is held to the same length limit as a query,
+  and the JSON itself is capped at 1 MiB. A tree that validates prints as
+  the query it was checked as.
 - **Restrictions hold.** A field outside `WithAllowedFields`, an operator
   outside a field's `AllowedOps` or `WithAllowedOps`, and a function outside
   `validate.WithAllowedFunctions` are refused however the query reaches for

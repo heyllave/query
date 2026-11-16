@@ -66,6 +66,16 @@ q.stringify(parsed.result!);
 
 No call throws on a bad query. Every result is an object with either `result` or `error`.
 
+## Length limit
+
+Every call takes an optional last argument, `maxLength`: the query length limit in characters. It defaults to 256 and `0` disables it. `validate` and `stringify` take it too, because a tree is held to the same limit as the query it came from: pass the limit the tree was parsed under.
+
+```ts
+const long = q.parse(text, 1000);
+q.validate(long.result!, fields, 1000);
+q.stringify(long.result!, 1000);
+```
+
 ## Show errors to a person
 
 Each failure carries a stable `code` and the span to underline.

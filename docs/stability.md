@@ -25,6 +25,7 @@ What you can rely on, and what holds the library to it.
 - 256 characters, unless the host sets another limit.
 - 128 levels of nesting.
 - About 10,000 years in either direction for day arithmetic.
+- For a tree handed to a bridge: the same character limit on the text it carries, and 1 MiB of JSON.
 
 A query runs in time proportional to its length and the size of the record. The language has no loops, no recursion and no user-defined functions.
 
