@@ -223,11 +223,11 @@ func TestValidate_TypeMismatches(t *testing.T) {
 	}{
 		{"state=10-3", "arithmetic"},
 		{"active=1+1", "arithmetic"},
-		{`created="not a date"`, "not compatible"},
-		{"count=1.5", "not compatible"},
-		{"count=abc", "not compatible"},
-		{"active=yes", "not compatible"},
-		{"ttl=5", "not compatible"},
+		{`created="not a date"`, "does not fit"},
+		{"count=1.5", "does not fit"},
+		{"count=abc", "does not fit"},
+		{"active=yes", "does not fit"},
+		{"ttl=5", "does not fit"},
 		{"total:1..abc", "range end"},
 		{"total=now()", ""},   // dynamic: accepted
 		{"total>[count]", ""}, // field ref: accepted

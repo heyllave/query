@@ -51,10 +51,20 @@ type Error struct {
 	// Op is the refused operator for [ErrOperatorNotAllowed] ("?" for a
 	// presence check).
 	Op string
+	// Hint says what the writer most likely meant and how to write it, when
+	// the validator can tell: `did you mean "total"?` for totl>5. It is
+	// English prose for a person, may be empty, and may be reworded between
+	// versions; branch on Kind, not on Hint. It names only fields the
+	// validator would accept, so it reveals nothing a restriction hides.
+	Hint string
 }
 
-// Error implements the error interface.
+// Error implements the error interface. The hint, when there is one, follows
+// the message in parentheses.
 func (e *Error) Error() string {
+	if e.Hint != "" {
+		return fmt.Sprintf("position %d: %s (%s)", e.Position.Offset, e.Message, e.Hint)
+	}
 	return fmt.Sprintf("position %d: %s", e.Position.Offset, e.Message)
 }
 
@@ -201,6 +211,7 @@ func (v *Validator) Validate(expr ast.Expression) error {
 		for _, fc := range ast.Calls(expr) {
 			if !w.allowedFuncs[fc.Name] {
 				w.addError(ErrFunctionNotAllowed, fc.Position, "", "", "function %q is not allowed", fc.Name)
+				w.hint(func() string { return w.functionHint(fc.Name) })
 			}
 		}
 	}
@@ -395,7 +406,8 @@ func (v *Validator) checkValue(cfg FieldConfig, val *ast.Value, pos token.Positi
 	}
 	if !typeCompatible(cfg.Type, *val) {
 		v.addError(ErrTypeMismatch, pos, fieldName, "",
-			"%s type %s is not compatible with field %q (type %s)", what, val.Type, fieldName, cfg.Type)
+			"%s %q (%s) does not fit field %q (type %s)", what, val.Raw, val.Type, fieldName, cfg.Type)
+		v.hint(func() string { return v.typeHint(cfg, val) })
 	}
 }
 
@@ -506,6 +518,7 @@ func (v *Validator) validateFuncCallFields(fc *ast.FuncCallExpr) []resolvedField
 			cfg, ok := v.resolveField(fieldName)
 			if !ok {
 				v.addError(ErrFieldNotFound, fc.Position, fieldName, "", "unknown field %q in function %s()", fieldName, fc.Name)
+				v.hint(func() string { return v.fieldHint(fieldName, fc.Name) })
 				continue
 			}
 			fields = append(fields, resolvedField{name: fieldName, cfg: cfg})
@@ -543,6 +556,7 @@ func (v *Validator) validatePresence(p *ast.PresenceExpr) {
 	cfg, ok := v.resolveField(fieldName)
 	if !ok {
 		v.addError(ErrFieldNotFound, p.Position, fieldName, "", "unknown field %q", fieldName)
+		v.hint(func() string { return v.bareWordHint(fieldName) })
 		return
 	}
 	if !v.opGloballyAllowed(OpPresence) || !cfg.AllowsOp(OpPresence) {
@@ -594,14 +608,39 @@ func (v *Validator) lookupField(name string) (FieldConfig, bool) {
 	return FieldConfig{}, false
 }
 
+// addError records a failure. An unknown field and a refused operator get
+// their hint here; a site that knows more (the function a name was passed to,
+// the literal that did not fit) replaces it with [Validator.hint].
 func (v *Validator) addError(kind ErrorKind, pos token.Position, field, op, format string, args ...any) {
-	v.errors = append(v.errors, &Error{
+	e := &Error{
 		Message:  fmt.Sprintf(format, args...),
 		Position: pos,
 		Kind:     kind,
 		Field:    field,
 		Op:       op,
-	})
+	}
+	v.errors = append(v.errors, e)
+	switch kind { //nolint:exhaustive // the other kinds carry no generic hint
+	case ErrFieldNotFound:
+		v.hint(func() string { return v.fieldHint(field, "") })
+	case ErrOperatorNotAllowed:
+		if field != "" {
+			v.hint(func() string { return v.opHint(field, Op(op)) })
+		}
+	}
+}
+
+// maxHinted is how many errors of one validation get a hint. A hint compares
+// a name against every field, so without a bound a long query of unknown
+// names would cost its length times the size of the schema.
+const maxHinted = 8
+
+// hint sets the hint of the error just recorded, if it is among the first
+// maxHinted. It takes a function so that the hint is not computed otherwise.
+func (v *Validator) hint(text func() string) {
+	if n := len(v.errors); n > 0 && n <= maxHinted {
+		v.errors[n-1].Hint = text()
+	}
 }
 
 func tokenTypeToOp(tt token.Type, wildcard bool) Op {

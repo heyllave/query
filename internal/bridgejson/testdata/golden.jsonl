@@ -330,9 +330,9 @@
 {"query":"not","print":"[\"not\"]","ast":{"type":"presence","field":["not"]}}
 {"query":"3","codes":["expectedField"]}
 {"query":"total>1 2","codes":["unexpected"]}
-{"query":"&&","codes":["unexpectedChar","unexpectedChar"]}
-{"query":"a && b","codes":["unexpectedChar","unexpectedChar"]}
-{"query":"a || b","codes":["unexpectedChar","unexpectedChar"]}
+{"query":"&&","codes":["unexpectedChar"]}
+{"query":"a && b","codes":["unexpectedChar"]}
+{"query":"a || b","codes":["unexpectedChar"]}
 {"query":"a == b","codes":["unexpectedChar"]}
 {"query":"!a","codes":["unexpectedChar"]}
 {"query":"name=\"=x\"","print":"name=\"=x\"","ast":{"type":"qualifier","op":"=","field":["name"],"value":{"type":"string","raw":"=x","value":"=x","quoted":true}}}

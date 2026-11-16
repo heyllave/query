@@ -23,8 +23,11 @@ Each function takes one NUL-terminated UTF-8 JSON object and returns one.
 | `QueryEval` | `{"query", "fields", "record"}` | `{"result": value}` |
 
 A failure is `{"error": "message"}` with `errors` (syntax) or
-`validationErrors` (validation): lists of `{code, message, offset, length}`.
-Show your own wording from `code`; the codes do not change, the messages may.
+`validationErrors` (validation): lists of `{code, message, offset, length}`,
+plus `hint` when the engine can tell what was meant (`"equality is a single
+="` for `state==draft`, `did you mean "total"?` for `totl>5`).
+Show your own wording from `code`; the codes do not change, the messages and
+hints may.
 
 A field is `{"name": "total", "type": "decimal"}`, optionally with
 `"allowedOps": ["=", ">"]`, `"nested": true` for label-style maps.

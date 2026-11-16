@@ -78,7 +78,7 @@ q.stringify(long.result!, 1000);
 
 ## Show errors to a person
 
-Each failure carries a stable `code` and the span to underline.
+Each failure carries a stable `code`, the span to underline and, when the engine can tell what was meant, a `hint` such as `did you mean "total"?`. See [Errors and hints]({{ '/errors/' | relative_url }}).
 
 ```ts
 for (const e of parsed.errors ?? []) {

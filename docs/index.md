@@ -46,6 +46,7 @@ If you need business rules, computed fields or templates, a general expression e
 
 - [Conditions and values]({{ '/conditions-and-values/' | relative_url }}): the two kinds of query, `Compile` and `CompileValue`.
 - [Syntax]({{ '/syntax/' | relative_url }}): every operator, value and function.
+- [Errors and hints]({{ '/errors/' | relative_url }}): what a rejected query tells you, and the fixes it suggests.
 - [Filtering a list with SQL]({{ '/sql/' | relative_url }}): the parse, validate and translate route.
 - [Command line]({{ '/cli/' | relative_url }}): `query explain`, to see how a query is read, and `filter`, `eval` and `map`, to run one over JSON records like `jq`.
 - [Stability]({{ '/stability/' | relative_url }}): what you can rely on, and what enforces it.

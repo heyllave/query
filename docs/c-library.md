@@ -36,7 +36,7 @@ Each function takes one NUL-terminated UTF-8 JSON object and returns one.
 
 `maxLength` is the query length limit in characters; it defaults to 256 and `0` disables it. For a tree, it bounds the text the tree carries as written (string values, field names), so a tree parsed under a larger limit is validated or printed under the same one.
 
-A failure is `{"error": "message"}` with a list of coded entries: `errors` for syntax, `validationErrors` for validation. Each entry is `{code, message, offset, length}`. Show your own wording from `code`; the codes do not change, the messages may.
+A failure is `{"error": "message"}` with a list of coded entries: `errors` for syntax, `validationErrors` for validation. Each entry is `{code, message, offset, length}`, plus `hint` when the engine can tell what was meant. Show your own wording from `code`; the codes do not change, the messages may.
 
 A field is `{"name": "total", "type": "decimal"}`. Add `"allowedOps": ["=", ">"]` to narrow the operators, or `"nested": true` for label-style maps.
 

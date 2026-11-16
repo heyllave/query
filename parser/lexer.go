@@ -39,7 +39,7 @@ func Lex(input string, maxLength int) ([]token.Token, error) {
 	l.run()
 
 	if err := l.errors.errOrNil(); err != nil {
-		return nil, err
+		return nil, annotate(input, err, false)
 	}
 	return l.tokens, nil
 }
@@ -80,7 +80,7 @@ func LexValue(input string, maxLength int) ([]token.Token, error) {
 	l.run()
 
 	if err := l.errors.errOrNil(); err != nil {
-		return nil, err
+		return nil, annotate(input, err, true)
 	}
 	return l.tokens, nil
 }
@@ -559,8 +559,7 @@ func (l *lexer) lexValue() {
 	// starts with one of these characters is written in quotes.
 	if ch == '=' || ch == '<' || ch == '>' {
 		l.errors.add(newError(CodeUnexpectedChar, ErrSyntax, token.Position{Offset: l.pos, Length: 1},
-			"unexpected %q where a value belongs: operators are single (=, !=, >, >=, <, <=); quote the value if it starts with %q",
-			string(ch), string(ch)))
+			"unexpected %q where a value belongs", string(ch)))
 	}
 
 	// Otherwise: unquoted string with possible wildcards. A bareword field

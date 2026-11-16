@@ -260,3 +260,59 @@ func TestParseFields_DefaultOperators(t *testing.T) {
 		})
 	}
 }
+
+func TestBridge_FailuresCarryHints(t *testing.T) {
+	fields := `[{"name":"total","type":"decimal"},{"name":"state","type":"text","allowedOps":["="]}]`
+
+	tests := []struct {
+		name string
+		env  Envelope
+		key  string
+		hint string
+	}{
+		{"syntax", Parse("state==draft", DefaultMaxLength), "errors", "single ="},
+		{"arithmetic on the left", Match("[total]*2>3", fields, "{}", DefaultMaxLength), "errors", "float([total]*2)>3"},
+		{"unknown field", ParseAndValidate("totl>5", fields, DefaultMaxLength), "validationErrors", `did you mean "total"?`},
+		{"refused operator", Match("state=a*", fields, "{}", DefaultMaxLength), "validationErrors", "it allows: ="},
+		{"value expression", Eval("total*2", fields, "{}", DefaultMaxLength), "errors", "[total]*2"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Act
+			got := wire(t, tt.env)
+
+			// Assert
+			list, _ := got[tt.key].([]any)
+			if len(list) == 0 {
+				t.Fatalf("no entries under %q in %v", tt.key, got)
+			}
+			entry, _ := list[0].(map[string]any)
+			hint, _ := entry["hint"].(string)
+			if !strings.Contains(hint, tt.hint) {
+				t.Errorf("hint = %q, want one containing %q", hint, tt.hint)
+			}
+			if message, _ := got["error"].(string); !strings.Contains(message, tt.hint) {
+				t.Errorf("error = %q, want the hint in the joined message too", message)
+			}
+		})
+	}
+}
+
+func TestBridge_NoHintKeyWhenThereIsNothingToSuggest(t *testing.T) {
+	// Arrange: ten fields, none close to the name asked for.
+	fields := `[{"name":"alpha","type":"text"},{"name":"bravo","type":"text"},{"name":"charlie","type":"text"},
+		{"name":"delta","type":"text"},{"name":"echo","type":"text"},{"name":"foxtrot","type":"text"},
+		{"name":"golf","type":"text"},{"name":"hotel","type":"text"},{"name":"india","type":"text"}]`
+
+	// Act
+	got := wire(t, ParseAndValidate("zzzzzz=1", fields, DefaultMaxLength))
+
+	// Assert
+	list, _ := got["validationErrors"].([]any)
+	if len(list) != 1 {
+		t.Fatalf("validationErrors = %v, want one entry", got)
+	}
+	if _, present := list[0].(map[string]any)["hint"]; present {
+		t.Errorf("entry has a hint key with nothing to suggest: %v", list[0])
+	}
+}

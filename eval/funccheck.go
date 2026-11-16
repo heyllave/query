@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	"github.com/heyllave/query/ast"
+	"github.com/heyllave/query/internal/nearest"
 )
 
 // ErrUnknownFunction is wrapped by the error [Compile] and [CompileValue]
@@ -24,7 +25,7 @@ func checkCalls(expr ast.Expression, funcs FuncRegistry) error {
 	for _, fc := range ast.Calls(expr) {
 		fn, ok := funcs.Get(fc.Name)
 		if !ok {
-			errs = append(errs, fmt.Errorf("position %d: %w %q", fc.Position.Offset, ErrUnknownFunction, fc.Name))
+			errs = append(errs, fmt.Errorf("position %d: %w %q%s", fc.Position.Offset, ErrUnknownFunction, fc.Name, didYouMean(fc.Name, funcs)))
 			continue
 		}
 		if err := fn.Arity.Check(fc.Name, len(fc.Args)); err != nil {
@@ -32,4 +33,17 @@ func checkCalls(expr ast.Expression, funcs FuncRegistry) error {
 		}
 	}
 	return errors.Join(errs...)
+}
+
+// didYouMean is " (did you mean "upper"?)" when a registered function is
+// close to name, or "" when none is.
+func didYouMean(name string, funcs FuncRegistry) string {
+	names := make([]string, 0, len(funcs))
+	for registered := range funcs {
+		names = append(names, registered)
+	}
+	if near := nearest.Match(name, names); near != "" {
+		return fmt.Sprintf(" (did you mean %q?)", near)
+	}
+	return ""
 }
