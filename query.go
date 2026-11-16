@@ -12,7 +12,7 @@ const DefaultMaxLength = 256
 
 // options holds configuration for parsing.
 type options struct {
-	maxLength int
+	parse parser.Config
 }
 
 // Option configures parsing behavior.
@@ -23,12 +23,43 @@ type Option func(*options)
 // [parser.MaxNesting] either way.
 func WithMaxLength(n int) Option {
 	return func(o *options) {
-		o.maxLength = n
+		o.parse.MaxLength = n
+	}
+}
+
+// WithExplicitAnd requires AND or OR between conditions, refusing the
+// implicit AND a space otherwise stands for. `state=draft total>5` and
+// `labels[team]=x` become errors with the code missingAnd. See
+// [parser.Config].
+func WithExplicitAnd() Option {
+	return func(o *options) {
+		o.parse.ExplicitAnd = true
+	}
+}
+
+// WithStrictValues refuses `=`, `<` and `>` inside an unquoted value, so
+// `a=1+b=2` is an error instead of a comparison with the text "1+b=2". A
+// value that holds one of those characters is written in quotes. See
+// [parser.Config].
+func WithStrictValues() Option {
+	return func(o *options) {
+		o.parse.StrictValues = true
+	}
+}
+
+// WithStrict turns on every strict option: [WithExplicitAnd] and
+// [WithStrictValues]. Strict options only refuse queries, so a query accepted
+// under WithStrict means the same under the default grammar. It suits a host
+// whose queries come from scripts, saved links and other programs, such as
+// an API's filter parameter.
+func WithStrict() Option {
+	return func(o *options) {
+		o.parse = o.parse.Strict()
 	}
 }
 
 func defaultOptions() options {
-	return options{maxLength: DefaultMaxLength}
+	return options{parse: parser.Config{MaxLength: DefaultMaxLength}}
 }
 
 // Parse parses a query string into an AST expression.
@@ -37,7 +68,7 @@ func Parse(q string, opts ...Option) (ast.Expression, error) {
 	for _, opt := range opts {
 		opt(&o)
 	}
-	return parser.Parse(q, o.maxLength)
+	return parser.ParseWith(q, o.parse)
 }
 
 // Validate validates an AST against field configurations.
@@ -63,7 +94,17 @@ func ParseAndValidate(q string, fields []validate.FieldConfig, opts ...Option) (
 // same query against many records, compile once with [github.com/heyllave/query/eval.Compile]
 // and reuse the resulting program.
 func Match(q string, fields []validate.FieldConfig, record map[string]any) (bool, error) {
-	prog, err := eval.Compile(q, fields)
+	return MatchWith(q, fields, record)
+}
+
+// MatchWith is Match with parsing options. Strict options only affect this call;
+// Match retains its original function type and default grammar.
+func MatchWith(q string, fields []validate.FieldConfig, record map[string]any, opts ...Option) (bool, error) {
+	o := defaultOptions()
+	for _, opt := range opts {
+		opt(&o)
+	}
+	prog, err := eval.Compile(q, fields, eval.WithParseConfig(o.parse))
 	if err != nil {
 		return false, err
 	}
@@ -77,7 +118,17 @@ func Match(q string, fields []validate.FieldConfig, record map[string]any) (bool
 // [github.com/heyllave/query/eval.ErrNoValue] when the expression cannot
 // resolve (e.g. a missing field or division by zero).
 func Eval(q string, fields []validate.FieldConfig, record map[string]any) (any, error) {
-	prog, err := eval.CompileValue(q, fields)
+	return EvalWith(q, fields, record)
+}
+
+// EvalWith is Eval with the optional query length limit. Condition grammar
+// switches do not affect value expressions, just as in eval.CompileValue.
+func EvalWith(q string, fields []validate.FieldConfig, record map[string]any, opts ...Option) (any, error) {
+	o := defaultOptions()
+	for _, opt := range opts {
+		opt(&o)
+	}
+	prog, err := eval.CompileValue(q, fields, eval.WithMaxLength(o.parse.MaxLength))
 	if err != nil {
 		return nil, err
 	}

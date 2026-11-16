@@ -58,7 +58,7 @@ func CompileValue(q string, fields []validate.FieldConfig, opts ...Option) (*Val
 
 	funcs := o.registry()
 
-	expr, err := parser.ParseValue(q, o.maxLength)
+	expr, err := parser.ParseValue(q, o.parse.MaxLength)
 	if err != nil {
 		return nil, fmt.Errorf("parse: %w", err)
 	}

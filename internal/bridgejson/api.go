@@ -38,10 +38,20 @@ func Fail(msg string) Envelope { return Envelope{"error": msg} }
 
 func ok(result any) Envelope { return Envelope{"result": result} }
 
+// Options is what a bridge call may set about how a query is parsed: the
+// length limit (zero or less disables it) and the strict switches. It is the
+// parser's own configuration, so a bridge cannot fall behind it.
+type Options = parser.Config
+
 // Parse parses query and answers with its AST. A maxLength of zero or less
 // disables the length limit, as in [parser.Parse].
 func Parse(query string, maxLength int) Envelope {
-	expr, err := parser.Parse(query, maxLength)
+	return ParseWith(query, Options{MaxLength: maxLength})
+}
+
+// ParseWith is [Parse] under the given options.
+func ParseWith(query string, o Options) Envelope {
+	expr, err := parser.ParseWith(query, o)
 	if err != nil {
 		return parseFailure(err)
 	}
@@ -84,7 +94,12 @@ func Stringify(astJSON string, maxLength int) Envelope {
 // ParseAndValidate parses query, validates it against the field configs and
 // answers with its AST. A maxLength of zero or less disables the length limit.
 func ParseAndValidate(query, fieldsJSON string, maxLength int) Envelope {
-	expr, err := parser.Parse(query, maxLength)
+	return ParseAndValidateWith(query, fieldsJSON, Options{MaxLength: maxLength})
+}
+
+// ParseAndValidateWith is [ParseAndValidate] under the given options.
+func ParseAndValidateWith(query, fieldsJSON string, o Options) Envelope {
+	expr, err := parser.ParseWith(query, o)
 	if err != nil {
 		return parseFailure(err)
 	}
@@ -101,11 +116,16 @@ func ParseAndValidate(query, fieldsJSON string, maxLength int) Envelope {
 // Match compiles query as a predicate and evaluates it against a JSON record.
 // A maxLength of zero or less disables the length limit.
 func Match(query, fieldsJSON, recordJSON string, maxLength int) Envelope {
+	return MatchWith(query, fieldsJSON, recordJSON, Options{MaxLength: maxLength})
+}
+
+// MatchWith is [Match] under the given options.
+func MatchWith(query, fieldsJSON, recordJSON string, o Options) Envelope {
 	fields, record, fail := decodeInputs(fieldsJSON, recordJSON)
 	if fail != nil {
 		return fail
 	}
-	prog, err := eval.Compile(query, fields, eval.WithMaxLength(maxLength))
+	prog, err := eval.Compile(query, fields, eval.WithParseConfig(o))
 	if err != nil {
 		return compileFailure(err)
 	}

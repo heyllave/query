@@ -84,3 +84,31 @@ func FuzzParseValue(f *testing.F) {
 		}
 	})
 }
+
+// FuzzParseStrict holds the strict options to their one promise: they only
+// refuse. A query accepted under ExplicitAnd and StrictValues must be accepted
+// by the default grammar and read as the same tree, so a host can turn the
+// options on or off without any stored query changing its meaning.
+func FuzzParseStrict(f *testing.F) {
+	for _, seed := range []string{
+		"a=1 b=2", "a=1 AND b=2", "frontend checkout", "labels[team]=x", "a=1+b=2",
+		`url="https://x/?a=b"`, "forks@(name=a kind=b)", "NOT (a=1 OR b=2) c",
+		"state IN (draft, x=1)", "total>10 - 3", "a=b=c", "(a b) OR c",
+	} {
+		f.Add(seed)
+	}
+	strict := Config{ExplicitAnd: true, StrictValues: true}
+	f.Fuzz(func(t *testing.T, input string) {
+		strictExpr, err := ParseWith(input, strict)
+		if err != nil {
+			return
+		}
+		lenient, err := Parse(input, 0)
+		if err != nil {
+			t.Fatalf("strict accepted %q, the default grammar refused it: %v", input, err)
+		}
+		if got, want := ast.String(strictExpr), ast.String(lenient); got != want {
+			t.Fatalf("%q reads %q under strict and %q by default", input, got, want)
+		}
+	})
+}

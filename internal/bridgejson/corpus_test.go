@@ -316,3 +316,44 @@ func TestBridge_NoHintKeyWhenThereIsNothingToSuggest(t *testing.T) {
 		t.Errorf("entry has a hint key with nothing to suggest: %v", list[0])
 	}
 }
+
+// TestParseWith_StrictOptions pins the two switches a bridge call may set: off unless
+// asked for, and reported with the same coded envelope as any parse failure.
+func TestParseWith_StrictOptions(t *testing.T) {
+	const fields = `[{"name":"a","type":"integer"},{"name":"b","type":"integer"}]`
+	strict := Options{MaxLength: DefaultMaxLength, ExplicitAnd: true, StrictValues: true}
+
+	code := func(t *testing.T, env Envelope) string {
+		t.Helper()
+		errs, _ := wire(t, env)["errors"].([]any)
+		if len(errs) == 0 {
+			return ""
+		}
+		first, _ := errs[0].(map[string]any)
+		c, _ := first["code"].(string)
+		return c
+	}
+
+	tests := []struct {
+		name string
+		env  Envelope
+		want string
+	}{
+		{"parse, default grammar", Parse("a=1 b=2", DefaultMaxLength), ""},
+		{"parse, explicit AND", ParseWith("a=1 b=2", Options{MaxLength: DefaultMaxLength, ExplicitAnd: true}), "missingAnd"},
+		{"parse, operator in a value by default", Parse("a=1+b=2", DefaultMaxLength), ""},
+		{"parse, strict values", ParseWith("a=1+b=2", Options{MaxLength: DefaultMaxLength, StrictValues: true}), "unexpectedChar"},
+		{"parse, strict accepts a plain query", ParseWith("a=1 AND b=2", strict), ""},
+		{"parseAndValidate", ParseAndValidateWith("a=1 b=2", fields, strict), "missingAnd"},
+		{"match", MatchWith("a=1 b=2", fields, `{"a":1,"b":2}`, strict), "missingAnd"},
+		{"match accepts a plain query", MatchWith("a=1 AND b=2", fields, `{"a":1,"b":2}`, strict), ""},
+		{"length limit still applies", ParseWith("a=1 AND b=2", Options{MaxLength: 3, ExplicitAnd: true}), "queryTooLong"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := code(t, tc.env); got != tc.want {
+				t.Errorf("first code = %q, want %q (envelope %v)", got, tc.want, tc.env)
+			}
+		})
+	}
+}

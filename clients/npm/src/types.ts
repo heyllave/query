@@ -199,7 +199,8 @@ export type ParseErrorCode =
   | "invalidInteger"
   | "invalidFloat"
   | "unclosedFuncArgs"
-  | "nestingTooDeep";
+  | "nestingTooDeep"
+  | "missingAnd";
 
 /**
  * One parse failure, with the span that caused it.
@@ -385,4 +386,21 @@ export function fields(expr: Expression): string[][] {
     return true;
   });
   return result;
+}
+
+/**
+ * How a query is parsed. The two switches turn off lenient forms of the
+ * default grammar; they only refuse queries, so one accepted with them on
+ * means the same with them off.
+ */
+export interface ParseOptions {
+  /** Query length limit in characters. Default 256; 0 disables it. */
+  maxLength?: number;
+  /**
+   * Require AND or OR between conditions. `a=1 b=2` fails with the code
+   * `missingAnd`.
+   */
+  explicitAnd?: boolean;
+  /** Refuse `=`, `<` and `>` inside an unquoted value, so `a=1+b=2` fails. */
+  strictValues?: boolean;
 }

@@ -83,3 +83,96 @@ func TestDefaultMaxLength(t *testing.T) {
 		t.Errorf("DefaultMaxLength = %d, want 256", query.DefaultMaxLength)
 	}
 }
+
+func TestParse_StrictOptions(t *testing.T) {
+	tests := []struct {
+		name    string
+		input   string
+		opts    []query.Option
+		wantErr bool
+	}{
+		{"implicit AND by default", "a=1 b=2", nil, false},
+		{"explicit AND required", "a=1 b=2", []query.Option{query.WithExplicitAnd()}, true},
+		{"explicit AND written", "a=1 AND b=2", []query.Option{query.WithExplicitAnd()}, false},
+		{"operator in a value by default", "a=1+b=2", nil, false},
+		{"strict values", "a=1+b=2", []query.Option{query.WithStrictValues()}, true},
+		{"strict refuses both", "a=1 b=2", []query.Option{query.WithStrict()}, true},
+		{"strict refuses both, values", "a=1+b=2", []query.Option{query.WithStrict()}, true},
+		{"strict accepts a plain query", `a=1 AND name="x=y"`, []query.Option{query.WithStrict()}, false},
+		{"strict keeps the length limit", "a=1", []query.Option{query.WithStrict(), query.WithMaxLength(2)}, true},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Act
+			_, err := query.Parse(tc.input, tc.opts...)
+
+			// Assert
+			if (err != nil) != tc.wantErr {
+				t.Errorf("Parse(%q) error = %v, wantErr %v", tc.input, err, tc.wantErr)
+			}
+		})
+	}
+}
+
+func TestMatch_StrictOptions(t *testing.T) {
+	fields := []validate.FieldConfig{
+		{Name: "a", Type: validate.TypeInteger, AllowedOps: validate.NumericOps},
+		{Name: "b", Type: validate.TypeInteger, AllowedOps: validate.NumericOps},
+	}
+	record := map[string]any{"a": 1, "b": 2}
+
+	t.Run("lenient by default", func(t *testing.T) {
+		ok, err := query.Match("a=1 b=2", fields, record)
+		if err != nil || !ok {
+			t.Errorf("Match = %v, %v; want true", ok, err)
+		}
+	})
+
+	t.Run("refuses what Parse refuses under the same option", func(t *testing.T) {
+		_, parseErr := query.Parse("a=1 b=2", query.WithStrict())
+		_, matchErr := query.MatchWith("a=1 b=2", fields, record, query.WithStrict())
+		if parseErr == nil || matchErr == nil {
+			t.Errorf("Parse error = %v, Match error = %v; want both refused", parseErr, matchErr)
+		}
+	})
+
+	t.Run("accepts a plain query under strict", func(t *testing.T) {
+		ok, err := query.MatchWith("a=1 AND b=2", fields, record, query.WithStrict())
+		if err != nil || !ok {
+			t.Errorf("Match = %v, %v; want true", ok, err)
+		}
+	})
+
+	t.Run("honours the length limit", func(t *testing.T) {
+		if _, err := query.MatchWith("a=1 AND b=2", fields, record, query.WithMaxLength(3)); err == nil {
+			t.Error("expected a length error")
+		}
+	})
+}
+
+// Callers can store the original convenience functions without adapting their
+// function types when opting in to the newer parsing API elsewhere.
+func TestLegacyMatchAndEvalFunctionTypes(t *testing.T) {
+	var match func(string, []validate.FieldConfig, map[string]any) (bool, error) = query.Match
+	var value func(string, []validate.FieldConfig, map[string]any) (any, error) = query.Eval
+	record := map[string]any{"state": "draft", "total": 5.0}
+	got, err := match("state=draft", testFields, record)
+	if err != nil || !got {
+		t.Fatalf("legacy Match = %v, %v; want true", got, err)
+	}
+	gotValue, err := value("[total]+2", testFields, record)
+	if err != nil || gotValue != float64(7) {
+		t.Fatalf("legacy Eval = %v, %v; want 7", gotValue, err)
+	}
+}
+
+func TestEvalWith_PreservesExplicitLengthLimit(t *testing.T) {
+	record := map[string]any{"total": 5.0}
+	if _, err := query.EvalWith("[total]+2", testFields, record, query.WithMaxLength(3)); err == nil {
+		t.Fatal("EvalWith ignored the explicit length limit")
+	}
+	got, err := query.EvalWith("[total]+2", testFields, record, query.WithMaxLength(0))
+	if err != nil || got != float64(7) {
+		t.Fatalf("EvalWith = %v, %v; want 7", got, err)
+	}
+}

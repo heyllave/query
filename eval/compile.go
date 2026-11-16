@@ -22,7 +22,7 @@ func Compile(q string, fields []validate.FieldConfig, opts ...Option) (*Program,
 	funcs := o.registry()
 
 	// Parse
-	expr, err := parser.Parse(q, o.maxLength)
+	expr, err := parser.ParseWith(q, o.parse)
 	if err != nil {
 		return nil, fmt.Errorf("parse: %w", err)
 	}

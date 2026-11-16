@@ -66,6 +66,7 @@ func TestCodes_EveryCodeIsProducible(t *testing.T) {
 	byCode := map[parser.Code]struct {
 		input    string
 		duration bool
+		strict   bool
 	}{
 		parser.CodeQueryTooLong:     {input: strings.Repeat("a", 300) + "=1"},
 		parser.CodeUnexpectedChar:   {input: "state=draft #"},
@@ -88,6 +89,7 @@ func TestCodes_EveryCodeIsProducible(t *testing.T) {
 		parser.CodeUnclosedFuncArgs: {input: "upper("},
 		parser.CodeInvalidDuration:  {input: "5zz", duration: true},
 		parser.CodeNestingTooDeep:   {input: strings.Repeat("(", parser.MaxNesting+1) + "a"},
+		parser.CodeMissingAnd:       {input: "a=1 b=2", strict: true},
 	}
 
 	for _, code := range parser.Codes() {
@@ -100,9 +102,12 @@ func TestCodes_EveryCodeIsProducible(t *testing.T) {
 
 			// Act
 			var err error
-			if tc.duration {
+			switch {
+			case tc.duration:
 				_, err = parser.ParseDuration(tc.input)
-			} else {
+			case tc.strict:
+				_, err = parser.ParseWith(tc.input, parser.Config{MaxLength: 256, ExplicitAnd: true})
+			default:
 				_, err = parser.Parse(tc.input, 256)
 			}
 

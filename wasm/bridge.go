@@ -39,9 +39,49 @@ func maxLengthArg(args []js.Value, i int) int {
 	return bridgejson.DefaultMaxLength
 }
 
-// jsParse is queryParse(query, maxLength?).
+// optionsArg reads the optional last argument of a call that parses a query.
+// It is either the maxLength number, as before, or an object
+// {maxLength?, explicitAnd?, strictValues?}; a member that is absent keeps
+// its default. A member of the wrong type is an error and not a default: a
+// host that passes explicitAnd: 1 believes strict parsing is on, and must
+// not be answered as if it were.
+func optionsArg(args []js.Value, i int) (bridgejson.Options, bridgejson.Envelope) {
+	o := bridgejson.Options{MaxLength: maxLengthArg(args, i)}
+	if len(args) <= i || args[i].Type() != js.TypeObject {
+		return o, nil
+	}
+	obj := args[i]
+	if v := obj.Get("maxLength"); !absent(v) {
+		if v.Type() != js.TypeNumber {
+			return o, bridgejson.Fail("maxLength must be a number")
+		}
+		o.MaxLength = v.Int()
+	}
+	for _, sw := range []struct {
+		key string
+		dst *bool
+	}{{"explicitAnd", &o.ExplicitAnd}, {"strictValues", &o.StrictValues}} {
+		v := obj.Get(sw.key)
+		if absent(v) {
+			continue
+		}
+		if v.Type() != js.TypeBoolean {
+			return o, bridgejson.Fail(sw.key + " must be a boolean")
+		}
+		*sw.dst = v.Bool()
+	}
+	return o, nil
+}
+
+func absent(v js.Value) bool { return v.Type() == js.TypeUndefined }
+
+// jsParse is queryParse(query, maxLength? | options?).
 func jsParse(args []js.Value) bridgejson.Envelope {
-	return bridgejson.Parse(args[0].String(), maxLengthArg(args, 1))
+	o, fail := optionsArg(args, 1)
+	if fail != nil {
+		return fail
+	}
+	return bridgejson.ParseWith(args[0].String(), o)
 }
 
 // jsValidate is queryValidate(astJSON, fieldsJSON, maxLength?).
@@ -54,14 +94,22 @@ func jsStringify(args []js.Value) bridgejson.Envelope {
 	return bridgejson.Stringify(args[0].String(), maxLengthArg(args, 1))
 }
 
-// jsParseAndValidate is queryParseAndValidate(query, fieldsJSON, maxLength?).
+// jsParseAndValidate is queryParseAndValidate(query, fieldsJSON, maxLength? | options?).
 func jsParseAndValidate(args []js.Value) bridgejson.Envelope {
-	return bridgejson.ParseAndValidate(args[0].String(), args[1].String(), maxLengthArg(args, 2))
+	o, fail := optionsArg(args, 2)
+	if fail != nil {
+		return fail
+	}
+	return bridgejson.ParseAndValidateWith(args[0].String(), args[1].String(), o)
 }
 
-// jsMatch is queryMatch(query, fieldsJSON, recordJSON, maxLength?).
+// jsMatch is queryMatch(query, fieldsJSON, recordJSON, maxLength? | options?).
 func jsMatch(args []js.Value) bridgejson.Envelope {
-	return bridgejson.Match(args[0].String(), args[1].String(), args[2].String(), maxLengthArg(args, 3))
+	o, fail := optionsArg(args, 3)
+	if fail != nil {
+		return fail
+	}
+	return bridgejson.MatchWith(args[0].String(), args[1].String(), args[2].String(), o)
 }
 
 // jsEval is queryEval(query, fieldsJSON, recordJSON, maxLength?).
