@@ -6,6 +6,27 @@ semantic versioning.
 
 ## Unreleased
 
+### Security
+
+- A tree sent to `validate` or `stringify` through the WASM and C bridges is
+  held to what the parser could have built. A selector name outside `first`,
+  `last`, `any`, `all`, `none` and the anonymous form, an unknown operator and
+  a `list` value are errors; before, such text was printed as written, so a
+  tree could validate and then print as a wider query naming fields it was
+  never checked against (`"selector": "first OR secret=a*"`).
+- The same trees are bound in size. A string value or field name longer
+  than the query length limit, or a tree whose JSON is over 1 MiB, fails with
+  the `queryTooLong` code. These used to be parsed with no limit. `validate`
+  and `stringify` take the optional `maxLength` the other calls take (WASM:
+  a trailing number; C: the `"maxLength"` key), so a tree parsed under a
+  larger limit is checked under the same one; 256 is the default and 0
+  disables it.
+- `ast.WildcardToLike` documents that its result needs `ESCAPE '\'` in the
+  `LIKE` clause, and `docs/sql.md`, `examples/sql` and the npm example now
+  write it. Without the clause, SQLite, Oracle and SQL Server read an escaped
+  `%` or `_` in the pattern as a wildcard again. If you copied the earlier
+  example, add the clause.
+
 ### Changed
 
 - A `"` inside an unquoted value (`A=x"y`, `A=*0%"`) is a parse error with
@@ -36,27 +57,6 @@ commits consumers pinned before it.
 - The Dart and Flutter clients (`clients/flutter`, `clients/flutter_plugin`)
   and their Android and iOS builds. `clients/ffi` stays, as a plain C shared
   library for any language; it is built and tested on its own.
-
-### Security
-
-- A tree sent to `validate` or `stringify` through the WASM and C bridges is
-  held to what the parser could have built. A selector name outside `first`,
-  `last`, `any`, `all`, `none` and the anonymous form, an unknown operator and
-  a `list` value are errors; before, such text was printed as written, so a
-  tree could validate and then print as a wider query naming fields it was
-  never checked against (`"selector": "first OR secret=a*"`).
-- The same trees are bound in size. A string value or field name longer
-  than the query length limit, or a tree whose JSON is over 1 MiB, fails with
-  the `queryTooLong` code. These used to be parsed with no limit. `validate`
-  and `stringify` take the optional `maxLength` the other calls take (WASM:
-  a trailing number; C: the `"maxLength"` key), so a tree parsed under a
-  larger limit is checked under the same one; 256 is the default and 0
-  disables it.
-- `ast.WildcardToLike` documents that its result needs `ESCAPE '\'` in the
-  `LIKE` clause, and `docs/sql.md`, `examples/sql` and the npm example now
-  write it. Without the clause, SQLite, Oracle and SQL Server read an escaped
-  `%` or `_` in the pattern as a wildcard again. If you copied the earlier
-  example, add the clause.
 
 ### Fixed
 
