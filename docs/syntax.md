@@ -50,6 +50,9 @@ NOT state=cancelled
 | Duration | `30m`, `4h`, `1d` | One unit per literal. |
 | Wildcard | `Jo*`, `*son`, `*oh*` | `\*` is a literal star. |
 
+A `"` inside an unquoted value is an error. Quote the whole value and write
+the quote as `\"`: `note="say \"hi\""`.
+
 An unquoted value that contains letters is always text, so UUIDs, versions, commit hashes and e-mail addresses are one value:
 
 ```
