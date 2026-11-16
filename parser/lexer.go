@@ -27,19 +27,26 @@ type lexer struct {
 	// one, where a ',' ends the value as it does in an IN list.
 	parens   []bool
 	argValue bool
+	// strictValues refuses a comparison character inside an unquoted value;
+	// see Config.
+	strictValues bool
 }
 
 // Lex tokenizes the input query string and returns the token stream.
 func Lex(input string, maxLength int) ([]token.Token, error) {
-	if err := checkInput(input, maxLength); err != nil {
+	return lexWith(input, Config{MaxLength: maxLength})
+}
+
+func lexWith(input string, cfg Config) ([]token.Token, error) {
+	if err := checkInput(input, cfg.MaxLength); err != nil {
 		return nil, err
 	}
 
-	l := &lexer{input: input}
+	l := &lexer{input: input, strictValues: cfg.StrictValues}
 	l.run()
 
 	if err := l.errors.errOrNil(); err != nil {
-		return nil, annotate(input, err, false, maxLength)
+		return nil, annotate(input, err, false, cfg.MaxLength)
 	}
 	return l.tokens, nil
 }
@@ -807,6 +814,7 @@ func (l *lexer) lexUnquotedStringValue() {
 	var buf strings.Builder
 	hasWildcard := false
 	quoteSeen := false
+	operatorSeen := false
 	var literalStars []int // byte offsets in buf of escaped stars
 
 	for l.pos < len(l.input) {
@@ -843,6 +851,13 @@ func (l *lexer) lexUnquotedStringValue() {
 			quoteSeen = true
 			l.errors.add(newError(CodeUnexpectedChar, ErrSyntax, token.Position{Offset: l.pos, Length: 1},
 				`unexpected '"' inside an unquoted value; quote the whole value and write the quote as \"`))
+		}
+		if l.strictValues && !operatorSeen && (ch == '=' || ch == '<' || ch == '>') {
+			// a=1+b=2 would otherwise compare a with the text "1+b=2": a
+			// second condition swallowed by the first, with no complaint.
+			operatorSeen = true
+			l.errors.add(newError(CodeUnexpectedChar, ErrSyntax, token.Position{Offset: l.pos, Length: 1},
+				"unexpected %q inside an unquoted value; quote the value, or separate two conditions with AND", string(ch)))
 		}
 		buf.WriteByte(ch)
 		l.pos++

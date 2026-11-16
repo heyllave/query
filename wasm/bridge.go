@@ -39,9 +39,27 @@ func maxLengthArg(args []js.Value, i int) int {
 	return bridgejson.DefaultMaxLength
 }
 
-// jsParse is queryParse(query, maxLength?).
+// optionsArg reads the optional last argument of a call that parses a query.
+// It is either the maxLength number, as before, or an object
+// {maxLength?, explicitAnd?, strictValues?}; anything absent keeps its
+// default.
+func optionsArg(args []js.Value, i int) bridgejson.Options {
+	o := bridgejson.Options{MaxLength: maxLengthArg(args, i)}
+	if len(args) <= i || args[i].Type() != js.TypeObject {
+		return o
+	}
+	obj := args[i]
+	if v := obj.Get("maxLength"); v.Type() == js.TypeNumber {
+		o.MaxLength = v.Int()
+	}
+	o.ExplicitAnd = obj.Get("explicitAnd").Type() == js.TypeBoolean && obj.Get("explicitAnd").Bool()
+	o.StrictValues = obj.Get("strictValues").Type() == js.TypeBoolean && obj.Get("strictValues").Bool()
+	return o
+}
+
+// jsParse is queryParse(query, maxLength? | options?).
 func jsParse(args []js.Value) bridgejson.Envelope {
-	return bridgejson.Parse(args[0].String(), maxLengthArg(args, 1))
+	return bridgejson.ParseWith(args[0].String(), optionsArg(args, 1))
 }
 
 // jsValidate is queryValidate(astJSON, fieldsJSON, maxLength?).
@@ -54,14 +72,14 @@ func jsStringify(args []js.Value) bridgejson.Envelope {
 	return bridgejson.Stringify(args[0].String(), maxLengthArg(args, 1))
 }
 
-// jsParseAndValidate is queryParseAndValidate(query, fieldsJSON, maxLength?).
+// jsParseAndValidate is queryParseAndValidate(query, fieldsJSON, maxLength? | options?).
 func jsParseAndValidate(args []js.Value) bridgejson.Envelope {
-	return bridgejson.ParseAndValidate(args[0].String(), args[1].String(), maxLengthArg(args, 2))
+	return bridgejson.ParseAndValidateWith(args[0].String(), args[1].String(), optionsArg(args, 2))
 }
 
-// jsMatch is queryMatch(query, fieldsJSON, recordJSON, maxLength?).
+// jsMatch is queryMatch(query, fieldsJSON, recordJSON, maxLength? | options?).
 func jsMatch(args []js.Value) bridgejson.Envelope {
-	return bridgejson.Match(args[0].String(), args[1].String(), args[2].String(), maxLengthArg(args, 3))
+	return bridgejson.MatchWith(args[0].String(), args[1].String(), args[2].String(), optionsArg(args, 3))
 }
 
 // jsEval is queryEval(query, fieldsJSON, recordJSON, maxLength?).

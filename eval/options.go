@@ -14,6 +14,8 @@ type options struct {
 	funcs         FuncRegistry
 	noBuiltins    bool
 	customVal     validate.AstValidator
+	explicitAnd   bool
+	strictValues  bool
 }
 
 func defaultOpts() options {
@@ -29,6 +31,18 @@ type Option func(*options)
 // nesting stays bounded by [parser.MaxNesting] either way.
 func WithMaxLength(n int) Option {
 	return func(o *options) { o.maxLength = n }
+}
+
+// WithExplicitAnd requires AND or OR between conditions; see
+// [parser.Config].
+func WithExplicitAnd() Option {
+	return func(o *options) { o.explicitAnd = true }
+}
+
+// WithStrictValues refuses `=`, `<` and `>` inside an unquoted value; see
+// [parser.Config].
+func WithStrictValues() Option {
+	return func(o *options) { o.strictValues = true }
 }
 
 // WithMaxDepth limits the nesting depth of the expression tree.

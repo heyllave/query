@@ -74,6 +74,7 @@ const (
 	CodeInvalidFloat     Code = "invalidFloat"     // a malformed float literal
 	CodeUnclosedFuncArgs Code = "unclosedFuncArgs" // a function's argument list never closes
 	CodeNestingTooDeep   Code = "nestingTooDeep"   // groups, negations or calls nest deeper than MaxNesting
+	CodeMissingAnd       Code = "missingAnd"       // two conditions with no connective, under Config.ExplicitAnd
 )
 
 // codes is every failure the parser can report, and the reason a client can
@@ -86,7 +87,7 @@ var codes = [...]Code{
 	CodeExpectedField, CodeExpectedValue, CodeExpectedInList, CodeExpectedSelector,
 	CodeExpectedRange, CodeUnexpected, CodeInvalidWildcard, CodeInvalidDate,
 	CodeInvalidDuration, CodeInvalidInteger, CodeInvalidFloat, CodeUnclosedFuncArgs,
-	CodeNestingTooDeep,
+	CodeNestingTooDeep, CodeMissingAnd,
 }
 
 // Codes returns every failure code the parser can report.

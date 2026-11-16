@@ -38,6 +38,8 @@ NOT state=cancelled
 
 `AND` binds tighter than `OR`. The keywords `AND`, `OR`, `NOT` and `IN` are accepted in any case.
 
+A host can require the connective: with the `ExplicitAnd` option a space is not an `AND`, and `state=draft total>1000` is an error (`missingAnd`). The formal grammar, and the options that turn the lenient forms off, are on the [Grammar](../grammar/) page.
+
 ## Values
 
 | Kind | Examples | Notes |

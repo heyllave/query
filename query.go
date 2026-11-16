@@ -12,7 +12,9 @@ const DefaultMaxLength = 256
 
 // options holds configuration for parsing.
 type options struct {
-	maxLength int
+	maxLength    int
+	explicitAnd  bool
+	strictValues bool
 }
 
 // Option configures parsing behavior.
@@ -27,6 +29,38 @@ func WithMaxLength(n int) Option {
 	}
 }
 
+// WithExplicitAnd requires AND or OR between conditions, refusing the
+// implicit AND a space otherwise stands for. `state=draft total>5` and
+// `labels[team]=x` become errors with the code missingAnd. See
+// [parser.Config].
+func WithExplicitAnd() Option {
+	return func(o *options) {
+		o.explicitAnd = true
+	}
+}
+
+// WithStrictValues refuses `=`, `<` and `>` inside an unquoted value, so
+// `a=1+b=2` is an error instead of a comparison with the text "1+b=2". A
+// value that holds one of those characters is written in quotes. See
+// [parser.Config].
+func WithStrictValues() Option {
+	return func(o *options) {
+		o.strictValues = true
+	}
+}
+
+// WithStrict turns on every strict option: [WithExplicitAnd] and
+// [WithStrictValues]. Strict options only refuse queries, so a query accepted
+// under WithStrict means the same under the default grammar. It suits a host
+// whose queries come from scripts, saved links and other programs, such as
+// an API's filter parameter.
+func WithStrict() Option {
+	return func(o *options) {
+		o.explicitAnd = true
+		o.strictValues = true
+	}
+}
+
 func defaultOptions() options {
 	return options{maxLength: DefaultMaxLength}
 }
@@ -37,7 +71,11 @@ func Parse(q string, opts ...Option) (ast.Expression, error) {
 	for _, opt := range opts {
 		opt(&o)
 	}
-	return parser.Parse(q, o.maxLength)
+	return parser.ParseWith(q, parser.Config{
+		MaxLength:    o.maxLength,
+		ExplicitAnd:  o.explicitAnd,
+		StrictValues: o.strictValues,
+	})
 }
 
 // Validate validates an AST against field configurations.

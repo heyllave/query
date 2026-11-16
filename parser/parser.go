@@ -18,6 +18,8 @@ type parser struct {
 	// and function calls around the current position; see MaxNesting.
 	nesting int
 	tooDeep bool
+	// explicitAnd refuses juxtaposition as a connective; see Config.
+	explicitAnd bool
 }
 
 // MaxNesting is the deepest a query may nest groups, negations, selectors,
@@ -53,16 +55,22 @@ func (p *parser) callFollows() bool {
 	return next.Type == token.LParen && next.Pos.Offset == tok.Pos.Offset+tok.Pos.Length
 }
 
-// Parse lexes and parses a query string into an AST.
+// Parse lexes and parses a query string into an AST with the default grammar.
+// It is [ParseWith] with only MaxLength set.
 func Parse(input string, maxLength int) (ast.Expression, error) {
-	tokens, err := Lex(input, maxLength)
+	return ParseWith(input, Config{MaxLength: maxLength})
+}
+
+// ParseWith lexes and parses a query string into an AST under cfg.
+func ParseWith(input string, cfg Config) (ast.Expression, error) {
+	tokens, err := lexWith(input, cfg)
 	if err != nil {
 		return nil, err
 	}
-	p := &parser{tokens: tokens}
+	p := &parser{tokens: tokens, explicitAnd: cfg.ExplicitAnd}
 	expr := p.parseExpression()
 	if err := p.errors.errOrNil(); err != nil {
-		return nil, annotate(input, err, false, maxLength)
+		return nil, annotate(input, err, false, cfg.MaxLength)
 	}
 	if p.peek().Type != token.EOF {
 		tok := p.peek()
@@ -70,7 +78,7 @@ func Parse(input string, maxLength int) (ast.Expression, error) {
 			"unexpected %s after a complete condition", describe(tok)))
 	}
 	if err := p.errors.errOrNil(); err != nil {
-		return nil, annotate(input, err, false, maxLength)
+		return nil, annotate(input, err, false, cfg.MaxLength)
 	}
 	return expr, nil
 }
@@ -151,6 +159,12 @@ func (p *parser) parseLogicalAnd() ast.Expression {
 			pos = p.advance().Pos
 		} else {
 			pos = p.peek().Pos
+			if p.explicitAnd {
+				// Recorded, then parsed as the AND it would have been, so one
+				// missing connective is one error and not a cascade of them.
+				p.errors.add(newError(CodeMissingAnd, ErrSyntax, pos,
+					"expected AND or OR before %s", describe(p.peek())))
+			}
 		}
 		right := p.parseChainExpr()
 		if right == nil {

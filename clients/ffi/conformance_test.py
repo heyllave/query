@@ -107,6 +107,24 @@ def check_hostile_input(lib):
             assert not error.startswith("internal error"), f"{name}({payload!r}) panicked: {error}"
 
 
+def check_strict_options(lib):
+    """The strict switches refuse the lenient forms, and are off unless asked for."""
+    assert "result" in lib.call("QueryParse", query="a=1 b=2")
+    assert first_code(lib.call("QueryParse", query="a=1 b=2", explicitAnd=True)) == "missingAnd"
+    assert "result" in lib.call("QueryParse", query="a=1 AND b=2", explicitAnd=True, strictValues=True)
+    assert "result" in lib.call("QueryParse", query="a=1+b=2")
+    assert first_code(lib.call("QueryParse", query="a=1+b=2", strictValues=True)) == "unexpectedChar"
+    fields = [{"name": "a", "type": "integer"}, {"name": "b", "type": "integer"}]
+    env = lib.call("QueryParseAndValidate", query="a=1 b=2", fields=fields, explicitAnd=True)
+    assert first_code(env) == "missingAnd", env
+    env = lib.call("QueryMatch", query="a=1 b=2", fields=fields, record={"a": 1, "b": 2}, explicitAnd=True)
+    assert first_code(env) == "missingAnd", env
+    env = lib.call("QueryMatch", query="a=1 AND b=2", fields=fields, record={"a": 1, "b": 2}, explicitAnd=True)
+    assert env.get("result") is True, env
+    env = lib.call("QueryParse", query="a=1", explicitAnd="yes")
+    assert "must be a boolean" in env.get("error", ""), env
+
+
 def check_threads(lib):
     """Calls from many threads at once agree with a single-threaded call."""
     fields = [{"name": "total", "type": "decimal"}]
@@ -142,7 +160,8 @@ def main():
         except AssertionError as err:
             failed += 1
             print(f"FAIL {tc['op']}: {tc['id']}: {err}")
-    for name, check in (("hostile input", check_hostile_input), ("threads", check_threads)):
+    for name, check in (("hostile input", check_hostile_input), ("strict options", check_strict_options),
+                        ("threads", check_threads)):
         try:
             check(lib)
         except AssertionError as err:

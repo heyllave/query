@@ -83,3 +83,33 @@ func TestDefaultMaxLength(t *testing.T) {
 		t.Errorf("DefaultMaxLength = %d, want 256", query.DefaultMaxLength)
 	}
 }
+
+func TestParse_StrictOptions(t *testing.T) {
+	tests := []struct {
+		name    string
+		input   string
+		opts    []query.Option
+		wantErr bool
+	}{
+		{"implicit AND by default", "a=1 b=2", nil, false},
+		{"explicit AND required", "a=1 b=2", []query.Option{query.WithExplicitAnd()}, true},
+		{"explicit AND written", "a=1 AND b=2", []query.Option{query.WithExplicitAnd()}, false},
+		{"operator in a value by default", "a=1+b=2", nil, false},
+		{"strict values", "a=1+b=2", []query.Option{query.WithStrictValues()}, true},
+		{"strict refuses both", "a=1 b=2", []query.Option{query.WithStrict()}, true},
+		{"strict refuses both, values", "a=1+b=2", []query.Option{query.WithStrict()}, true},
+		{"strict accepts a plain query", `a=1 AND name="x=y"`, []query.Option{query.WithStrict()}, false},
+		{"strict keeps the length limit", "a=1", []query.Option{query.WithStrict(), query.WithMaxLength(2)}, true},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Act
+			_, err := query.Parse(tc.input, tc.opts...)
+
+			// Assert
+			if (err != nil) != tc.wantErr {
+				t.Errorf("Parse(%q) error = %v, wantErr %v", tc.input, err, tc.wantErr)
+			}
+		})
+	}
+}

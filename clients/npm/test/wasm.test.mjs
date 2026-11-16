@@ -63,6 +63,33 @@ test("queryParse reports each failure with a code and a span", () => {
   assert.ok(first.message.length > 0);
 });
 
+test("the strict options refuse the lenient forms and are off by default", () => {
+  assert.equal(w.queryParse("a=1 b=2").error, undefined);
+  assert.equal(w.queryParse("a=1 b=2", 256).error, undefined);
+
+  const missing = w.queryParse("a=1 b=2", { explicitAnd: true });
+  assert.equal(missing.errors[0].code, "missingAnd");
+  assert.equal(missing.errors[0].offset, 4);
+  assert.ok(missing.errors[0].hint.length > 0);
+
+  assert.equal(w.queryParse("a=1+b=2").error, undefined);
+  assert.equal(w.queryParse("a=1+b=2", { strictValues: true }).errors[0].code, "unexpectedChar");
+
+  const strict = { explicitAnd: true, strictValues: true };
+  assert.equal(w.queryParse("a=1 AND b=2", strict).error, undefined);
+
+  const fields = JSON.stringify([
+    { name: "a", type: "integer" },
+    { name: "b", type: "integer" },
+  ]);
+  assert.equal(w.queryParseAndValidate("a=1 b=2", fields, strict).errors[0].code, "missingAnd");
+  assert.equal(w.queryMatch("a=1 b=2", fields, '{"a":1,"b":2}', strict).errors[0].code, "missingAnd");
+  assert.equal(w.queryMatch("a=1 AND b=2", fields, '{"a":1,"b":2}', strict).result, true);
+
+  // The object form still carries the length limit.
+  assert.equal(w.queryParse("a=1 AND b=2", { maxLength: 3 }).errors[0].code, "queryTooLong");
+});
+
 test("queryParse codes the common failures a person types", () => {
   const cases = [
     ["(state=draft", "unclosedParen"],

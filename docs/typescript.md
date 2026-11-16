@@ -70,6 +70,8 @@ No call throws on a bad query. Every result is an object with either `result` or
 
 Every call takes an optional last argument, `maxLength`: the query length limit in characters. It defaults to 256 and `0` disables it. `validate` and `stringify` take it too, because a tree is held to the same limit as the query it came from: pass the limit the tree was parsed under.
 
+`parse`, `parseAndValidate` and `match` accept an object in its place, which also carries the strict switches: `q.parse(text, { maxLength: 512, explicitAnd: true, strictValues: true })`. With `explicitAnd`, `a=1 b=2` fails with the code `missingAnd`. See [Grammar](../grammar/#strict-options).
+
 ```ts
 const long = q.parse(text, 1000);
 q.validate(long.result!, fields, 1000);

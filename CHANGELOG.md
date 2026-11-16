@@ -8,6 +8,23 @@ semantic versioning.
 
 ### Added
 
+- Strict parsing options, for a host whose queries come from scripts and
+  saved links rather than a search box. `query.WithExplicitAnd()` requires
+  `AND` or `OR` between conditions, so `a=1 b=2`, `frontend checkout` and
+  `labels[team]=x` are errors with the new code `missingAnd`.
+  `query.WithStrictValues()` refuses `=`, `<` and `>` inside an unquoted
+  value, so `a=1+b=2` is an error instead of a comparison with the text
+  `1+b=2`. `query.WithStrict()` turns both on. The same switches are
+  `parser.ParseWith` with a `parser.Config`, and `eval.WithExplicitAnd()` and
+  `eval.WithStrictValues()`. Both are off by default and only refuse
+  queries: one accepted under the strict options parses to the same tree
+  under the default grammar. The TypeScript client takes them as an object
+  in place of the `maxLength` number (`parse(q, { explicitAnd: true })`), and
+  the C library as the `"explicitAnd"` and `"strictValues"` keys of a
+  request.
+- A Grammar page in the documentation: the EBNF the parser implements, how
+  each ambiguous form is read, and what the language leaves out on purpose.
+
 - `query filter`, `query eval` and `query map` run a query over JSON records
   from stdin, one object per line or one array, and write the matching
   records, a value per record, or a reshaped object per record, the way `jq`

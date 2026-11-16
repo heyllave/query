@@ -25,6 +25,7 @@ import type {
   MatchResult,
   EvalResult,
   QueryRecord,
+  ParseOptions,
 } from "./types.js";
 
 export type {
@@ -51,25 +52,26 @@ export type {
   EvalResult,
   QueryRecord,
   Visitor,
+  ParseOptions,
 } from "./types.js";
 
 export { visit, walk, fields, fieldToString } from "./types.js";
 
 // Extend the global scope for Go WASM functions.
 declare global {
-  function queryParse(q: string, maxLength?: number): ParseResult;
+  function queryParse(q: string, options?: number | ParseOptions): ParseResult;
   function queryValidate(astJSON: string, fieldsJSON: string, maxLength?: number): ValidateResult;
   function queryStringify(astJSON: string, maxLength?: number): StringifyResult;
   function queryParseAndValidate(
     q: string,
     fieldsJSON: string,
-    maxLength?: number
+    options?: number | ParseOptions
   ): ParseResult;
   function queryMatch(
     q: string,
     fieldsJSON: string,
     recordJSON: string,
-    maxLength?: number
+    options?: number | ParseOptions
   ): MatchResult;
   function queryEval(
     q: string,
@@ -88,10 +90,11 @@ declare global {
 /** Query API returned by loadQuery(). */
 export interface QueryAPI {
   /**
-   * Parse a query string into an AST. `maxLength` is the query length limit
-   * in characters (default 256); 0 disables it.
+   * Parse a query string into an AST. The last argument is the query length
+   * limit in characters (default 256; 0 disables it), or a
+   * {@link ParseOptions} object that also carries the strict switches.
    */
-  parse(q: string, maxLength?: number): ParseResult;
+  parse(q: string, options?: number | ParseOptions): ParseResult;
 
   /**
    * Validate an AST against field configurations. `maxLength` bounds the
@@ -103,14 +106,19 @@ export interface QueryAPI {
   /** Convert an AST back to a query string; `maxLength` as in {@link validate}. */
   stringify(ast: Expression, maxLength?: number): StringifyResult;
 
-  /** Parse and validate in one call; `maxLength` as in {@link parse}. */
-  parseAndValidate(q: string, fields: FieldConfig[], maxLength?: number): ParseResult;
+  /** Parse and validate in one call; `options` as in {@link parse}. */
+  parseAndValidate(q: string, fields: FieldConfig[], options?: number | ParseOptions): ParseResult;
 
   /**
    * Compile a boolean predicate and evaluate it against a record in one call.
    * For repeated evaluation, prefer compiling once on the Go side.
    */
-  match(q: string, fields: FieldConfig[], record: QueryRecord, maxLength?: number): MatchResult;
+  match(
+    q: string,
+    fields: FieldConfig[],
+    record: QueryRecord,
+    options?: number | ParseOptions
+  ): MatchResult;
 
   /**
    * Compile a value expression and evaluate it against a record, returning the
@@ -190,8 +198,8 @@ export async function loadQuery(source: WasmSource = "./query.wasm"): Promise<Qu
   void go.run(instance);
 
   return {
-    parse(q: string, maxLength?: number): ParseResult {
-      return queryParse(q, maxLength);
+    parse(q: string, options?: number | ParseOptions): ParseResult {
+      return queryParse(q, options);
     },
 
     validate(ast: Expression, fields: FieldConfig[], maxLength?: number): ValidateResult {
@@ -202,12 +210,21 @@ export async function loadQuery(source: WasmSource = "./query.wasm"): Promise<Qu
       return queryStringify(JSON.stringify(ast), maxLength);
     },
 
-    parseAndValidate(q: string, fields: FieldConfig[], maxLength?: number): ParseResult {
-      return queryParseAndValidate(q, JSON.stringify(fields), maxLength);
+    parseAndValidate(
+      q: string,
+      fields: FieldConfig[],
+      options?: number | ParseOptions
+    ): ParseResult {
+      return queryParseAndValidate(q, JSON.stringify(fields), options);
     },
 
-    match(q: string, fields: FieldConfig[], record: QueryRecord, maxLength?: number): MatchResult {
-      return queryMatch(q, JSON.stringify(fields), JSON.stringify(record), maxLength);
+    match(
+      q: string,
+      fields: FieldConfig[],
+      record: QueryRecord,
+      options?: number | ParseOptions
+    ): MatchResult {
+      return queryMatch(q, JSON.stringify(fields), JSON.stringify(record), options);
     },
 
     eval(q: string, fields: FieldConfig[], record: QueryRecord, maxLength?: number): EvalResult {

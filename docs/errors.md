@@ -38,6 +38,7 @@ When the fix is mechanical, the hint shows your own query corrected. A rewrite i
 | `total=>5` | "greater than or equal" is written >=: `total>=5` |
 | `a<>b` | "not equal" is written !=: `a!=b` |
 | `status=active && priority>3` | join conditions with AND: `status=active AND priority>3` |
+| `a=1 b=2` (with `ExplicitAnd`) | join two conditions with AND or OR: `a=1 AND b=2`; quote text that has a space: `name="John Doe"` |
 | `!state=draft` | negate a condition with NOT: `NOT state=draft` |
 | `priority BETWEEN 1 AND 5` | a range is written with a colon and two dots: `priority:1..5` |
 | `3<priority` | the field goes on the left: `priority>3` |

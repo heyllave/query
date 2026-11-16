@@ -263,6 +263,8 @@ func hintFor(q *query, e *Error) string {
 			return "close the call before comparing: lower(name)=john"
 		}
 		return `separate arguments with commas; an argument is a field, a number or quoted text`
+	case CodeMissingAnd:
+		return `join two conditions with AND or OR: a=1 AND b=2; quote text that has a space: name="John Doe"`
 	case CodeQueryTooLong, CodeInvalidInteger, CodeInvalidFloat, CodeNestingTooDeep:
 		return ""
 	}

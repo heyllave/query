@@ -17,11 +17,11 @@
 //
 // Every function takes one NUL-terminated UTF-8 JSON object and returns one:
 //
-//	QueryParse            {"query", "maxLength"?}       -> {"result": ast}
+//	QueryParse            {"query", "maxLength"?, strict?}  -> {"result": ast}
 //	QueryValidate         {"ast", "fields", "maxLength"?} -> {"valid": bool, ...}
 //	QueryStringify        {"ast", "maxLength"?}           -> {"result": string}
-//	QueryParseAndValidate {"query", "fields", "maxLength"?}           -> {"result": ast}
-//	QueryMatch            {"query", "fields", "record", "maxLength"?} -> {"result": bool}
+//	QueryParseAndValidate {"query", "fields", "maxLength"?, strict?}           -> {"result": ast}
+//	QueryMatch            {"query", "fields", "record", "maxLength"?, strict?} -> {"result": bool}
 //	QueryEval             {"query", "fields", "record", "maxLength"?} -> {"result": value}
 //
 // "maxLength" is the query length limit in characters (default 256); 0
@@ -80,6 +80,24 @@ func (r request) maxLength() (int, bridgejson.Envelope) {
 	return maxLen, nil
 }
 
+// options reads the parse options of a call that takes a query: "maxLength"
+// and the optional booleans "explicitAnd" and "strictValues".
+func (r request) options() (bridgejson.Options, bridgejson.Envelope) {
+	maxLen, fail := r.maxLength()
+	if fail != nil {
+		return bridgejson.Options{}, fail
+	}
+	o := bridgejson.Options{MaxLength: maxLen}
+	for key, dst := range map[string]*bool{"explicitAnd": &o.ExplicitAnd, "strictValues": &o.StrictValues} {
+		if v, ok := r[key]; ok {
+			if err := json.Unmarshal(v, dst); err != nil {
+				return bridgejson.Options{}, bridgejson.Fail(key + " must be a boolean")
+			}
+		}
+	}
+	return o, nil
+}
+
 func (r request) raw(key, fallback string) string {
 	if v, ok := r[key]; ok {
 		return string(v)
@@ -110,11 +128,11 @@ func call(req *C.char, fn func(request) bridgejson.Envelope) *C.char {
 //export QueryParse
 func QueryParse(req *C.char) *C.char {
 	return call(req, func(r request) bridgejson.Envelope {
-		maxLen, fail := r.maxLength()
+		opts, fail := r.options()
 		if fail != nil {
 			return fail
 		}
-		return bridgejson.Parse(r.str("query"), maxLen)
+		return bridgejson.ParseWith(r.str("query"), opts)
 	})
 }
 
@@ -143,22 +161,22 @@ func QueryStringify(req *C.char) *C.char {
 //export QueryParseAndValidate
 func QueryParseAndValidate(req *C.char) *C.char {
 	return call(req, func(r request) bridgejson.Envelope {
-		maxLen, fail := r.maxLength()
+		opts, fail := r.options()
 		if fail != nil {
 			return fail
 		}
-		return bridgejson.ParseAndValidate(r.str("query"), r.raw("fields", "[]"), maxLen)
+		return bridgejson.ParseAndValidateWith(r.str("query"), r.raw("fields", "[]"), opts)
 	})
 }
 
 //export QueryMatch
 func QueryMatch(req *C.char) *C.char {
 	return call(req, func(r request) bridgejson.Envelope {
-		maxLen, fail := r.maxLength()
+		opts, fail := r.options()
 		if fail != nil {
 			return fail
 		}
-		return bridgejson.Match(r.str("query"), r.raw("fields", "[]"), r.raw("record", "{}"), maxLen)
+		return bridgejson.MatchWith(r.str("query"), r.raw("fields", "[]"), r.raw("record", "{}"), opts)
 	})
 }
 
