@@ -200,9 +200,13 @@ const (
 )
 
 // sqlCodes are the failures a word borrowed from SQL produces: something
-// unexpected, or a field or value missing where the SQL keyword stood.
+// unexpected, or a field or value missing where the SQL keyword stood. Under
+// ExplicitAnd the keyword is a word with no AND before it (x BETWEEN 1 AND 5,
+// name IS NULL), so a missing AND is one of them: joining those words with
+// AND, as the general advice says, would only make the query wrong.
 var sqlCodes = map[Code]bool{
 	CodeUnexpected: true, CodeUnexpectedChar: true, CodeExpectedField: true, CodeExpectedValue: true,
+	CodeMissingAnd: true,
 }
 
 func hintFor(q *query, e *Error) string {

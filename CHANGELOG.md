@@ -58,6 +58,11 @@ semantic versioning.
   (`unknown function "uper" (did you mean "upper"?)`).
 - `query explain --schema` prints validation errors like syntax errors: one
   per failure, with its code, a marker under the text and its hint.
+- Under `ExplicitAnd`, a query that fails for want of an `AND` because of a
+  word borrowed from SQL gets that word's hint: `x BETWEEN 1 AND 5` is told
+  `x:1..5`, and `name LIKE john`, `name IS NULL` and `SELECT a FROM t` get
+  the same advice as under the default grammar, where the general advice to
+  add the `AND` would only make the query wrong.
 
 ### Security
 

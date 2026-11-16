@@ -286,3 +286,78 @@ func TestConfig_Strict(t *testing.T) {
 		t.Errorf("Strict() = %+v, want both switches on and MaxLength kept", got)
 	}
 }
+
+// Under ExplicitAnd a word borrowed from SQL fails as a missing AND. The
+// general advice for that code is to add the AND, which for these queries
+// gives another wrong query, so the SQL word's own advice takes its place.
+func TestParseWith_MissingAndFromSQLGetsTheSQLHint(t *testing.T) {
+	tests := []struct {
+		name  string
+		input string
+		want  string
+		not   string
+	}{
+		{"between", "x BETWEEN 1 AND 5", "x:1..5", "join two conditions"},
+		{"between after a clause", "a=1 AND x BETWEEN 1 AND 5", "a=1 AND x:1..5", "join two conditions"},
+		{"like", "name LIKE john", "no LIKE", "join two conditions"},
+		{"is null", "name IS NULL", "NOT field", "join two conditions"},
+		{"is not null", "name IS NOT NULL", "NOT field", "join two conditions"},
+		{"contains", "name contains john", "name=*john*", "join two conditions"},
+		{"select", "SELECT a FROM t", "only conditions", "join two conditions"},
+		{"limit", "state=draft LIMIT 5", "only conditions", "join two conditions"},
+		{"order by", "state=draft ORDER BY total", "only conditions", "join two conditions"},
+		{"plain juxtaposition", "a=1 b=2", "join two conditions", "LIKE"},
+		{"unquoted second word", "name=john smith", "join two conditions", "LIKE"},
+		{"field named like SQL", "limit>5 b=2", "join two conditions", "only conditions"},
+		{"SQL word inside quotes", `name="is null" b=2`, "join two conditions", "NOT field"},
+		{"SQL word in an earlier clause", "a LIKE b AND c=1 d=2", "no LIKE", ""},
+		{"bracket lookup", `labels["team"]=x`, "labels.team=x", "join two conditions"},
+	}
+	for _, cfg := range []parser.Config{{ExplicitAnd: true}, parser.Config{}.Strict()} {
+		for _, tt := range tests {
+			t.Run(tt.name, func(t *testing.T) {
+				// Act
+				_, err := parser.ParseWith(tt.input, cfg)
+
+				// Assert
+				errs := parser.Errors(err)
+				if len(errs) == 0 || errs[0].Code != parser.CodeMissingAnd {
+					t.Fatalf("ParseWith(%q) = %v, want missingAnd first", tt.input, err)
+				}
+				hint := errs[0].Hint
+				if !strings.Contains(hint, tt.want) || (tt.not != "" && strings.Contains(hint, tt.not)) {
+					t.Errorf("ParseWith(%q) hint = %q, want one containing %q and not %q", tt.input, hint, tt.want, tt.not)
+				}
+			})
+		}
+	}
+}
+
+// The later clause of a query is explained on its own terms: the SQL word
+// before the AND does not reach it.
+func TestParseWith_SQLHintStopsAtTheClause(t *testing.T) {
+	// Act
+	_, err := parser.ParseWith("a LIKE b AND c=1 d=2", parser.Config{ExplicitAnd: true})
+
+	// Assert
+	errs := parser.Errors(err)
+	if len(errs) != 3 {
+		t.Fatalf("got %d errors, want 3: %v", len(errs), err)
+	}
+	if last := errs[2].Hint; !strings.Contains(last, "join two conditions") {
+		t.Errorf("hint for the last clause = %q, want the general advice", last)
+	}
+}
+
+// A rewrite offered for a missing AND is itself accepted under the same
+// options.
+func TestParseWith_MissingAndRewritesParseStrictly(t *testing.T) {
+	strict := parser.Config{}.Strict()
+	for _, rewrite := range []string{"x:1..5", "a=1 AND x:1..5", "labels.team=x"} {
+		t.Run(rewrite, func(t *testing.T) {
+			if _, err := parser.ParseWith(rewrite, strict); err != nil {
+				t.Errorf("ParseWith(%q) under strict options: %v", rewrite, err)
+			}
+		})
+	}
+}
