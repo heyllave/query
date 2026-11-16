@@ -263,7 +263,7 @@ func TestParse_RejectsQuoteInUnquotedValue(t *testing.T) {
 // the value into the next term inside a query and decide on what it found
 // there, so `A:0%(*..A` held a pattern while ParseValue("0%(*") refused it.
 func TestParse_OpenParenInValueIsAStringEverywhere(t *testing.T) {
-	for _, q := range []string{`A:0%(*..A`, `A=0%(* AND B=1`, `A=0%(1`, `A=0%(1 AND B`} {
+	for _, q := range []string{`A:0%(*..A`, `A=0%(* AND B=1`, `A=0%(1`, `A=0%(1 AND B`, `A()IN(0%A(*)A`, `x=0%f(* AND B`} {
 		expr, err := Parse(q, 0)
 		if err != nil {
 			t.Errorf("Parse(%q): %v", q, err)
@@ -279,8 +279,9 @@ func TestParse_OpenParenInValueIsAStringEverywhere(t *testing.T) {
 			t.Errorf("Parse(%q) printed as %q, reparsed and printed as %q", q, out, got)
 		}
 	}
-	v := parseFieldRefValue(t, `0%(*`)
-	if v.Type != ast.ValueString || !v.Wildcard {
-		t.Errorf("ParseValue(\"0%%(*\") = %+v, want a wildcard string", v)
+	for _, text := range []string{`0%(*`, `0%A(*`} {
+		if v := parseFieldRefValue(t, text); v.Type != ast.ValueString || !v.Wildcard {
+			t.Errorf("ParseValue(%q) = %+v, want a wildcard string", text, v)
+		}
 	}
 }
