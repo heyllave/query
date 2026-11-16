@@ -130,22 +130,49 @@ func TestMatch_StrictOptions(t *testing.T) {
 
 	t.Run("refuses what Parse refuses under the same option", func(t *testing.T) {
 		_, parseErr := query.Parse("a=1 b=2", query.WithStrict())
-		_, matchErr := query.Match("a=1 b=2", fields, record, query.WithStrict())
+		_, matchErr := query.MatchWith("a=1 b=2", fields, record, query.WithStrict())
 		if parseErr == nil || matchErr == nil {
 			t.Errorf("Parse error = %v, Match error = %v; want both refused", parseErr, matchErr)
 		}
 	})
 
 	t.Run("accepts a plain query under strict", func(t *testing.T) {
-		ok, err := query.Match("a=1 AND b=2", fields, record, query.WithStrict())
+		ok, err := query.MatchWith("a=1 AND b=2", fields, record, query.WithStrict())
 		if err != nil || !ok {
 			t.Errorf("Match = %v, %v; want true", ok, err)
 		}
 	})
 
 	t.Run("honours the length limit", func(t *testing.T) {
-		if _, err := query.Match("a=1 AND b=2", fields, record, query.WithMaxLength(3)); err == nil {
+		if _, err := query.MatchWith("a=1 AND b=2", fields, record, query.WithMaxLength(3)); err == nil {
 			t.Error("expected a length error")
 		}
 	})
+}
+
+// Callers can store the original convenience functions without adapting their
+// function types when opting in to the newer parsing API elsewhere.
+func TestLegacyMatchAndEvalFunctionTypes(t *testing.T) {
+	var match func(string, []validate.FieldConfig, map[string]any) (bool, error) = query.Match
+	var value func(string, []validate.FieldConfig, map[string]any) (any, error) = query.Eval
+	record := map[string]any{"state": "draft", "total": 5.0}
+	got, err := match("state=draft", testFields, record)
+	if err != nil || !got {
+		t.Fatalf("legacy Match = %v, %v; want true", got, err)
+	}
+	gotValue, err := value("[total]+2", testFields, record)
+	if err != nil || gotValue != float64(7) {
+		t.Fatalf("legacy Eval = %v, %v; want 7", gotValue, err)
+	}
+}
+
+func TestEvalWith_PreservesExplicitLengthLimit(t *testing.T) {
+	record := map[string]any{"total": 5.0}
+	if _, err := query.EvalWith("[total]+2", testFields, record, query.WithMaxLength(3)); err == nil {
+		t.Fatal("EvalWith ignored the explicit length limit")
+	}
+	got, err := query.EvalWith("[total]+2", testFields, record, query.WithMaxLength(0))
+	if err != nil || got != float64(7) {
+		t.Fatalf("EvalWith = %v, %v; want 7", got, err)
+	}
 }

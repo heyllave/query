@@ -133,7 +133,7 @@ expr, err := query.Parse(q, query.WithStrict())
 // The same switches on the parser and the evaluator.
 expr, err := parser.ParseWith(q, parser.Config{MaxLength: 512, ExplicitAnd: true, StrictValues: true})
 prog, err := eval.Compile(q, fields, eval.WithStrict())
-ok, err := query.Match(q, fields, record, query.WithStrict())
+ok, err := query.MatchWith(q, fields, record, query.WithStrict())
 ```
 
 A strict option only refuses queries. It never changes what an accepted query

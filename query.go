@@ -93,7 +93,13 @@ func ParseAndValidate(q string, fields []validate.FieldConfig, opts ...Option) (
 // record in one call. It is a convenience for one-off checks; to evaluate the
 // same query against many records, compile once with [github.com/heyllave/query/eval.Compile]
 // and reuse the resulting program.
-func Match(q string, fields []validate.FieldConfig, record map[string]any, opts ...Option) (bool, error) {
+func Match(q string, fields []validate.FieldConfig, record map[string]any) (bool, error) {
+	return MatchWith(q, fields, record)
+}
+
+// MatchWith is Match with parsing options. Strict options only affect this call;
+// Match retains its original function type and default grammar.
+func MatchWith(q string, fields []validate.FieldConfig, record map[string]any, opts ...Option) (bool, error) {
 	o := defaultOptions()
 	for _, opt := range opts {
 		opt(&o)
@@ -111,7 +117,13 @@ func Match(q string, fields []validate.FieldConfig, record map[string]any, opts 
 // compile once with eval.CompileValue and reuse the program. It returns
 // [github.com/heyllave/query/eval.ErrNoValue] when the expression cannot
 // resolve (e.g. a missing field or division by zero).
-func Eval(q string, fields []validate.FieldConfig, record map[string]any, opts ...Option) (any, error) {
+func Eval(q string, fields []validate.FieldConfig, record map[string]any) (any, error) {
+	return EvalWith(q, fields, record)
+}
+
+// EvalWith is Eval with the optional query length limit. Condition grammar
+// switches do not affect value expressions, just as in eval.CompileValue.
+func EvalWith(q string, fields []validate.FieldConfig, record map[string]any, opts ...Option) (any, error) {
 	o := defaultOptions()
 	for _, opt := range opts {
 		opt(&o)

@@ -16,9 +16,10 @@ semantic versioning.
   value, so `a=1+b=2` is an error instead of a comparison with the text
   `1+b=2`. `query.WithStrict()` turns both on. The same switches are
   `parser.ParseWith` with a `parser.Config`, and `eval.WithExplicitAnd()`,
-  `eval.WithStrictValues()` and `eval.WithStrict()`. `query.Match` and
-  `query.Eval` now take the same options as `query.Parse`, so a host that
-  parses strictly matches strictly. Both are off by default and only refuse
+  `eval.WithStrictValues()` and `eval.WithStrict()`. `query.MatchWith` takes the same options as `query.Parse`, so a host that
+  parses strictly matches strictly. `query.EvalWith` accepts the query length
+  option for value expressions. The existing `query.Match` and `query.Eval`
+  keep their original function signatures and default grammar. Both are off by default and only refuse
   queries: one accepted under the strict options parses to the same tree
   under the default grammar. The TypeScript client takes them as an object
   in place of the `maxLength` number (`parse(q, { explicitAnd: true })`), and
