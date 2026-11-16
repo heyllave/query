@@ -291,3 +291,24 @@ test("every entry point takes an optional maxLength in characters", () => {
   assert.ok(w.queryStringify(tree).error);
   assert.equal(w.queryStringify(tree, 0).result, q);
 });
+
+test("a failure carries a hint when the engine can tell what was meant", () => {
+  const syntax = w.queryParse("state==draft");
+  assert.equal(syntax.errors[0].code, "unexpectedChar");
+  assert.match(syntax.errors[0].hint, /single =/);
+
+  const arithmetic = w.queryParse("[base]*1.1 > 3");
+  assert.match(arithmetic.errors[0].hint, /float\(\[base\]\*1\.1\)>3/);
+
+  const typo = w.queryParseAndValidate("stat=draft", JSON.stringify(fields));
+  assert.equal(typo.validationErrors[0].code, "fieldNotFound");
+  assert.match(typo.validationErrors[0].hint, /did you mean "state"\?/);
+});
+
+test("a doubled character is one error spanning both", () => {
+  const { errors } = w.queryParse("a=1 && b=2");
+  assert.equal(errors.length, 1);
+  assert.equal(errors[0].offset, 4);
+  assert.equal(errors[0].length, 2);
+  assert.match(errors[0].hint, /AND/);
+});

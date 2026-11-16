@@ -483,7 +483,7 @@ What a caller can rely on, and what holds the library to it:
 | Promise | Held by |
 |---|---|
 | A query keeps its meaning. | `internal/bridgejson/testdata/golden.jsonl` records, for several hundred queries, the printed form and the JSON tree, or the error codes. Any change shows up as a diff of that file and has to be made on purpose (`go test ./internal/bridgejson -run TestGolden -update`). |
-| Error codes never change once shipped. | The same file, plus `parser/code_test.go`, which requires an input for every code. English messages may be reworded. |
+| Error codes never change once shipped. | The same file, plus `parser/code_test.go`, which requires an input for every code. English messages and hints may be reworded. |
 | Every client agrees. | `conformance/corpus.json` runs against the Go API, the bridge envelopes, the JavaScript client and the C library. |
 | The evaluator agrees with SQL. | `conformance/sql` runs every case through the evaluator and a real SQLite database. |
 | No input panics, and printing a query gives a query that parses to the same tree. | Four fuzz targets, run on every push and for longer every week. |

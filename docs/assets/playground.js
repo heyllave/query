@@ -75,6 +75,12 @@
       code.textContent = item.code;
       li.appendChild(code);
       li.appendChild(document.createTextNode(" at offset " + item.offset + ": " + item.message));
+      if (item.hint) {
+        var hint = document.createElement("div");
+        hint.className = "pg-hint";
+        hint.textContent = "Hint: " + item.hint;
+        li.appendChild(hint);
+      }
       errorList.appendChild(li);
     });
     errorList.hidden = false;

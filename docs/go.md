@@ -38,7 +38,7 @@ fields := []validate.FieldConfig{
 expr, err := query.ParseAndValidate("state=draft AND total>50000", fields)
 ```
 
-`expr` is an `ast.Expression`. A syntax failure is a `parser.ErrorList`; a validation failure is a `validate.ErrorList`. Every entry has a stable `Code` and a position, so you can show your own wording and underline the right characters.
+`expr` is an `ast.Expression`. A syntax failure is a `parser.ErrorList`; a validation failure is a `validate.ErrorList`. Every entry has a stable `Code` and a position, so you can show your own wording and underline the right characters, and a `Hint` when the engine can tell what was meant. See [Errors and hints]({{ '/errors/' | relative_url }}).
 
 ## Match records in memory
 

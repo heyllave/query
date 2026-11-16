@@ -87,17 +87,31 @@ This JSON is a debugging view. It is not the tree the TypeScript client and the 
 
 ## Errors
 
-A syntax error prints its code and points at the character. The command exits with status 1.
+An error prints its code, marks the offending text and, when the engine can tell what was meant, adds a hint. The command exits with status 1.
 
 ```bash
 query explain "status==active"
 ```
 
 ```
-error [unexpectedChar]: unexpected "=" where a value belongs: operators are single (=, !=, >, >=, <, <=); quote the value if it starts with "="
+error [unexpectedChar]: unexpected "=" where a value belongs
   status==active
          ^
+  hint: equality is a single =: status=active
 ```
+
+```bash
+query explain "[base]*1.1 > 3"
+```
+
+```
+error [unexpected]: unexpected "*" after a complete condition
+  [base]*1.1 > 3
+        ^
+  hint: arithmetic goes on the right of the operator or inside a function: float([base]*1.1)>3
+```
+
+[Errors and hints]({{ '/errors/' | relative_url }}) lists what the hints cover.
 
 ## Validate against a field list
 
@@ -113,11 +127,22 @@ error [unexpectedChar]: unexpected "=" where a value belongs: operators are sing
 ```
 
 ```bash
-query explain --schema fields.json "status=act* AND nope=1"
+query explain --schema fields.json "statsu=active AND priority>high AND status=act*"
 ```
 
 ```
-position 0: operator "*" is not allowed for field "status" (type text); position 16: unknown field "nope"
+error [fieldNotFound]: unknown field "statsu"
+  statsu=active AND priority>high AND status=act*
+  ^~~~~~
+  hint: did you mean "status"?
+error [typeMismatch]: value "high" (string) does not fit field "priority" (type integer)
+  statsu=active AND priority>high AND status=act*
+                    ^~~~~~~~
+  hint: a number looks like 42, -3 or 1.5
+error [operatorNotAllowed]: operator "*" is not allowed for field "status" (type text)
+  statsu=active AND priority>high AND status=act*
+                                      ^~~~~~
+  hint: status cannot be matched with a * pattern; it allows: =, !=
 ```
 
 - `type` is `text`, `integer`, `decimal`, `boolean`, `date`, `datetime` or `duration`.

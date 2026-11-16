@@ -104,10 +104,19 @@ type Error struct {
 	Code     Code
 	Position token.Position
 	Kind     ErrorKind
+	// Hint says what the writer most likely meant and how to write it, when
+	// the parser can tell: "equality is a single =" for state==draft. It is
+	// English prose for a person, may be empty, and may be reworded between
+	// versions; branch on Code, not on Hint.
+	Hint string
 }
 
-// Error implements the error interface.
+// Error implements the error interface. The hint, when there is one, follows
+// the message in parentheses.
 func (e *Error) Error() string {
+	if e.Hint != "" {
+		return fmt.Sprintf("position %d: %s (%s)", e.Position.Offset, e.Message, e.Hint)
+	}
 	return fmt.Sprintf("position %d: %s", e.Position.Offset, e.Message)
 }
 

@@ -14,6 +14,23 @@ semantic versioning.
   does. Without `--schema` the fields a query names are typed from the
   records. `map` takes `name=<value expression>` entries or bare field paths;
   `eval --raw` writes strings bare.
+- Hints. A parse or validation error now says what the writer most likely
+  meant and how to write it, in a new `Hint` field on `parser.Error` and
+  `validate.Error` (`hint` in the WASM and C envelopes, a `hint:` line in
+  `query explain`, and under each error in the playground). Where the fix is
+  mechanical the hint is the writer's own query corrected, and it is only
+  offered if it parses: `status==active` gives `status=active`,
+  `[base]*1.1 > 3` gives `float([base]*1.1)>3`, `3<total` gives `total>3`,
+  `a=1 && b=2` gives `a=1 AND b=2`, `total BETWEEN 1 AND 5` gives
+  `total:1..5`. Validation suggests the nearest field or function
+  (`did you mean "total"?`), says which operators a field allows, and
+  explains a value that does not fit its type. A hint names only fields and
+  functions the caller may use, so `WithAllowedFields` and a custom validator
+  are not revealed by it. Only the first eight errors of a query get a hint.
+- `eval.Compile` suggests the nearest registered function for an unknown one
+  (`unknown function "uper" (did you mean "upper"?)`).
+- `query explain --schema` prints validation errors like syntax errors: one
+  per failure, with its code, a marker under the text and its hint.
 
 ### Security
 
@@ -37,6 +54,15 @@ semantic versioning.
   example, add the clause.
 
 ### Changed
+
+- Error messages name a token by its text (`unexpected "*"`) instead of its
+  lexer form (`unexpected token *("*")`), and `Error()` appends the hint in
+  parentheses. Codes and positions are unchanged, with one exception below.
+  The type-mismatch message quotes the value: `value "abc" (string) does not
+  fit field "total" (type decimal)`.
+- A run of the same unexpected character is one error that spans the run, so
+  `a && b` reports `unexpectedChar` once, at the `&&`, where it used to report
+  it twice.
 
 - A `"` inside an unquoted value (`A=x"y`, `A=*0%"`) is a parse error with
   the `unexpectedChar` code. Such a value could not be printed back: a

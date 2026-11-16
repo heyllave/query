@@ -540,6 +540,9 @@ func ValidationErrors(err error) []map[string]any {
 			"field":   e.Field,
 			"op":      e.Op,
 		}
+		if e.Hint != "" {
+			out[i]["hint"] = e.Hint
+		}
 	}
 	return out
 }

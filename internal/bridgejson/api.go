@@ -169,6 +169,9 @@ func parseFailure(err error) Envelope {
 			"offset":  e.Position.Offset,
 			"length":  e.Position.Length,
 		}
+		if e.Hint != "" {
+			list[i]["hint"] = e.Hint
+		}
 	}
 	env["errors"] = list
 	return env

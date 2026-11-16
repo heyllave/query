@@ -432,3 +432,44 @@ func TestRunExplain_ErrorShowsCodeAndSpan(t *testing.T) {
 		})
 	}
 }
+
+func TestExplain_PrintsHints(t *testing.T) {
+	schema := `{"fields": [{"name": "status", "type": "text", "allowed_ops": ["=", "!="]}]}`
+	schemaPath := filepath.Join(t.TempDir(), "schema.json")
+	if err := os.WriteFile(schemaPath, []byte(schema), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	tests := []struct {
+		name string
+		args []string
+		want []string
+	}{
+		{"syntax error", []string{"explain", "[base]*1.1 > 3"},
+			[]string{"error [unexpected]", "^", "hint: ", "float([base]*1.1)>3"}},
+		{"unknown field", []string{"explain", "--schema", schemaPath, "statsu=a"},
+			[]string{"error [fieldNotFound]", "^~~~~~", `hint: did you mean "status"?`}},
+		{"refused operator", []string{"explain", "--schema", schemaPath, "status=a*"},
+			[]string{"error [operatorNotAllowed]", "hint: ", "it allows: =, !="}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			stdout, stderr := tempFiles(t)
+
+			// Act
+			code := run(tt.args, stdout, stderr)
+
+			// Assert
+			if code != 1 {
+				t.Fatalf("exit code = %d, want 1", code)
+			}
+			out := readTemp(t, stderr)
+			for _, want := range tt.want {
+				if !strings.Contains(out, want) {
+					t.Errorf("output is missing %q:\n%s", want, out)
+				}
+			}
+		})
+	}
+}

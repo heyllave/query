@@ -2,6 +2,7 @@ package eval
 
 import (
 	"errors"
+	"strings"
 	"testing"
 
 	"github.com/heyllave/query/ast"
@@ -186,5 +187,35 @@ func TestCompileArgResolvers_MissingFunc(t *testing.T) {
 	)
 	if !errors.Is(err, ErrUnknownFunction) {
 		t.Fatalf("compile error = %v, want ErrUnknownFunction", err)
+	}
+}
+
+func TestCompile_UnknownFunctionSuggestsTheNearest(t *testing.T) {
+	tests := []struct {
+		name  string
+		query string
+		want  string
+	}{
+		{"typo", "uper(name)=X", `unknown function "uper" (did you mean "upper"?)`},
+		{"wrong case", "Lower(name)=x", `(did you mean "lower"?)`},
+		{"nothing close", "frobnicate(name)=x", `unknown function "frobnicate"`},
+	}
+	fields := []validate.FieldConfig{{Name: "name", Type: validate.TypeText, AllowedOps: validate.TextOps}}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Act
+			_, err := Compile(tt.query, fields)
+
+			// Assert
+			if !errors.Is(err, ErrUnknownFunction) {
+				t.Fatalf("Compile(%q) error = %v, want ErrUnknownFunction", tt.query, err)
+			}
+			if !strings.Contains(err.Error(), tt.want) {
+				t.Errorf("Compile(%q) error = %q, want one containing %q", tt.query, err, tt.want)
+			}
+			if tt.name == "nothing close" && strings.Contains(err.Error(), "did you mean") {
+				t.Errorf("Compile(%q) suggested a function with none close: %q", tt.query, err)
+			}
+		})
 	}
 }

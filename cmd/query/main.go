@@ -16,6 +16,7 @@ package main
 
 import (
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -214,7 +215,7 @@ func runExplain(args []string, stdout, stderr *os.File) int {
 		}
 		v := validate.New(fields)
 		if err := v.Validate(expr); err != nil {
-			_, _ = fmt.Fprintln(stderr, err)
+			printErrors(query, err, stderr)
 			return 1
 		}
 	}
@@ -242,20 +243,34 @@ func runExplain(args []string, stdout, stderr *os.File) int {
 	return 0
 }
 
+// printErrors prints each syntax or validation failure with its code, the
+// query, a marker under the offending span and, when there is one, a hint.
 func printErrors(query string, err error, stderr io.Writer) {
-	errs := parser.Errors(err)
-	if len(errs) == 0 {
-		_, _ = fmt.Fprintf(stderr, "error: %s\n", err)
-		return
+	// The code is what a client keys its own wording off, so printing it here
+	// is how someone writing one finds the identifier to switch on.
+	report := func(code, message string, pos token.Position, hint string) {
+		_, _ = fmt.Fprintf(stderr, "error [%s]: %s\n", code, message)
+		_, _ = fmt.Fprintf(stderr, "  %s\n", query)
+		_, _ = fmt.Fprintf(stderr, "  %s\n", caret(query, pos))
+		if hint != "" {
+			_, _ = fmt.Fprintf(stderr, "  hint: %s\n", hint)
+		}
 	}
 
-	for _, e := range errs {
-		// The code is what a client keys its own wording off, so printing it
-		// here is how someone writing one finds the identifier to switch on.
-		_, _ = fmt.Fprintf(stderr, "error [%s]: %s\n", e.Code, e.Message)
-		_, _ = fmt.Fprintf(stderr, "  %s\n", query)
-		_, _ = fmt.Fprintf(stderr, "  %s\n", caret(query, e.Position))
+	if errs := parser.Errors(err); len(errs) > 0 {
+		for _, e := range errs {
+			report(string(e.Code), e.Message, e.Position, e.Hint)
+		}
+		return
 	}
+	var invalid validate.ErrorList
+	if errors.As(err, &invalid) {
+		for _, e := range invalid {
+			report(e.Kind.Code(), e.Message, e.Position, e.Hint)
+		}
+		return
+	}
+	_, _ = fmt.Fprintf(stderr, "error: %s\n", err)
 }
 
 // caret builds the line that underlines the offending span: a '^' at the

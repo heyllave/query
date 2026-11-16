@@ -214,6 +214,13 @@ export interface ParseError {
   message: string;
   offset: number;
   length: number;
+  /**
+   * What the writer most likely meant and how to write it, when the parser
+   * can tell: "equality is a single =" for `state==draft`. English, absent
+   * when there is nothing to suggest, and may be reworded between versions;
+   * branch on `code`.
+   */
+  hint?: string;
 }
 
 /** A stable machine identifier for a validation failure, matching Go's ErrorKind.Code. */
@@ -239,6 +246,12 @@ export interface ValidationError {
   field: string;
   /** The refused operator for `operatorNotAllowed` ("?" for a presence check). */
   op: string;
+  /**
+   * What the writer most likely meant, when the validator can tell:
+   * `did you mean "total"?` for `totl>5`. English, absent when there is
+   * nothing to suggest. It names only fields the config would accept.
+   */
+  hint?: string;
 }
 
 /** Result from parse operations. */
