@@ -17,6 +17,10 @@ semantic versioning.
 
 ### Fixed
 
+- An unquoted value that holds an unclosed call (`0%f(*`) is a string whether
+  it is read inside a query or on its own, as with an unclosed group. The
+  arithmetic look-ahead used to treat the open call as arithmetic when the
+  value stood alone, so the bridge quoted the pattern away.
 - A wildcard pattern that starts with `*` and holds an arithmetic character
   (`A=*0%"`) is read as a pattern. The lexer's arithmetic look-ahead could
   claim such a value and then refuse it, so a query like `A=*0%" "A"`
