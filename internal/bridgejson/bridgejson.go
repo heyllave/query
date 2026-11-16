@@ -13,6 +13,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"unicode/utf8"
 
 	"github.com/heyllave/query/ast"
 	"github.com/heyllave/query/parser"
@@ -31,12 +32,22 @@ type AST struct {
 	// FieldFunc is the source form of the function a qualifier compares
 	// (lower(name) in lower(name)=john); Field is empty for such a node.
 	FieldFunc string `json:"fieldFunc,omitempty"`
-	Left      *AST   `json:"left,omitempty"`
-	Right     *AST   `json:"right,omitempty"`
-	Expr      *AST   `json:"expr,omitempty"`
-	Inner     *AST   `json:"inner,omitempty"`
-	Base      *AST   `json:"base,omitempty"`
+	// Call is the source form of a function used as a predicate
+	// (contains(tags, "x")); the node's type is "call".
+	Call string `json:"call,omitempty"`
+	// Fields lists the field paths a "call" node or a FieldFunc reads, so a
+	// client can find them without parsing the source form. It is derived on
+	// the way out and ignored on the way in.
+	Fields []FieldPath `json:"fields,omitempty"`
+	Left   *AST        `json:"left,omitempty"`
+	Right  *AST        `json:"right,omitempty"`
+	Expr   *AST        `json:"expr,omitempty"`
+	Inner  *AST        `json:"inner,omitempty"`
+	Base   *AST        `json:"base,omitempty"`
 }
+
+// FieldPath is a field name split on its dots.
+type FieldPath []string
 
 // Val is the JSON-serializable representation of a value.
 type Val struct {
@@ -84,8 +95,15 @@ func AstToJSON(expr ast.Expression) *AST {
 		}
 		if e.FieldFunc != nil {
 			n.FieldFunc = ast.String(e.FieldFunc)
+			n.Fields = fieldPaths(e.FieldFunc)
 		}
 		return n
+	case *ast.FuncCallExpr:
+		return &AST{
+			Type:   "call",
+			Call:   ast.String(e),
+			Fields: fieldPaths(e),
+		}
 	case *ast.PresenceExpr:
 		return &AST{
 			Type:  "presence",
@@ -108,10 +126,44 @@ func AstToJSON(expr ast.Expression) *AST {
 	}
 }
 
+// fieldPaths lists the fields a call reads, in walk order.
+func fieldPaths(fc *ast.FuncCallExpr) []FieldPath {
+	paths := ast.Fields(fc)
+	if len(paths) == 0 {
+		return nil
+	}
+	out := make([]FieldPath, len(paths))
+	for i, p := range paths {
+		out[i] = FieldPath(p)
+	}
+	return out
+}
+
+// readCall reads a function call back from its source form.
+func readCall(what, src string) (*ast.FuncCallExpr, error) {
+	expr, err := parser.Parse(src, DefaultMaxLength)
+	if err != nil {
+		return nil, fmt.Errorf("%s %q: %w", what, src, err)
+	}
+	fc, ok := expr.(*ast.FuncCallExpr)
+	if !ok {
+		return nil, fmt.Errorf("%s %q is not a function call", what, src)
+	}
+	return fc, nil
+}
+
 func valueToJSON(v *ast.Value) *Val {
+	raw := v.Raw
+	switch v.Type { //nolint:exhaustive // the other types' raw text is their literal
+	case ast.ValueArith, ast.ValueFunc, ast.ValueFieldRef:
+		// The parser's raw text is the source with its spaces removed, which
+		// does not always read back (a space may have separated an operator
+		// from an escaped operand). The printed form always does.
+		raw = ast.StringValue(v)
+	}
 	return &Val{
 		Type:     v.Type.String(),
-		Raw:      v.Raw,
+		Raw:      raw,
 		Value:    v.Any(),
 		Wildcard: v.Wildcard,
 		Quoted:   v.Quoted,
@@ -139,8 +191,8 @@ func tooLong(what string, length, limit int) error {
 // is read back through the parser or printed as part of a query, and neither
 // may cost more than a query itself could.
 func checkLength(what, text string) error {
-	if len(text) > DefaultMaxLength {
-		return tooLong(what, len(text), DefaultMaxLength)
+	if n := utf8.RuneCountInString(text); n > DefaultMaxLength {
+		return tooLong(what, n, DefaultMaxLength)
 	}
 	return nil
 }
@@ -213,13 +265,9 @@ func nodeToAST(n *AST) (ast.Expression, error) {
 		if n.FieldFunc != "" {
 			// The compared function is carried as its source text; read it
 			// back through the parser as a standalone call.
-			expr, err := parser.Parse(n.FieldFunc, DefaultMaxLength)
+			fc, err := readCall("fieldFunc", n.FieldFunc)
 			if err != nil {
-				return nil, fmt.Errorf("fieldFunc %q: %w", n.FieldFunc, err)
-			}
-			fc, ok := expr.(*ast.FuncCallExpr)
-			if !ok {
-				return nil, fmt.Errorf("fieldFunc %q is not a function call", n.FieldFunc)
+				return nil, err
 			}
 			q.FieldFunc = fc
 			q.Field = nil
@@ -238,6 +286,8 @@ func nodeToAST(n *AST) (ast.Expression, error) {
 			return nil, err
 		}
 		return &ast.PresenceExpr{Field: ast.FieldPath(n.Field)}, nil
+	case "call":
+		return readCall("call", n.Call)
 	case "group":
 		inner, err := nodeToAST(n.Expr)
 		if err != nil {
@@ -268,7 +318,7 @@ func nodeToAST(n *AST) (ast.Expression, error) {
 			return nil, fmt.Errorf("selector needs a base expression")
 		}
 		switch n.Base.Type {
-		case "qualifier", "presence", "group", "selector":
+		case "qualifier", "presence", "call", "group", "selector":
 		default:
 			return nil, fmt.Errorf("selector base cannot be a %q node; wrap it in a group", n.Base.Type)
 		}
@@ -375,11 +425,12 @@ func sameValueType(parsed, declared string) bool {
 	return numeric(parsed) && numeric(declared)
 }
 
-// checkFieldLength holds a field path to the query limit.
+// checkFieldLength holds a field path, as the printer writes it, to the
+// query limit.
 func checkFieldLength(field []string) error {
-	n := 0
+	n := len(field) - 1 // the dots between segments
 	for _, seg := range field {
-		n += len(seg) + 1
+		n += utf8.RuneCountInString(seg)
 	}
 	if n > DefaultMaxLength {
 		return tooLong("field", n, DefaultMaxLength)

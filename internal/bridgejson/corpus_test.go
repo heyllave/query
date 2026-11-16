@@ -75,7 +75,7 @@ func TestCorpus_ThroughBridgeEnvelopes(t *testing.T) {
 			case "parse":
 				got = wire(t, Guard(func() Envelope { return Parse(tc.Query, DefaultMaxLength) }))
 			case "parseAndValidate":
-				got = wire(t, Guard(func() Envelope { return ParseAndValidate(tc.Query, fields) }))
+				got = wire(t, Guard(func() Envelope { return ParseAndValidate(tc.Query, fields, DefaultMaxLength) }))
 			case "stringify":
 				parsed := wire(t, Parse(tc.Query, DefaultMaxLength))
 				tree, err := json.Marshal(parsed["result"])
@@ -84,9 +84,9 @@ func TestCorpus_ThroughBridgeEnvelopes(t *testing.T) {
 				}
 				got = wire(t, Guard(func() Envelope { return Stringify(string(tree)) }))
 			case "match":
-				got = wire(t, Guard(func() Envelope { return Match(tc.Query, fields, record) }))
+				got = wire(t, Guard(func() Envelope { return Match(tc.Query, fields, record, DefaultMaxLength) }))
 			case "eval":
-				got = wire(t, Guard(func() Envelope { return Eval(tc.Query, fields, record) }))
+				got = wire(t, Guard(func() Envelope { return Eval(tc.Query, fields, record, DefaultMaxLength) }))
 			default:
 				t.Fatalf("unknown op %q", tc.Op)
 			}
@@ -156,10 +156,10 @@ func TestBridge_MalformedInputsNeverPanic(t *testing.T) {
 			calls := map[string]func() Envelope{
 				"validate":         func() Envelope { return Validate(in, in) },
 				"stringify":        func() Envelope { return Stringify(in) },
-				"parseAndValidate": func() Envelope { return ParseAndValidate("a=1", in) },
-				"match":            func() Envelope { return Match("a=1", in, in) },
-				"matchRecord":      func() Envelope { return Match("a=1", `[{"name":"a","type":"decimal"}]`, in) },
-				"eval":             func() Envelope { return Eval("[a]+1", `[{"name":"a","type":"decimal"}]`, in) },
+				"parseAndValidate": func() Envelope { return ParseAndValidate("a=1", in, DefaultMaxLength) },
+				"match":            func() Envelope { return Match("a=1", in, in, DefaultMaxLength) },
+				"matchRecord":      func() Envelope { return Match("a=1", `[{"name":"a","type":"decimal"}]`, in, DefaultMaxLength) },
+				"eval":             func() Envelope { return Eval("[a]+1", `[{"name":"a","type":"decimal"}]`, in, DefaultMaxLength) },
 			}
 			for name, call := range calls {
 				got := wire(t, Guard(call))
@@ -180,11 +180,11 @@ func TestBridge_FailuresCarryCodes(t *testing.T) {
 		key  string
 	}{
 		{"parse", Parse("total>", DefaultMaxLength), "errors"},
-		{"parseAndValidate syntax", ParseAndValidate("total>", fields), "errors"},
-		{"parseAndValidate unknown field", ParseAndValidate("nope=1", fields), "validationErrors"},
-		{"match syntax", Match("total>", fields, "{}"), "errors"},
-		{"match unknown field", Match("nope=1", fields, "{}"), "validationErrors"},
-		{"eval unknown field", Eval("[nope]+1", fields, "{}"), "validationErrors"},
+		{"parseAndValidate syntax", ParseAndValidate("total>", fields, DefaultMaxLength), "errors"},
+		{"parseAndValidate unknown field", ParseAndValidate("nope=1", fields, DefaultMaxLength), "validationErrors"},
+		{"match syntax", Match("total>", fields, "{}", DefaultMaxLength), "errors"},
+		{"match unknown field", Match("nope=1", fields, "{}", DefaultMaxLength), "validationErrors"},
+		{"eval unknown field", Eval("[nope]+1", fields, "{}", DefaultMaxLength), "validationErrors"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -252,7 +252,7 @@ func TestParseFields_DefaultOperators(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.query, func(t *testing.T) {
-			got := wire(t, ParseAndValidate(tt.query, fields))
+			got := wire(t, ParseAndValidate(tt.query, fields, DefaultMaxLength))
 
 			if ok := got["error"] == nil; ok != tt.want {
 				t.Fatalf("accepted = %v, want %v (%v)", ok, tt.want, got["error"])

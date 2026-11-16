@@ -33,6 +33,7 @@ export type {
   UnaryExpr,
   QualifierExpr,
   PresenceExpr,
+  CallExpr,
   GroupExpr,
   SelectorExpr,
   Value,
@@ -61,17 +62,20 @@ declare global {
   function queryStringify(astJSON: string): StringifyResult;
   function queryParseAndValidate(
     q: string,
-    fieldsJSON: string
+    fieldsJSON: string,
+    maxLength?: number
   ): ParseResult;
   function queryMatch(
     q: string,
     fieldsJSON: string,
-    recordJSON: string
+    recordJSON: string,
+    maxLength?: number
   ): MatchResult;
   function queryEval(
     q: string,
     fieldsJSON: string,
-    recordJSON: string
+    recordJSON: string,
+    maxLength?: number
   ): EvalResult;
 
   // Go's wasm_exec.js provides this constructor.
@@ -83,7 +87,10 @@ declare global {
 
 /** Query API returned by loadQuery(). */
 export interface QueryAPI {
-  /** Parse a query string into an AST. */
+  /**
+   * Parse a query string into an AST. `maxLength` is the query length limit
+   * in characters (default 256); 0 disables it.
+   */
   parse(q: string, maxLength?: number): ParseResult;
 
   /** Validate an AST against field configurations. */
@@ -92,20 +99,20 @@ export interface QueryAPI {
   /** Convert an AST back to a query string. */
   stringify(ast: Expression): StringifyResult;
 
-  /** Parse and validate in one call. */
-  parseAndValidate(q: string, fields: FieldConfig[]): ParseResult;
+  /** Parse and validate in one call; `maxLength` as in {@link parse}. */
+  parseAndValidate(q: string, fields: FieldConfig[], maxLength?: number): ParseResult;
 
   /**
    * Compile a boolean predicate and evaluate it against a record in one call.
    * For repeated evaluation, prefer compiling once on the Go side.
    */
-  match(q: string, fields: FieldConfig[], record: QueryRecord): MatchResult;
+  match(q: string, fields: FieldConfig[], record: QueryRecord, maxLength?: number): MatchResult;
 
   /**
    * Compile a value expression and evaluate it against a record, returning the
    * computed value (number, string, boolean, or list).
    */
-  eval(q: string, fields: FieldConfig[], record: QueryRecord): EvalResult;
+  eval(q: string, fields: FieldConfig[], record: QueryRecord, maxLength?: number): EvalResult;
 }
 
 /**
@@ -191,16 +198,16 @@ export async function loadQuery(source: WasmSource = "./query.wasm"): Promise<Qu
       return queryStringify(JSON.stringify(ast));
     },
 
-    parseAndValidate(q: string, fields: FieldConfig[]): ParseResult {
-      return queryParseAndValidate(q, JSON.stringify(fields));
+    parseAndValidate(q: string, fields: FieldConfig[], maxLength?: number): ParseResult {
+      return queryParseAndValidate(q, JSON.stringify(fields), maxLength);
     },
 
-    match(q: string, fields: FieldConfig[], record: QueryRecord): MatchResult {
-      return queryMatch(q, JSON.stringify(fields), JSON.stringify(record));
+    match(q: string, fields: FieldConfig[], record: QueryRecord, maxLength?: number): MatchResult {
+      return queryMatch(q, JSON.stringify(fields), JSON.stringify(record), maxLength);
     },
 
-    eval(q: string, fields: FieldConfig[], record: QueryRecord): EvalResult {
-      return queryEval(q, JSON.stringify(fields), JSON.stringify(record));
+    eval(q: string, fields: FieldConfig[], record: QueryRecord, maxLength?: number): EvalResult {
+      return queryEval(q, JSON.stringify(fields), JSON.stringify(record), maxLength);
     },
   };
 }

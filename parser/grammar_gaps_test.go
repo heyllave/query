@@ -183,3 +183,23 @@ func TestParseDuration_Bounds(t *testing.T) {
 		})
 	}
 }
+
+func TestParse_RejectsInvalidUTF8(t *testing.T) {
+	for _, q := range []string{"\xde", "a=\xff", "name=caf\xc3", "\"\xe9\"=1"} {
+		_, err := Parse(q, 0)
+		if err == nil {
+			t.Errorf("Parse(%q) accepted invalid UTF-8", q)
+			continue
+		}
+		list := Errors(err)
+		if len(list) != 1 || list[0].Code != CodeUnexpectedChar {
+			t.Errorf("Parse(%q) errors = %v, want one unexpectedChar", q, err)
+		}
+	}
+	if _, err := Parse("name=café AND 日本=1", 0); err != nil {
+		t.Errorf("valid UTF-8 rejected: %v", err)
+	}
+	if _, err := ParseValue("len(\xff)", 0); err == nil {
+		t.Error("ParseValue accepted invalid UTF-8")
+	}
+}

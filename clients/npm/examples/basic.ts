@@ -8,10 +8,10 @@
  */
 
 import { loadQuery, visit, walk, fields, fieldToString } from "../src/index.js";
-import type { Visitor, Expression, QualifierExpr, PresenceExpr, BinaryExpr, UnaryExpr, GroupExpr } from "../src/index.js";
+import type { Visitor, Expression, QualifierExpr, PresenceExpr, CallExpr, BinaryExpr, UnaryExpr, GroupExpr } from "../src/index.js";
 
 async function main() {
-  const q = await loadQuery("../query.wasm");
+  const q = await loadQuery(new URL("../query.wasm", import.meta.url));
 
   // -----------------------------------------------------------------------
   // 1. Parse a query
@@ -95,6 +95,11 @@ async function main() {
     },
     visitPresence(e: PresenceExpr): string {
       return `${e.field.join(".")} IS NOT NULL`;
+    },
+    visitCall(e: CallExpr): string {
+      // A predicate function has no SQL of its own; a real consumer maps each
+      // name it supports. Here it is carried through as a comment.
+      return `/* ${e.call} */ TRUE`;
     },
     visitGroup(e: GroupExpr): string {
       return `(${visit(sqlVisitor, e.expr)})`;

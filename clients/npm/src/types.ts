@@ -60,19 +60,38 @@ export interface UnaryExpr extends BaseNode {
   expr: Expression;
 }
 
-/** Qualifier expression: field op value. */
+/**
+ * Qualifier expression: field op value.
+ *
+ * When the left side is a function (`lower(name)=john`), `fieldFunc` carries
+ * its source form, `field` is empty and `fields` lists the fields the
+ * function reads.
+ */
 export interface QualifierExpr extends BaseNode {
   type: "qualifier";
   op: Operator;
   field: string[];
   value: Value;
   endValue?: Value;
+  fieldFunc?: string;
+  fields?: string[][];
 }
 
 /** Presence expression: field exists check. */
 export interface PresenceExpr extends BaseNode {
   type: "presence";
   field: string[];
+}
+
+/**
+ * A function used as a predicate: `contains(tags, "x")`. `call` is its source
+ * form and `fields` lists the fields it reads. To change the call, parse new
+ * text; the bridge reads `call` back through the parser.
+ */
+export interface CallExpr extends BaseNode {
+  type: "call";
+  call: string;
+  fields?: string[][];
 }
 
 /** Group expression: (expr). */
@@ -107,6 +126,7 @@ export type Expression =
   | UnaryExpr
   | QualifierExpr
   | PresenceExpr
+  | CallExpr
   | GroupExpr
   | SelectorExpr;
 
@@ -271,6 +291,7 @@ export interface Visitor<T> {
   visitUnary(expr: UnaryExpr): T;
   visitQualifier(expr: QualifierExpr): T;
   visitPresence(expr: PresenceExpr): T;
+  visitCall(expr: CallExpr): T;
   visitGroup(expr: GroupExpr): T;
   visitSelector(expr: SelectorExpr): T;
 }
@@ -286,6 +307,8 @@ export function visit<T>(visitor: Visitor<T>, expr: Expression): T {
       return visitor.visitQualifier(expr);
     case "presence":
       return visitor.visitPresence(expr);
+    case "call":
+      return visitor.visitCall(expr);
     case "group":
       return visitor.visitGroup(expr);
     case "selector":
@@ -332,13 +355,19 @@ export function walk(
 export function fields(expr: Expression): string[][] {
   const seen = new Set<string>();
   const result: string[][] = [];
+  const add = (field: string[]) => {
+    const key = field.join(".");
+    if (field.length > 0 && !seen.has(key)) {
+      seen.add(key);
+      result.push(field);
+    }
+  };
   walk(expr, (node) => {
     if (node.type === "qualifier" || node.type === "presence") {
-      const key = node.field.join(".");
-      if (!seen.has(key)) {
-        seen.add(key);
-        result.push(node.field);
-      }
+      add(node.field);
+    }
+    if ((node.type === "qualifier" || node.type === "call") && node.fields) {
+      node.fields.forEach(add);
     }
     return true;
   });

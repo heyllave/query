@@ -184,6 +184,17 @@ func startsLikeName(s string) bool {
 	return c == '_' || (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || c >= utf8.RuneSelf
 }
 
+// StringValue prints a value as it would appear after an operator in
+// [String]: a function call, an arithmetic tree or a field reference in a
+// form that [parser.ParseValue] reads back to the same value, a string with
+// the quoting it needs. It is the source form a bridge carries for a value
+// whose text is not a plain literal.
+func StringValue(v *Value) string {
+	var buf strings.Builder
+	writeValue(&buf, v)
+	return buf.String()
+}
+
 // writeValue serializes a Value to the buffer. Function-valued expressions
 // (e.g. now() in `created_at>=now()`) re-emit the call source; quoted string
 // literals preserve their quoting and escape any embedded special chars;

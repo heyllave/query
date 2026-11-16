@@ -2,9 +2,16 @@
 
 All notable changes to this library are listed here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow
-semantic versioning once the first tag is cut.
+semantic versioning.
 
 ## Unreleased
+
+Nothing yet.
+
+## v0.1.0 - 2026-11-16
+
+The first tagged release. Everything below is relative to the untagged
+commits consumers pinned before it.
 
 ### Removed
 
@@ -21,7 +28,7 @@ semantic versioning once the first tag is cut.
   tree could validate and then print as a wider query naming fields it was
   never checked against (`"selector": "first OR secret=a*"`).
 - The same trees are bound in size. A value, field function or field name
-  longer than the default query limit (256 bytes), or a tree whose JSON is
+  longer than the default query limit (256 characters), or a tree whose JSON is
   over 1 MiB, fails with the `queryTooLong` code. These used to be parsed
   with no limit.
 - `ast.WildcardToLike` documents that its result needs `ESCAPE '\'` in the
@@ -32,6 +39,21 @@ semantic versioning once the first tag is cut.
 
 ### Fixed
 
+- The JSON tree the WASM and C bridges hand to clients carries a function used
+  as a predicate (`contains(tags, "x")`) as a `call` node with its source
+  form and the fields it reads. It used to be dropped: `parse` answered a null
+  result, and `contains(tags, "x") AND b>1` arrived as a binary node with no
+  left side, while `match` evaluated the same query correctly.
+- The bridges carry an arithmetic, function or field-reference value in its
+  printed form, which always reads back; the raw source with its spaces
+  removed did not always.
+- The query length limit counts characters, as its message says, not bytes.
+  Every bridge entry point (`parseAndValidate`, `match`, `eval`) takes an
+  optional `maxLength`; `0` disables the limit. They used to apply the default
+  with no way to change it.
+- A query that is not valid UTF-8 is a parse error (`unexpectedChar`) at the
+  offending byte. It used to lex as a term that could not be carried to a
+  client as JSON.
 - `state==draft`, `total=>5` and `a<>b` are parse errors. They used to compare
   against the text `=draft` or `>5` without complaint. A value that really
   starts with `=`, `<` or `>` is written in quotes.
@@ -136,6 +158,12 @@ semantic versioning once the first tag is cut.
 
 ### Added
 
+- A `fields` key on `call` nodes and on qualifiers with a `fieldFunc`, listing
+  the fields the function reads, so a client's `fields()` sees them without
+  parsing the source form. `ast.StringValue` prints one value as `ast.String`
+  would.
+- `FuzzBridgeRoundTrip`, which checks that every query the parser accepts
+  survives the JSON bridge unchanged; it runs with `make fuzz` and in CI.
 - A documentation site with a live playground, built from `docs/` and
   published to GitHub Pages (<https://heyllave.github.io/query/>).
 - `validate.WithAllowedFunctions`, for consumers that translate the tree and

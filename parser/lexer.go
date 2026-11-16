@@ -31,9 +31,8 @@ type lexer struct {
 
 // Lex tokenizes the input query string and returns the token stream.
 func Lex(input string, maxLength int) ([]token.Token, error) {
-	if maxLength > 0 && len(input) > maxLength {
-		return nil, ErrorList{newError(CodeQueryTooLong, ErrQueryTooLong, token.Position{},
-			"query length %d exceeds maximum of %d characters", len(input), maxLength)}
+	if err := checkInput(input, maxLength); err != nil {
+		return nil, err
 	}
 
 	l := &lexer{input: input}
@@ -45,14 +44,36 @@ func Lex(input string, maxLength int) ([]token.Token, error) {
 	return l.tokens, nil
 }
 
+// checkInput rejects input that is longer than maxLength characters (when
+// maxLength is positive) or is not valid UTF-8. A query is text: a byte that
+// is not part of a character cannot name a field or a value, could not be
+// carried to a client as JSON, and is reported at its position.
+func checkInput(input string, maxLength int) error {
+	if n := utf8.RuneCountInString(input); maxLength > 0 && n > maxLength {
+		return ErrorList{newError(CodeQueryTooLong, ErrQueryTooLong, token.Position{},
+			"query length %d exceeds maximum of %d characters", n, maxLength)}
+	}
+	if !utf8.ValidString(input) {
+		for i := 0; i < len(input); {
+			r, w := utf8.DecodeRuneInString(input[i:])
+			if r == utf8.RuneError && w == 1 {
+				return ErrorList{newError(CodeUnexpectedChar, ErrSyntax,
+					token.Position{Offset: i, Length: 1},
+					"byte 0x%02x at position %d is not valid UTF-8", input[i], i)}
+			}
+			i += w
+		}
+	}
+	return nil
+}
+
 // LexValue tokenizes input as a value expression, starting in value mode so a
 // leading literal, arithmetic expression, or function call lexes correctly at
 // position 0 (where the boolean grammar would expect a field name). It backs
 // [ParseValue].
 func LexValue(input string, maxLength int) ([]token.Token, error) {
-	if maxLength > 0 && len(input) > maxLength {
-		return nil, ErrorList{newError(CodeQueryTooLong, ErrQueryTooLong, token.Position{},
-			"query length %d exceeds maximum of %d characters", len(input), maxLength)}
+	if err := checkInput(input, maxLength); err != nil {
+		return nil, err
 	}
 
 	l := &lexer{input: input, afterOperator: true}

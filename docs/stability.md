@@ -22,7 +22,7 @@ What you can rely on, and what holds the library to it.
 
 ## Limits on every query
 
-- 256 bytes, unless the host sets another limit.
+- 256 characters, unless the host sets another limit.
 - 128 levels of nesting.
 - About 10,000 years in either direction for day arithmetic.
 

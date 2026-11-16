@@ -45,6 +45,7 @@ fuzz:
 	$(GOTEST) -run=^$$ -fuzz=^FuzzParseValue$$ -fuzztime=$(FUZZTIME) ./parser/
 	$(GOTEST) -run=^$$ -fuzz=^FuzzCompileMatch$$ -fuzztime=$(FUZZTIME) ./eval/
 	$(GOTEST) -run=^$$ -fuzz=^FuzzCompileValue$$ -fuzztime=$(FUZZTIME) ./eval/
+	$(GOTEST) -run=^$$ -fuzz=^FuzzBridgeRoundTrip$$ -fuzztime=$(FUZZTIME) ./internal/bridgejson/
 
 # Run every example program the way the README shows.
 examples:

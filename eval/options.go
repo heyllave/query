@@ -25,7 +25,7 @@ func defaultOpts() options {
 // Option configures query compilation.
 type Option func(*options)
 
-// WithMaxLength sets the maximum query string length. 0 disables the limit;
+// WithMaxLength sets the maximum query string length in characters. 0 disables the limit;
 // nesting stays bounded by [parser.MaxNesting] either way.
 func WithMaxLength(n int) Option {
 	return func(o *options) { o.maxLength = n }

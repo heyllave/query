@@ -48,6 +48,13 @@ func TestJSONToAST_RoundTripsWhatTheParserRead(t *testing.T) {
 		`items@first`,
 		`items@(x=1)`,
 		`(a=1 OR b=2) AND NOT c=3`,
+		// A function as a predicate, alone and beside a qualifier, and a
+		// function on the left of a comparison.
+		`contains(tags, "x")`,
+		`contains(tags, "x") AND b>1`,
+		`NOT startsWith(name, "a")`,
+		`lower(name)=john`,
+		`items@any(contains(tags, "x"))`,
 	}
 	for _, q := range cases {
 		t.Run(q, func(t *testing.T) {
@@ -290,5 +297,81 @@ func TestJSONToAST_RefusesASelectorWhoseBaseIsNotASingleTerm(t *testing.T) {
 				t.Fatalf("JSONToAST accepted %s", node)
 			}
 		})
+	}
+}
+
+func TestAstToJSON_CarriesAPredicateCallAndItsFields(t *testing.T) {
+	expr, err := parser.Parse(`contains(lower(labels.team), "pay") AND b>1`, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tree := AstToJSON(expr)
+	if tree.Left == nil || tree.Left.Type != "call" {
+		t.Fatalf("left node = %+v, want a call", tree.Left)
+	}
+	if got, want := tree.Left.Call, `contains(lower(labels.team), "pay")`; got != want {
+		t.Errorf("call = %q, want %q", got, want)
+	}
+	if got := tree.Left.Fields; len(got) != 1 || got[0][0] != "labels" || got[0][1] != "team" {
+		t.Errorf("fields = %v, want [[labels team]]", got)
+	}
+
+	q, err := parser.Parse(`len(name)>3`, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	node := AstToJSON(q)
+	if node.FieldFunc != "len(name)" || len(node.Fields) != 1 || node.Fields[0][0] != "name" {
+		t.Errorf("fieldFunc node = %+v, want len(name) reading name", node)
+	}
+}
+
+func TestJSONToAST_RefusesACallThatIsNotOne(t *testing.T) {
+	for _, data := range []string{
+		`{"type":"call","call":"a=1"}`,
+		`{"type":"call","call":""}`,
+		`{"type":"call","call":"contains("}`,
+	} {
+		if _, err := JSONToAST(data); err == nil {
+			t.Errorf("JSONToAST(%s) accepted a call that is not a function call", data)
+		}
+	}
+}
+
+func TestParse_LengthLimitCountsCharacters(t *testing.T) {
+	// 10 characters, 20 bytes: a limit of 10 admits it, a limit of 9 does not.
+	q := "a=" + "ééééééé" + "é"
+	if env := Parse(q, 10); env["error"] != nil {
+		t.Errorf("Parse under a 10-character limit failed: %v", env["error"])
+	}
+	env := Parse(q, 9)
+	if env["error"] == nil {
+		t.Fatal("Parse under a 9-character limit succeeded")
+	}
+	if msg, _ := env["error"].(string); msg != "position 0: query length 10 exceeds maximum of 9 characters" {
+		t.Errorf("message = %q", msg)
+	}
+}
+
+func TestEntryPoints_HonourMaxLength(t *testing.T) {
+	q := "state=abcdefghijklmnopqrstuvwxyz"
+	fields := `[{"Name":"state","Type":"text"}]`
+	if env := ParseAndValidate(q, fields, 8); env["error"] == nil {
+		t.Error("ParseAndValidate ignored maxLength")
+	}
+	if env := ParseAndValidate(q, fields, 0); env["error"] != nil {
+		t.Errorf("ParseAndValidate with the limit disabled failed: %v", env["error"])
+	}
+	if env := Match(q, fields, `{"state":"x"}`, 8); env["error"] == nil {
+		t.Error("Match ignored maxLength")
+	}
+	if env := Match(q, fields, `{"state":"x"}`, 0); env["error"] != nil {
+		t.Errorf("Match with the limit disabled failed: %v", env["error"])
+	}
+	if env := Eval("[state]", fields, `{"state":"x"}`, 3); env["error"] == nil {
+		t.Error("Eval ignored maxLength")
+	}
+	if env := Eval("[state]", fields, `{"state":"x"}`, 0); env["error"] != nil {
+		t.Errorf("Eval with the limit disabled failed: %v", env["error"])
 	}
 }

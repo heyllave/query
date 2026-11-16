@@ -91,6 +91,7 @@ const toText: Visitor<string> = {
   visitUnary: (e) => `NOT ${visit(toText, e.expr)}`,
   visitQualifier: (e) => `${e.field.join(".")} ${e.op} ?`,
   visitPresence: (e) => `${e.field.join(".")} IS NOT NULL`,
+  visitCall: (e) => e.call, // a function used as a predicate, in source form
   visitGroup: (e) => visit(toText, e.expr),
   visitSelector: (e) => `${e.selector}(${e.inner ? visit(toText, e.inner) : ""})`,
 };

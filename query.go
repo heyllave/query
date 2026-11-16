@@ -7,7 +7,7 @@ import (
 	"github.com/heyllave/query/validate"
 )
 
-// DefaultMaxLength is the default maximum query string length in bytes.
+// DefaultMaxLength is the default maximum query string length in characters.
 const DefaultMaxLength = 256
 
 // options holds configuration for parsing.
@@ -18,7 +18,7 @@ type options struct {
 // Option configures parsing behavior.
 type Option func(*options)
 
-// WithMaxLength sets the maximum allowed query string length.
+// WithMaxLength sets the maximum allowed query string length in characters.
 // A value of 0 disables length checking; nesting stays bounded by
 // [parser.MaxNesting] either way.
 func WithMaxLength(n int) Option {

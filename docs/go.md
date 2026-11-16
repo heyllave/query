@@ -16,7 +16,7 @@ permalink: /go/
 go get github.com/heyllave/query
 ```
 
-The module has no dependencies outside the standard library. Until the first tagged release, pin a commit.
+The module has no dependencies outside the standard library. Pin a tag: `go get github.com/heyllave/query@v0.1.0`.
 
 ## Describe your fields
 
@@ -70,6 +70,8 @@ v, err := prog.Eval(map[string]any{"base": 100}) // 110.00000000000001
 ```
 
 The result is `int64`, `float64`, `string`, `bool`, `time.Time`, `time.Duration` or `[]any`. When the expression cannot resolve (a missing field, a division by zero), `Eval` returns `eval.ErrNoValue`.
+
+`Compile` takes a condition and answers yes or no; `CompileValue` takes an expression and returns what it computes. See [Conditions and values]({{ '/conditions-and-values/' | relative_url }}) for the difference and for what happens when one is passed to the other.
 
 ## Restrict what a caller may ask
 
