@@ -3,24 +3,23 @@ package eval
 import (
 	"fmt"
 
+	"github.com/heyllave/query/parser"
 	"github.com/heyllave/query/validate"
 )
 
 type options struct {
-	maxLength     int
+	parse         parser.Config
 	maxDepth      int
 	allowedOps    []validate.Op
 	allowedFields []string
 	funcs         FuncRegistry
 	noBuiltins    bool
 	customVal     validate.AstValidator
-	explicitAnd   bool
-	strictValues  bool
 }
 
 func defaultOpts() options {
 	return options{
-		maxLength: 256,
+		parse: parser.Config{MaxLength: 256},
 	}
 }
 
@@ -30,19 +29,31 @@ type Option func(*options)
 // WithMaxLength sets the maximum query string length in characters. 0 disables the limit;
 // nesting stays bounded by [parser.MaxNesting] either way.
 func WithMaxLength(n int) Option {
-	return func(o *options) { o.maxLength = n }
+	return func(o *options) { o.parse.MaxLength = n }
 }
 
 // WithExplicitAnd requires AND or OR between conditions; see
 // [parser.Config].
 func WithExplicitAnd() Option {
-	return func(o *options) { o.explicitAnd = true }
+	return func(o *options) { o.parse.ExplicitAnd = true }
 }
 
 // WithStrictValues refuses `=`, `<` and `>` inside an unquoted value; see
 // [parser.Config].
 func WithStrictValues() Option {
-	return func(o *options) { o.strictValues = true }
+	return func(o *options) { o.parse.StrictValues = true }
+}
+
+// WithStrict turns on every strict option; see [parser.Config.Strict].
+func WithStrict() Option {
+	return func(o *options) { o.parse = o.parse.Strict() }
+}
+
+// WithParseConfig sets the whole grammar a query is parsed under: the
+// length limit and the strict options together. It is how a caller that
+// already holds a [parser.Config] passes it on unchanged.
+func WithParseConfig(cfg parser.Config) Option {
+	return func(o *options) { o.parse = cfg }
 }
 
 // WithMaxDepth limits the nesting depth of the expression tree.

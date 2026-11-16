@@ -317,9 +317,9 @@ func TestBridge_NoHintKeyWhenThereIsNothingToSuggest(t *testing.T) {
 	}
 }
 
-// TestStrictOptions pins the two switches a bridge call may set: off unless
+// TestParseWith_StrictOptions pins the two switches a bridge call may set: off unless
 // asked for, and reported with the same coded envelope as any parse failure.
-func TestStrictOptions(t *testing.T) {
+func TestParseWith_StrictOptions(t *testing.T) {
 	const fields = `[{"name":"a","type":"integer"},{"name":"b","type":"integer"}]`
 	strict := Options{MaxLength: DefaultMaxLength, ExplicitAnd: true, StrictValues: true}
 

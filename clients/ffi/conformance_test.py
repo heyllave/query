@@ -123,6 +123,13 @@ def check_strict_options(lib):
     assert env.get("result") is True, env
     env = lib.call("QueryParse", query="a=1", explicitAnd="yes")
     assert "must be a boolean" in env.get("error", ""), env
+    for bad in ("yes", 1, None):
+        env = lib.call("QueryParse", query="a=1 b=2", strictValues=bad)
+        assert env.get("error") == "strictValues must be a boolean", env
+    # Two bad members always name the same one.
+    for _ in range(20):
+        env = lib.call("QueryParse", query="a=1", strictValues=1, explicitAnd=1)
+        assert env.get("error") == "explicitAnd must be a boolean", env
 
 
 def check_threads(lib):

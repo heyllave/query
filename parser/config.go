@@ -26,3 +26,12 @@ type Config struct {
 	// is written in quotes (`url="https://x/?a=b"`).
 	StrictValues bool
 }
+
+// Strict returns c with every strict option on. It is the one place that
+// lists them, so the WithStrict option of each package cannot fall behind
+// when an option is added.
+func (c Config) Strict() Config {
+	c.ExplicitAnd = true
+	c.StrictValues = true
+	return c
+}

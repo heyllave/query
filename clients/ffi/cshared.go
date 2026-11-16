@@ -17,15 +17,21 @@
 //
 // Every function takes one NUL-terminated UTF-8 JSON object and returns one:
 //
-//	QueryParse            {"query", "maxLength"?, strict?}  -> {"result": ast}
+//	QueryParse            {"query", "maxLength"?, "explicitAnd"?, "strictValues"?} -> {"result": ast}
 //	QueryValidate         {"ast", "fields", "maxLength"?} -> {"valid": bool, ...}
 //	QueryStringify        {"ast", "maxLength"?}           -> {"result": string}
-//	QueryParseAndValidate {"query", "fields", "maxLength"?, strict?}           -> {"result": ast}
-//	QueryMatch            {"query", "fields", "record", "maxLength"?, strict?} -> {"result": bool}
+//	QueryParseAndValidate {"query", "fields", "maxLength"?, "explicitAnd"?, "strictValues"?} -> {"result": ast}
+//	QueryMatch            {"query", "fields", "record", "maxLength"?, "explicitAnd"?, "strictValues"?} -> {"result": bool}
 //	QueryEval             {"query", "fields", "record", "maxLength"?} -> {"result": value}
 //
 // "maxLength" is the query length limit in characters (default 256); 0
 // disables it.
+//
+// "explicitAnd" and "strictValues" are booleans, false when absent, that turn
+// off lenient forms of the grammar: with "explicitAnd" a space between two
+// conditions is an error (code missingAnd), and with "strictValues" an
+// unquoted value may not contain =, < or >. A value that is not a boolean is
+// an error. A key the call does not list is ignored.
 //
 // A failure answers {"error": message} with "errors" (parse) or
 // "validationErrors" (validation) listing each failure's stable code and span.
@@ -88,12 +94,21 @@ func (r request) options() (bridgejson.Options, bridgejson.Envelope) {
 		return bridgejson.Options{}, fail
 	}
 	o := bridgejson.Options{MaxLength: maxLen}
-	for key, dst := range map[string]*bool{"explicitAnd": &o.ExplicitAnd, "strictValues": &o.StrictValues} {
-		if v, ok := r[key]; ok {
-			if err := json.Unmarshal(v, dst); err != nil {
-				return bridgejson.Options{}, bridgejson.Fail(key + " must be a boolean")
-			}
+	// In a fixed order, so two bad members always name the same one first.
+	for _, sw := range []struct {
+		key string
+		dst *bool
+	}{{"explicitAnd", &o.ExplicitAnd}, {"strictValues", &o.StrictValues}} {
+		v, ok := r[sw.key]
+		if !ok {
+			continue
 		}
+		// A JSON null would unmarshal into a bool without complaint and
+		// leave it false; it is not a boolean, so it is refused too.
+		if string(v) != "true" && string(v) != "false" {
+			return bridgejson.Options{}, bridgejson.Fail(sw.key + " must be a boolean")
+		}
+		*sw.dst = string(v) == "true"
 	}
 	return o, nil
 }

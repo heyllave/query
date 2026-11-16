@@ -38,32 +38,10 @@ func Fail(msg string) Envelope { return Envelope{"error": msg} }
 
 func ok(result any) Envelope { return Envelope{"result": result} }
 
-// Options is what a bridge call may set about how a query is parsed. The zero
-// value of the two switches is the default grammar; see [parser.Config].
-type Options struct {
-	// MaxLength is the query length limit in characters; zero or less
-	// disables it.
-	MaxLength int
-	// ExplicitAnd requires AND or OR between conditions.
-	ExplicitAnd bool
-	// StrictValues refuses =, < and > inside an unquoted value.
-	StrictValues bool
-}
-
-func (o Options) config() parser.Config {
-	return parser.Config{MaxLength: o.MaxLength, ExplicitAnd: o.ExplicitAnd, StrictValues: o.StrictValues}
-}
-
-func (o Options) evalOptions() []eval.Option {
-	opts := []eval.Option{eval.WithMaxLength(o.MaxLength)}
-	if o.ExplicitAnd {
-		opts = append(opts, eval.WithExplicitAnd())
-	}
-	if o.StrictValues {
-		opts = append(opts, eval.WithStrictValues())
-	}
-	return opts
-}
+// Options is what a bridge call may set about how a query is parsed: the
+// length limit (zero or less disables it) and the strict switches. It is the
+// parser's own configuration, so a bridge cannot fall behind it.
+type Options = parser.Config
 
 // Parse parses query and answers with its AST. A maxLength of zero or less
 // disables the length limit, as in [parser.Parse].
@@ -73,7 +51,7 @@ func Parse(query string, maxLength int) Envelope {
 
 // ParseWith is [Parse] under the given options.
 func ParseWith(query string, o Options) Envelope {
-	expr, err := parser.ParseWith(query, o.config())
+	expr, err := parser.ParseWith(query, o)
 	if err != nil {
 		return parseFailure(err)
 	}
@@ -121,7 +99,7 @@ func ParseAndValidate(query, fieldsJSON string, maxLength int) Envelope {
 
 // ParseAndValidateWith is [ParseAndValidate] under the given options.
 func ParseAndValidateWith(query, fieldsJSON string, o Options) Envelope {
-	expr, err := parser.ParseWith(query, o.config())
+	expr, err := parser.ParseWith(query, o)
 	if err != nil {
 		return parseFailure(err)
 	}
@@ -147,7 +125,7 @@ func MatchWith(query, fieldsJSON, recordJSON string, o Options) Envelope {
 	if fail != nil {
 		return fail
 	}
-	prog, err := eval.Compile(query, fields, o.evalOptions()...)
+	prog, err := eval.Compile(query, fields, eval.WithParseConfig(o))
 	if err != nil {
 		return compileFailure(err)
 	}

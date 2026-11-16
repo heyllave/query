@@ -19,16 +19,17 @@ import (
 // mistakes, and no error site has to guess at intent.
 //
 // value is true for a value expression (ParseValue), where a comparison is
-// the mistake rather than the point. maxLength is the caller's limit on the
-// query, in characters, or 0 for none: a rewrite longer than it would be
-// refused if typed back, so it is not suggested.
-func annotate(input string, err error, value bool, maxLength int) error {
+// the mistake rather than the point. cfg is the grammar the query was parsed
+// under: a rewrite is only suggested if the caller would accept it typed
+// back, so it has to fit cfg.MaxLength and parse under the same strict
+// options.
+func annotate(input string, err error, value bool, cfg Config) error {
 	var list ErrorList
 	if !errors.As(err, &list) {
 		return err
 	}
 	list = mergeRepeats(input, list)
-	q := &query{input: input, value: value, maxLength: maxLength}
+	q := &query{input: input, value: value, maxLength: cfg.MaxLength, cfg: cfg}
 	for i, e := range list {
 		if i == maxHinted {
 			break
@@ -47,6 +48,7 @@ type query struct {
 	input     string
 	value     bool
 	maxLength int
+	cfg       Config
 	words     []word
 	scanned   bool
 }
@@ -126,7 +128,7 @@ func (q *query) parses(rewrite string) bool {
 	if q.maxLength > 0 && utf8.RuneCountInString(rewrite) > q.maxLength {
 		return false
 	}
-	return parses(rewrite)
+	return parses(rewrite, q.cfg)
 }
 
 // A hint reads the query around its error, and some re-parse a corrected
@@ -160,15 +162,16 @@ func mergeRepeats(input string, list ErrorList) ErrorList {
 	return out
 }
 
-// parses reports whether q is a valid condition. Hints use it to check a
-// rewrite before suggesting it, without going back through annotate.
-func parses(q string) bool {
-	l := &lexer{input: q}
+// parses reports whether q is a valid condition under cfg's strict options.
+// Hints use it to check a rewrite before suggesting it, without going back
+// through annotate.
+func parses(q string, cfg Config) bool {
+	l := &lexer{input: q, strictValues: cfg.StrictValues}
 	l.run()
 	if len(l.errors) > 0 {
 		return false
 	}
-	p := &parser{tokens: l.tokens}
+	p := &parser{tokens: l.tokens, explicitAnd: cfg.ExplicitAnd}
 	p.parseExpression()
 	return len(p.errors) == 0 && p.peek().Type == token.EOF
 }
@@ -264,7 +267,7 @@ func hintFor(q *query, e *Error) string {
 		}
 		return `separate arguments with commas; an argument is a field, a number or quoted text`
 	case CodeMissingAnd:
-		return `join two conditions with AND or OR: a=1 AND b=2; quote text that has a space: name="John Doe"`
+		return c.missingAnd()
 	case CodeQueryTooLong, CodeInvalidInteger, CodeInvalidFloat, CodeNestingTooDeep:
 		return ""
 	}
@@ -525,6 +528,27 @@ func (c context) doubledOperator() string {
 		return with(fmt.Sprintf("write %c= with no space", prev), string(prev)+"=")
 	}
 	return fmt.Sprintf("to compare with text that starts with %q, put the value in quotes", string(c.ch))
+}
+
+// missingAnd is the hint for two conditions with no connective, under
+// ExplicitAnd. A bracket directly after a name is a keyed lookup from another
+// language, and joining it with AND would produce exactly the misreading the
+// option exists to refuse, so it gets its own advice.
+func (c context) missingAnd() string {
+	if c.ch == '[' && c.off > 0 && c.before == c.input[:c.off] && isWordRune(rune(c.input[c.off-1])) {
+		end := skipBracketed(c.input, c.off)
+		key := strings.Trim(c.input[c.off+1:max(end-1, c.off+1)], `"`)
+		name := lastWord(c.before)
+		if key != "" && name != "" && !strings.ContainsAny(key, " \t\"[]") {
+			dotted := name + "." + key
+			if q := c.input[:c.off-len(name)] + dotted + c.input[end:]; c.parses(q) {
+				return fmt.Sprintf("a key is written after a dot: %s", q)
+			}
+			return fmt.Sprintf("a key is written after a dot: %s", dotted)
+		}
+		return "a key is written after a dot: labels.team"
+	}
+	return `join two conditions with AND or OR: a=1 AND b=2; quote text that has a space: name="John Doe"`
 }
 
 func (c context) unexpected(value bool) string {

@@ -15,13 +15,23 @@ semantic versioning.
   `query.WithStrictValues()` refuses `=`, `<` and `>` inside an unquoted
   value, so `a=1+b=2` is an error instead of a comparison with the text
   `1+b=2`. `query.WithStrict()` turns both on. The same switches are
-  `parser.ParseWith` with a `parser.Config`, and `eval.WithExplicitAnd()` and
-  `eval.WithStrictValues()`. Both are off by default and only refuse
+  `parser.ParseWith` with a `parser.Config`, and `eval.WithExplicitAnd()`,
+  `eval.WithStrictValues()` and `eval.WithStrict()`. `query.Match` and
+  `query.Eval` now take the same options as `query.Parse`, so a host that
+  parses strictly matches strictly. Both are off by default and only refuse
   queries: one accepted under the strict options parses to the same tree
   under the default grammar. The TypeScript client takes them as an object
   in place of the `maxLength` number (`parse(q, { explicitAnd: true })`), and
   the C library as the `"explicitAnd"` and `"strictValues"` keys of a
   request.
+- Under a strict option, a hint that rewrites the query is checked against
+  that option, so it is never a query the host would refuse. A keyed lookup
+  such as `labels["team"]=x` is told to use a dot (`labels.team=x`), and a
+  comparison inside a value is told both ways out: join two conditions with
+  `AND`, or quote the value. A missing connective is reported together with a
+  lexical error that follows it, instead of only after that error is fixed.
+- The TypeScript client and the C library refuse a strict switch that is
+  not a boolean (`explicitAnd: 1`), instead of parsing leniently.
 - A Grammar page in the documentation: the EBNF the parser implements, how
   each ambiguous form is read, and what the language leaves out on purpose.
 

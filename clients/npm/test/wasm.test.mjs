@@ -86,6 +86,20 @@ test("the strict options refuse the lenient forms and are off by default", () =>
   assert.equal(w.queryMatch("a=1 b=2", fields, '{"a":1,"b":2}', strict).errors[0].code, "missingAnd");
   assert.equal(w.queryMatch("a=1 AND b=2", fields, '{"a":1,"b":2}', strict).result, true);
 
+  // A switch of the wrong type is an error, never a silent default: a host
+  // that passed it believes strict parsing is on.
+  for (const bad of [{ explicitAnd: 1 }, { strictValues: "true" }, { explicitAnd: null }, { maxLength: "9" }]) {
+    const env = w.queryParse("a=1 b=2", bad);
+    assert.match(env.error, /must be a (boolean|number)/, JSON.stringify(bad));
+    assert.equal(env.result, undefined);
+  }
+  assert.match(w.queryMatch("a=1 b=2", fields, '{"a":1,"b":2}', { explicitAnd: "yes" }).error, /explicitAnd must be a boolean/);
+  assert.match(w.queryParseAndValidate("a=1 b=2", fields, { strictValues: 0 }).error, /strictValues must be a boolean/);
+
+  // A strict failure's hint is one the strict grammar accepts.
+  const keyed = w.queryParse('labels["team"]=x', { explicitAnd: true });
+  assert.match(keyed.errors[0].hint, /labels\.team=x/);
+
   // The object form still carries the length limit.
   assert.equal(w.queryParse("a=1 AND b=2", { maxLength: 3 }).errors[0].code, "queryTooLong");
 });

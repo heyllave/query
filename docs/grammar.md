@@ -132,7 +132,8 @@ expr, err := query.Parse(q, query.WithStrict())
 
 // The same switches on the parser and the evaluator.
 expr, err := parser.ParseWith(q, parser.Config{MaxLength: 512, ExplicitAnd: true, StrictValues: true})
-prog, err := eval.Compile(q, fields, eval.WithExplicitAnd(), eval.WithStrictValues())
+prog, err := eval.Compile(q, fields, eval.WithStrict())
+ok, err := query.Match(q, fields, record, query.WithStrict())
 ```
 
 A strict option only refuses queries. It never changes what an accepted query
@@ -156,6 +157,9 @@ q.parseAndValidate(text, fields, { maxLength: 512, explicitAnd: true });
 ```json
 {"query": "a=1 b=2", "explicitAnd": true, "strictValues": true}
 ```
+
+A switch that is not a boolean is an error in both, so a host cannot believe
+strict parsing is on when it is not.
 
 `parse`, `parseAndValidate` and `match` take them. `validate` and `stringify`
 work on a tree that is already parsed, and `eval` takes a value, not a

@@ -113,3 +113,39 @@ func TestParse_StrictOptions(t *testing.T) {
 		})
 	}
 }
+
+func TestMatch_StrictOptions(t *testing.T) {
+	fields := []validate.FieldConfig{
+		{Name: "a", Type: validate.TypeInteger, AllowedOps: validate.NumericOps},
+		{Name: "b", Type: validate.TypeInteger, AllowedOps: validate.NumericOps},
+	}
+	record := map[string]any{"a": 1, "b": 2}
+
+	t.Run("lenient by default", func(t *testing.T) {
+		ok, err := query.Match("a=1 b=2", fields, record)
+		if err != nil || !ok {
+			t.Errorf("Match = %v, %v; want true", ok, err)
+		}
+	})
+
+	t.Run("refuses what Parse refuses under the same option", func(t *testing.T) {
+		_, parseErr := query.Parse("a=1 b=2", query.WithStrict())
+		_, matchErr := query.Match("a=1 b=2", fields, record, query.WithStrict())
+		if parseErr == nil || matchErr == nil {
+			t.Errorf("Parse error = %v, Match error = %v; want both refused", parseErr, matchErr)
+		}
+	})
+
+	t.Run("accepts a plain query under strict", func(t *testing.T) {
+		ok, err := query.Match("a=1 AND b=2", fields, record, query.WithStrict())
+		if err != nil || !ok {
+			t.Errorf("Match = %v, %v; want true", ok, err)
+		}
+	})
+
+	t.Run("honours the length limit", func(t *testing.T) {
+		if _, err := query.Match("a=1 AND b=2", fields, record, query.WithMaxLength(3)); err == nil {
+			t.Error("expected a length error")
+		}
+	})
+}

@@ -1,7 +1,10 @@
 package parser
 
 import (
+	"fmt"
 	"math"
+	"sort"
+	"strconv"
 	"strings"
 	"time"
 	"unicode"
@@ -45,10 +48,45 @@ func lexWith(input string, cfg Config) ([]token.Token, error) {
 	l := &lexer{input: input, strictValues: cfg.StrictValues}
 	l.run()
 
-	if err := l.errors.errOrNil(); err != nil {
-		return nil, annotate(input, err, false, cfg.MaxLength)
+	if len(l.errors) > 0 {
+		errs := l.errors
+		if cfg.ExplicitAnd {
+			errs = withMissingAnds(errs, l.tokens)
+		}
+		return nil, annotate(input, errs, false, cfg)
 	}
 	return l.tokens, nil
+}
+
+// withMissingAnds adds, to the errors of a query that did not lex, the
+// missing connectives that come before the first of them. Without this a
+// query with both mistakes (`a=1 b==2` under ExplicitAnd) reports only the
+// lexical one, and the writer who fixes it is handed a second error the first
+// answer did not mention. Tokens before the first lexical error are what the
+// lexer would have produced anyway, so a missing connective found among them
+// is real; anything later is read from a stream the error already disturbed
+// and is left out.
+func withMissingAnds(errs ErrorList, tokens []token.Token) ErrorList {
+	first := errs[0].Position.Offset
+	for _, e := range errs[1:] {
+		if e.Position.Offset < first {
+			first = e.Position.Offset
+		}
+	}
+	p := &parser{tokens: tokens, explicitAnd: true}
+	p.parseExpression()
+	var out ErrorList
+	for _, e := range p.errors {
+		if e.Code == CodeMissingAnd && e.Position.Offset < first {
+			out = append(out, e)
+		}
+	}
+	if len(out) == 0 {
+		return errs
+	}
+	out = append(out, errs...)
+	sort.SliceStable(out, func(i, j int) bool { return out[i].Position.Offset < out[j].Position.Offset })
+	return out
 }
 
 // checkInput rejects input that is longer than maxLength characters (when
@@ -87,7 +125,7 @@ func LexValue(input string, maxLength int) ([]token.Token, error) {
 	l.run()
 
 	if err := l.errors.errOrNil(); err != nil {
-		return nil, annotate(input, err, true, maxLength)
+		return nil, annotate(input, err, true, Config{MaxLength: maxLength})
 	}
 	return l.tokens, nil
 }
@@ -814,7 +852,7 @@ func (l *lexer) lexUnquotedStringValue() {
 	var buf strings.Builder
 	hasWildcard := false
 	quoteSeen := false
-	operatorSeen := false
+	operatorAt := -1       // offset of the first comparison character, under strictValues
 	var literalStars []int // byte offsets in buf of escaped stars
 
 	for l.pos < len(l.input) {
@@ -852,12 +890,12 @@ func (l *lexer) lexUnquotedStringValue() {
 			l.errors.add(newError(CodeUnexpectedChar, ErrSyntax, token.Position{Offset: l.pos, Length: 1},
 				`unexpected '"' inside an unquoted value; quote the whole value and write the quote as \"`))
 		}
-		if l.strictValues && !operatorSeen && (ch == '=' || ch == '<' || ch == '>') {
+		if l.strictValues && operatorAt < 0 && l.pos > start && (ch == '=' || ch == '<' || ch == '>') {
 			// a=1+b=2 would otherwise compare a with the text "1+b=2": a
-			// second condition swallowed by the first, with no complaint.
-			operatorSeen = true
-			l.errors.add(newError(CodeUnexpectedChar, ErrSyntax, token.Position{Offset: l.pos, Length: 1},
-				"unexpected %q inside an unquoted value; quote the value, or separate two conditions with AND", string(ch)))
+			// second condition swallowed by the first, with no complaint. A
+			// value that opens with one of these is refused by lexValue
+			// under either grammar, so only a later one is reported here.
+			operatorAt = l.pos
 		}
 		buf.WriteByte(ch)
 		l.pos++
@@ -865,6 +903,16 @@ func (l *lexer) lexUnquotedStringValue() {
 
 	raw := l.input[start:l.pos]
 	value := buf.String()
+	if operatorAt >= 0 {
+		ch := string(l.input[operatorAt])
+		e := newError(CodeUnexpectedChar, ErrSyntax, token.Position{Offset: operatorAt, Length: 1},
+			"unexpected %q inside an unquoted value", ch)
+		// The hint is set here, where the whole value is known, because the
+		// two readings need different fixes and only the writer knows which.
+		e.Hint = fmt.Sprintf("two conditions are joined with AND: a=1 AND b=2; if the %q is part of the value, put the value in quotes: %s",
+			ch, strconv.Quote(value))
+		l.errors.add(e)
+	}
 	if hasWildcard {
 		value = encodePattern(value, literalStars)
 	}

@@ -12,9 +12,7 @@ const DefaultMaxLength = 256
 
 // options holds configuration for parsing.
 type options struct {
-	maxLength    int
-	explicitAnd  bool
-	strictValues bool
+	parse parser.Config
 }
 
 // Option configures parsing behavior.
@@ -25,7 +23,7 @@ type Option func(*options)
 // [parser.MaxNesting] either way.
 func WithMaxLength(n int) Option {
 	return func(o *options) {
-		o.maxLength = n
+		o.parse.MaxLength = n
 	}
 }
 
@@ -35,7 +33,7 @@ func WithMaxLength(n int) Option {
 // [parser.Config].
 func WithExplicitAnd() Option {
 	return func(o *options) {
-		o.explicitAnd = true
+		o.parse.ExplicitAnd = true
 	}
 }
 
@@ -45,7 +43,7 @@ func WithExplicitAnd() Option {
 // [parser.Config].
 func WithStrictValues() Option {
 	return func(o *options) {
-		o.strictValues = true
+		o.parse.StrictValues = true
 	}
 }
 
@@ -56,13 +54,12 @@ func WithStrictValues() Option {
 // an API's filter parameter.
 func WithStrict() Option {
 	return func(o *options) {
-		o.explicitAnd = true
-		o.strictValues = true
+		o.parse = o.parse.Strict()
 	}
 }
 
 func defaultOptions() options {
-	return options{maxLength: DefaultMaxLength}
+	return options{parse: parser.Config{MaxLength: DefaultMaxLength}}
 }
 
 // Parse parses a query string into an AST expression.
@@ -71,11 +68,7 @@ func Parse(q string, opts ...Option) (ast.Expression, error) {
 	for _, opt := range opts {
 		opt(&o)
 	}
-	return parser.ParseWith(q, parser.Config{
-		MaxLength:    o.maxLength,
-		ExplicitAnd:  o.explicitAnd,
-		StrictValues: o.strictValues,
-	})
+	return parser.ParseWith(q, o.parse)
 }
 
 // Validate validates an AST against field configurations.
@@ -100,8 +93,12 @@ func ParseAndValidate(q string, fields []validate.FieldConfig, opts ...Option) (
 // record in one call. It is a convenience for one-off checks; to evaluate the
 // same query against many records, compile once with [github.com/heyllave/query/eval.Compile]
 // and reuse the resulting program.
-func Match(q string, fields []validate.FieldConfig, record map[string]any) (bool, error) {
-	prog, err := eval.Compile(q, fields)
+func Match(q string, fields []validate.FieldConfig, record map[string]any, opts ...Option) (bool, error) {
+	o := defaultOptions()
+	for _, opt := range opts {
+		opt(&o)
+	}
+	prog, err := eval.Compile(q, fields, eval.WithParseConfig(o.parse))
 	if err != nil {
 		return false, err
 	}
@@ -114,8 +111,12 @@ func Match(q string, fields []validate.FieldConfig, record map[string]any) (bool
 // compile once with eval.CompileValue and reuse the program. It returns
 // [github.com/heyllave/query/eval.ErrNoValue] when the expression cannot
 // resolve (e.g. a missing field or division by zero).
-func Eval(q string, fields []validate.FieldConfig, record map[string]any) (any, error) {
-	prog, err := eval.CompileValue(q, fields)
+func Eval(q string, fields []validate.FieldConfig, record map[string]any, opts ...Option) (any, error) {
+	o := defaultOptions()
+	for _, opt := range opts {
+		opt(&o)
+	}
+	prog, err := eval.CompileValue(q, fields, eval.WithMaxLength(o.parse.MaxLength))
 	if err != nil {
 		return nil, err
 	}
