@@ -7,6 +7,7 @@ import (
 	"unicode"
 	"unicode/utf8"
 
+	"github.com/heyllave/query/internal/hintwords"
 	"github.com/heyllave/query/internal/nearest"
 	"github.com/heyllave/query/token"
 )
@@ -18,22 +19,114 @@ import (
 // mistakes, and no error site has to guess at intent.
 //
 // value is true for a value expression (ParseValue), where a comparison is
-// the mistake rather than the point.
-func annotate(input string, err error, value bool) error {
+// the mistake rather than the point. maxLength is the caller's limit on the
+// query, in characters, or 0 for none: a rewrite longer than it would be
+// refused if typed back, so it is not suggested.
+func annotate(input string, err error, value bool, maxLength int) error {
 	var list ErrorList
 	if !errors.As(err, &list) {
 		return err
 	}
 	list = mergeRepeats(input, list)
+	q := &query{input: input, value: value, maxLength: maxLength}
 	for i, e := range list {
 		if i == maxHinted {
 			break
 		}
 		if e.Hint == "" {
-			e.Hint = hintFor(input, e, value)
+			e.Hint = hintFor(q, e)
 		}
 	}
 	return list
+}
+
+// query is what every hint of one failed parse shares: the text, the mode,
+// the caller's limit, and the words of the text, which are scanned once
+// however many errors ask for them.
+type query struct {
+	input     string
+	value     bool
+	maxLength int
+	words     []word
+	scanned   bool
+}
+
+// word is one bare word of the query, outside quotes and brackets.
+type word struct {
+	start, end int
+	// field is true when the word is used as a name: followed by an operator,
+	// a dot, a selector or a call, or itself a later part of a dotted name.
+	field bool
+}
+
+// bareWords returns the words of the query that are not inside a quoted
+// string or a bracketed field name, where text is data rather than syntax.
+func (q *query) bareWords() []word {
+	if q.scanned {
+		return q.words
+	}
+	q.scanned = true
+	in := q.input
+	for i := 0; i < len(in); {
+		r, size := utf8.DecodeRuneInString(in[i:])
+		switch {
+		case r == '"':
+			i = skipQuoted(in, i)
+		case r == '[':
+			i = skipBracketed(in, i)
+		case isWordRune(r):
+			text := firstWord(in[i:])
+			end := i + len(text)
+			next := strings.TrimLeftFunc(in[end:], unicode.IsSpace)
+			used := next != "" && strings.ContainsRune("=<>!:.@(", rune(next[0]))
+			dotted := i > 0 && in[i-1] == '.'
+			q.words = append(q.words, word{start: i, end: end, field: used || dotted})
+			i = end
+		default:
+			i += size
+		}
+	}
+	return q.words
+}
+
+// skipQuoted returns the index just past the string that opens at in[open],
+// or len(in) when it never closes.
+func skipQuoted(in string, open int) int {
+	for i := open + 1; i < len(in); i++ {
+		switch in[i] {
+		case '\\':
+			i++
+		case '"':
+			return i + 1
+		}
+	}
+	return len(in)
+}
+
+// skipBracketed returns the index just past the bracketed name that opens at
+// in[open], or len(in) when it never closes.
+func skipBracketed(in string, open int) int {
+	for i := open + 1; i < len(in); i++ {
+		switch in[i] {
+		case '"':
+			i = skipQuoted(in, i) - 1
+		case ']':
+			return i + 1
+		}
+	}
+	return len(in)
+}
+
+// parses reports whether rewrite is a valid condition the caller would
+// accept: within the caller's length limit and the rewrite bound.
+func (q *query) parses(rewrite string) bool {
+	if len(rewrite) > maxRewriteLength {
+		return false
+	}
+	if q.maxLength > 0 && utf8.RuneCountInString(rewrite) > q.maxLength {
+		return false
+	}
+	return parses(rewrite)
 }
 
 // A hint reads the query around its error, and some re-parse a corrected
@@ -70,9 +163,6 @@ func mergeRepeats(input string, list ErrorList) ErrorList {
 // parses reports whether q is a valid condition. Hints use it to check a
 // rewrite before suggesting it, without going back through annotate.
 func parses(q string) bool {
-	if len(q) > maxRewriteLength {
-		return false
-	}
 	l := &lexer{input: q}
 	l.run()
 	if len(l.errors) > 0 {
@@ -99,50 +189,31 @@ func describe(tok token.Token) string {
 }
 
 const (
-	hintArithmeticRule = "arithmetic goes on the right of the operator or inside a function: "
-	hintArithmeticLeft = hintArithmeticRule + "total>[base]*1.1 or float([base]*1.1)>3"
-	hintNotSQL         = "only conditions are allowed here, such as field=value; " +
-		"selecting, sorting and limiting are not part of a query"
+	hintArithmeticRule   = "arithmetic goes on the right of the operator or inside a function: "
+	hintArithmeticLeft   = hintArithmeticRule + "total>[base]*1.1 or float([base]*1.1)>3"
 	hintNoCompareInValue = "a value expression computes a value and cannot compare or combine; " +
 		"evaluate this as a condition instead"
 	hintDurationForm = "a duration is a number and one unit, with no space: 30m, 4h, 7d, 2w"
 )
 
-// sqlWords are words from SQL that have a different spelling here. The hint
-// is given when the error sits on or just after one of them.
-var sqlWords = map[string]string{
-	"LIKE":     "there is no LIKE; use = with * as the wildcard: name=john*",
-	"ILIKE":    "there is no ILIKE; = already ignores case, and * is the wildcard: name=john*",
-	"BETWEEN":  "a range is written with a colon and two dots: total:1..5",
-	"IS":       "to test for a missing value write NOT field; for a present one write the field alone",
-	"NULL":     "to test for a missing value write NOT field; for a present one write the field alone",
-	"CONTAINS": `to test for part of a text use a wildcard, name=*john*, or contains(name, "john")`,
-	"SELECT":   hintNotSQL,
-	"FROM":     hintNotSQL,
-	"WHERE":    hintNotSQL,
-	"ORDER":    hintNotSQL,
-	"GROUP":    hintNotSQL,
-	"LIMIT":    hintNotSQL,
-	"OFFSET":   hintNotSQL,
+// sqlCodes are the failures a word borrowed from SQL produces: something
+// unexpected, or a field or value missing where the SQL keyword stood.
+var sqlCodes = map[Code]bool{
+	CodeUnexpected: true, CodeUnexpectedChar: true, CodeExpectedField: true, CodeExpectedValue: true,
 }
 
-// durationWords are spelled-out units, which a duration literal abbreviates.
-var durationWords = map[string]string{
-	"minute": "m", "minutes": "m", "min": "m", "mins": "m",
-	"hour": "h", "hours": "h", "hr": "h", "hrs": "h",
-	"day": "d", "days": "d",
-	"week": "w", "weeks": "w",
-}
-
-func hintFor(input string, e *Error, value bool) string {
+func hintFor(q *query, e *Error) string {
 	off := e.Position.Offset
-	if off < 0 || off > len(input) {
+	if off < 0 || off > len(q.input) {
 		return ""
 	}
-	c := newContext(input, off)
+	c := newContext(q, off)
+	value := q.value
 
-	if h := c.sqlHint(); h != "" && !value {
-		return h
+	if !value && sqlCodes[e.Code] {
+		if h := c.sqlHint(); h != "" {
+			return h
+		}
 	}
 
 	switch e.Code {
@@ -200,7 +271,7 @@ func hintFor(input string, e *Error, value bool) string {
 
 // context is what the hints read: the text on each side of the error.
 type context struct {
-	input      string
+	*query
 	off        int
 	before     string // input before the error, trailing space removed
 	rest       string // input from the error on
@@ -209,8 +280,9 @@ type context struct {
 	wordAt     string // the word that starts at the error
 }
 
-func newContext(input string, off int) context {
-	c := context{input: input, off: off, rest: input[off:]}
+func newContext(q *query, off int) context {
+	input := q.input
+	c := context{query: q, off: off, rest: input[off:]}
 	c.before = strings.TrimRightFunc(input[:off], unicode.IsSpace)
 	if c.rest != "" {
 		c.ch, _ = utf8.DecodeRuneInString(c.rest)
@@ -257,32 +329,51 @@ func isConnective(word string) bool {
 	return strings.EqualFold(word, "AND") || strings.EqualFold(word, "OR") || strings.EqualFold(word, "NOT")
 }
 
-// sqlHint answers when a word borrowed from SQL is used as a keyword at or
-// before the error. A field may be called limit or from, so a word followed
-// by an operator (limit>5) or part of a dotted name is a field, not SQL.
+// sqlHint answers when a word borrowed from SQL is used as a keyword in the
+// clause that failed: at the error, or before it with no AND or OR between.
+// A field may be called limit or from, so a word used as a name (limit>5,
+// labels.order) is a field, not SQL; and text inside quotes is data.
 func (c context) sqlHint() string {
-	end := c.off + len(c.wordAt)
-	for i := 0; i < end; {
-		r, size := utf8.DecodeRuneInString(c.input[i:])
-		if !isWordRune(r) {
-			i += size
+	words := c.bareWords()
+	last := len(words) - 1
+	for last >= 0 && words[last].start > c.off {
+		last--
+	}
+	for i := last; i >= 0; i-- {
+		w := words[i]
+		text := c.input[w.start:w.end]
+		if strings.EqualFold(text, "AND") || strings.EqualFold(text, "OR") {
+			if w.start < c.off && !c.betweenBefore(words, i) {
+				return ""
+			}
 			continue
 		}
-		word := firstWord(c.input[i:])
-		next := strings.TrimLeftFunc(c.input[i+len(word):], unicode.IsSpace)
-		usedAsField := next != "" && strings.ContainsRune("=<>!:.@(", rune(next[0]))
-		dotted := i > 0 && (c.input[i-1] == '.' || c.input[i-1] == '[' || c.input[i-1] == '"')
-		if h, ok := sqlWords[strings.ToUpper(word)]; ok && !usedAsField && !dotted {
-			if strings.EqualFold(word, "BETWEEN") {
-				if q := c.betweenAsRange(); q != "" {
-					return "a range is written with a colon and two dots: " + q
-				}
-			}
-			return h
+		if w.field || isConnective(text) {
+			continue
 		}
-		i += len(word)
+		hint, ok := hintwords.SQL(text)
+		if !ok {
+			continue
+		}
+		if strings.EqualFold(text, "BETWEEN") {
+			if q := c.betweenAsRange(w); q != "" {
+				return "a range is written with a colon and two dots: " + q
+			}
+		}
+		return hint
 	}
 	return ""
+}
+
+// betweenBefore reports whether the AND at words[i] is the one inside
+// BETWEEN lo AND hi rather than a connective that ends the clause.
+func (c context) betweenBefore(words []word, i int) bool {
+	for j := i - 1; j >= 0 && j >= i-2; j-- {
+		if strings.EqualFold(c.input[words[j].start:words[j].end], "BETWEEN") {
+			return true
+		}
+	}
+	return false
 }
 
 // fixed is the query with input[start:end] replaced by repl, when that makes
@@ -292,7 +383,7 @@ func (c context) fixed(start, end int, repl string) string {
 	if start < 0 || end > len(c.input) || start > end {
 		return ""
 	}
-	if q := c.input[:start] + repl + c.input[end:]; parses(q) {
+	if q := c.input[:start] + repl + c.input[end:]; c.parses(q) {
 		return q
 	}
 	return ""
@@ -355,6 +446,11 @@ func (c context) unexpectedChar(value bool) string {
 // When the query is a single comparison it shows that comparison rewritten,
 // total*2>3 as float([total]*2)>3; otherwise it states the rule.
 func (c context) arithmeticLeft() string {
+	// The rewrite below drops spaces, which is only safe when none of them is
+	// inside a quoted string.
+	if strings.ContainsRune(c.input, '"') {
+		return hintArithmeticLeft
+	}
 	for _, word := range strings.Fields(c.input) {
 		if isConnective(word) {
 			return hintArithmeticLeft
@@ -381,14 +477,14 @@ func (c context) arithmeticLeft() string {
 	for opLen < len(right) && opLen < 2 && strings.ContainsRune("=<>!", rune(right[opLen])) {
 		opLen++
 	}
-	if operand := right[opLen:]; operand != "" && firstWord(operand) == operand && !isNumber(operand) {
+	if operand := right[opLen:]; isFieldName(operand) {
 		if mirrored, ok := mirrorOperator[right[:opLen]]; ok {
-			if rewrite := operand + mirrored + left; parses(rewrite) {
+			if rewrite := operand + mirrored + left; c.parses(rewrite) {
 				return "the field goes on the left and arithmetic on the right: " + rewrite
 			}
 		}
 	}
-	if rewrite := "float(" + left + ")" + right; parses(rewrite) {
+	if rewrite := "float(" + left + ")" + right; c.parses(rewrite) {
 		return hintArithmeticRule + rewrite
 	}
 	return hintArithmeticLeft
@@ -439,7 +535,7 @@ func (c context) unexpected(value bool) string {
 		case strings.EqualFold(c.wordAt, "mod"):
 			return "the remainder operator is %: 10%3"
 		}
-		if unit, ok := durationWords[strings.ToLower(c.wordAt)]; ok && endsWithDigit(c.before) {
+		if unit, ok := hintwords.DurationUnit(c.wordAt); ok && endsWithDigit(c.before) {
 			return fmt.Sprintf("write the unit as one letter, joined to the number: %s%s", lastWord(c.before), unit)
 		}
 		if unicode.IsLetter(c.ch) && endsWithDigit(c.before) {
@@ -507,8 +603,10 @@ func (c context) expectedField() string {
 	return ""
 }
 
-// flipLiteralFirst rewrites `3<total` as `total>3` when the text at the error
-// is a literal, an operator and a plain field name; otherwise it is "".
+// flipLiteralFirst rewrites `3<total` as `total>3` when the rest of the
+// query is exactly a literal, an operator and a field name, dotted or not.
+// With anything after the field (3<total AND 4<base) the rewrite would drop
+// it, so there is none.
 func (c context) flipLiteralFirst() string {
 	i := 0
 	for i < len(c.rest) && !strings.ContainsRune("=<>! \t", rune(c.rest[i])) {
@@ -520,17 +618,34 @@ func (c context) flipLiteralFirst() string {
 	for opLen < len(tail) && opLen < 2 && strings.ContainsRune("=<>!", rune(tail[opLen])) {
 		opLen++
 	}
-	op := tail[:opLen]
-	field := firstWord(strings.TrimLeft(tail[opLen:], " \t"))
-	if literal == "" || field == "" || (field[0] >= '0' && field[0] <= '9') {
+	field := strings.TrimSpace(tail[opLen:])
+	flipped, ok := mirrorOperator[tail[:opLen]]
+	if !ok || literal == "" || !isFieldName(field) {
 		return ""
 	}
-	flipped, ok := mirrorOperator[op]
-	if !ok || !parses(field+flipped+literal) {
-		return ""
+	if rewrite := c.input[:c.off] + field + flipped + literal; c.parses(rewrite) {
+		return rewrite
 	}
-	return field + flipped + literal
+	return ""
 }
+
+// isFieldName reports whether s is one bare field name: letters, digits and
+// underscores, with dots, slashes and hyphens between parts, as in
+// labels.example.com/team. A number is not a name.
+func isFieldName(s string) bool {
+	if s == "" || hintwords.IsNumber(s) || !isWordStart(rune(s[0])) {
+		return false
+	}
+	for _, r := range s {
+		if !isWordRune(r) && r != '.' && r != '/' && r != '-' {
+			return false
+		}
+	}
+	last := s[len(s)-1]
+	return last != '.' && last != '/' && last != '-'
+}
+
+func isWordStart(r rune) bool { return unicode.IsLetter(r) || r == '_' }
 
 func (c context) expectedValue(value bool) string {
 	if strings.HasSuffix(c.before, "..") || strings.HasPrefix(c.rest, "..") {
@@ -555,33 +670,47 @@ func (c context) expectedValue(value bool) string {
 }
 
 func (c context) expectedRange() string {
+	const general = `":" starts a range such as total:1..5; to compare, use =`
 	// The error sits where ".." should be; the text since the colon shows
 	// what was written instead.
 	colon := strings.LastIndexByte(c.input[:c.off], ':')
 	if colon < 0 {
-		return ""
+		return general
 	}
-	field := lastWord(strings.TrimRightFunc(c.input[:colon], unicode.IsSpace))
+	field := fieldBefore(c.input[:colon])
 	written := strings.TrimSpace(c.input[colon+1 : c.off])
-	if lo, hi, ok := strings.Cut(written, "-"); ok && isNumber(lo) && isNumber(hi) {
+	if field == "" || written == "" || strings.ContainsAny(written, " \t") {
+		return general
+	}
+	if lo, hi, ok := strings.Cut(written, "-"); ok && hintwords.IsNumber(lo) && hintwords.IsNumber(hi) {
 		return fmt.Sprintf("a range uses two dots: %s:%s..%s", field, lo, hi)
 	}
-	if field != "" && written != "" && !strings.ContainsAny(written, " \t") {
-		return fmt.Sprintf(`":" starts a range such as %s:1..5; to compare, write %s=%s`, field, field, written)
-	}
-	return `":" starts a range such as total:1..5; to compare, use =`
+	return fmt.Sprintf(`":" starts a range such as %s:1..5; to compare, write %s=%s`, field, field, written)
 }
 
-func isNumber(s string) bool {
-	if s == "" {
-		return false
-	}
-	for _, r := range s {
-		if (r < '0' || r > '9') && r != '.' {
-			return false
+// fieldBefore returns the field name that ends s, as written: total,
+// labels.team, [total] or ["billing address"]. It is "" when s does not end
+// in a name.
+func fieldBefore(s string) string {
+	s = strings.TrimRightFunc(s, unicode.IsSpace)
+	if strings.HasSuffix(s, "]") {
+		if open := strings.LastIndexByte(s, '['); open >= 0 && skipBracketed(s, open) == len(s) {
+			return s[open:]
 		}
+		return ""
 	}
-	return true
+	start := len(s)
+	for start > 0 {
+		r, size := utf8.DecodeLastRuneInString(s[:start])
+		if !isWordRune(r) && r != '.' && r != '/' && r != '-' {
+			break
+		}
+		start -= size
+	}
+	if name := s[start:]; isFieldName(name) {
+		return name
+	}
+	return ""
 }
 
 func (c context) unclosedParen() string {
@@ -602,7 +731,7 @@ func (c context) invalidWildcard(length int) string {
 	if strings.Contains(raw, "**") {
 		return "there is no ** operator; use pow(2, 3)"
 	}
-	if name, tail, ok := strings.Cut(raw, "*"); ok && name != "" && isNumber(tail) && firstWord(name) == name {
+	if name, tail, ok := strings.Cut(raw, "*"); ok && name != "" && hintwords.IsNumber(tail) && firstWord(name) == name {
 		return fmt.Sprintf("to multiply the field %s, write it in brackets: [%s]*%s", name, name, tail)
 	}
 	return `a star matches any text and may only start or end the value: jo*, *son, *oh*; write a literal star as \*`
@@ -632,21 +761,35 @@ func (c context) expectedSelector() string {
 	return "a selector is one of first, last, any(...), all(...) or none(...)"
 }
 
-// betweenAsRange rewrites `total BETWEEN 1 AND 5` as `total:1..5`, wherever
-// it sits in the query, or returns "" when the words do not have that shape
-// or the result is not a valid condition.
-func (c context) betweenAsRange() string {
-	words := strings.Fields(c.input)
-	for i, word := range words {
-		if !strings.EqualFold(word, "BETWEEN") || i == 0 || i+3 >= len(words) || !strings.EqualFold(words[i+2], "AND") {
-			continue
-		}
-		parts := append([]string{}, words[:i-1]...)
-		parts = append(parts, words[i-1]+":"+words[i+1]+".."+words[i+3])
-		parts = append(parts, words[i+4:]...)
-		if q := strings.Join(parts, " "); parses(q) {
-			return q
-		}
+// betweenAsRange rewrites `total BETWEEN 1 AND 5` as `total:1..5` for the
+// BETWEEN at between, leaving the rest of the query as written. It returns ""
+// when the words around it do not have that shape or the result is not a
+// valid condition.
+func (c context) betweenAsRange(between word) string {
+	field := fieldBefore(c.input[:between.start])
+	if field == "" {
+		return ""
 	}
-	return ""
+	fieldStart := strings.LastIndex(c.input[:between.start], field)
+	lo, afterLo := nextRun(c.input, between.end)
+	and, afterAnd := nextRun(c.input, afterLo)
+	hi, afterHi := nextRun(c.input, afterAnd)
+	if lo == "" || hi == "" || !strings.EqualFold(and, "AND") {
+		return ""
+	}
+	return c.fixed(fieldStart, afterHi, field+":"+lo+".."+hi)
+}
+
+// nextRun returns the run of non-space characters that starts at or after
+// from, and the index just past it.
+func nextRun(s string, from int) (run string, end int) {
+	start := from
+	for start < len(s) && (s[start] == ' ' || s[start] == '\t') {
+		start++
+	}
+	end = start
+	for end < len(s) && s[end] != ' ' && s[end] != '\t' {
+		end++
+	}
+	return s[start:end], end
 }

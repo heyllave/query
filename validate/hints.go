@@ -6,35 +6,13 @@ import (
 	"strings"
 
 	"github.com/heyllave/query/ast"
+	"github.com/heyllave/query/internal/hintwords"
 	"github.com/heyllave/query/internal/nearest"
 )
 
 // maxListedFields is the most field names a hint spells out. A longer list
 // stops helping and starts hiding the message.
 const maxListedFields = 8
-
-// sqlFieldWords are words from SQL that end up read as field names, with what
-// to write instead.
-var sqlFieldWords = map[string]string{
-	"IS":       "to test for a missing value write NOT field; for a present one write the field alone",
-	"NULL":     "to test for a missing value write NOT field; for a present one write the field alone",
-	"LIKE":     "there is no LIKE; use = with * as the wildcard: name=john*",
-	"ILIKE":    "there is no ILIKE; = already ignores case, and * is the wildcard: name=john*",
-	"BETWEEN":  "a range is written with a colon and two dots: total:1..5",
-	"CONTAINS": `to test for part of a text use a wildcard, name=*john*, or contains(name, "john")`,
-	"NOT":      "NOT goes before a condition: NOT state=draft; to compare, use state!=draft",
-	"SELECT":   hintNotSQL,
-	"FROM":     hintNotSQL,
-	"WHERE":    hintNotSQL,
-	"ORDER":    hintNotSQL,
-	"BY":       hintNotSQL,
-	"GROUP":    hintNotSQL,
-	"LIMIT":    hintNotSQL,
-	"OFFSET":   hintNotSQL,
-}
-
-const hintNotSQL = "only conditions are allowed here, such as field=value; " +
-	"selecting, sorting and limiting are not part of a query"
 
 // usableFields lists the declared fields this validator would accept, sorted.
 // Hints name fields only from this list, so a field hidden by
@@ -50,54 +28,71 @@ func (v *Validator) usableFields() []string {
 	return names
 }
 
-// durationWords are spelled-out units, which a duration literal abbreviates.
-var durationWords = map[string]string{
-	"minute": "m", "minutes": "m", "min": "m", "mins": "m",
-	"hour": "h", "hours": "h", "hr": "h", "hrs": "h",
-	"day": "d", "days": "d",
-	"week": "w", "weeks": "w",
-}
-
 // bareWordHint is the advice for a word standing alone that is not a field:
 // state IS NULL, name contains john, created_at>now() - 7 days. A word on its
 // own is a presence test, so a stray word is read as a field name.
 func (v *Validator) bareWordHint(name string) string {
-	if h, ok := sqlFieldWords[strings.ToUpper(name)]; ok {
+	if h, ok := hintwords.SQL(name); ok {
 		return h
 	}
-	if unit, ok := durationWords[strings.ToLower(name)]; ok {
+	// Every word of `name IS NULL` is a bare word, and the first is the one
+	// the writer cares about, so it gets the same advice as IS and NULL.
+	if v.missingTest {
+		return hintwords.Missing
+	}
+	if unit, ok := hintwords.DurationUnit(name); ok {
 		return fmt.Sprintf("a duration is a number joined to a one-letter unit: 7%s", unit)
 	}
-	if h := v.fieldHint(name, ""); h != "" && !strings.HasPrefix(h, "the fields are") {
+	if h := v.namedFieldHint(name, "", v.usableFields()); h != "" {
 		return h
 	}
-	return fmt.Sprintf("a word on its own is read as a field that must have a value; "+
-		"to use it as text, attach it to a comparison and quote text that has spaces: name=%q", name)
+	return "a word on its own is read as a field that must have a value; " +
+		"to use it as text, put it after an operator, in quotes if it has spaces: field=\"two words\""
 }
 
-// fieldHint is the advice for a name that is not a field. fn is the function
-// whose argument it was, or "".
-func (v *Validator) fieldHint(name, fn string) string {
-	if fn == "" && strings.EqualFold(name, "NOT") {
-		return sqlFieldWords["NOT"]
-	}
-	usable := v.usableFields()
-	if h := arithmeticHint(name, usable, fn); h != "" {
+// fieldHint is the advice for a name that is not a field: a correction when
+// the validator can name one, otherwise the field list when it is short.
+func (v *Validator) fieldHint(name string) string {
+	if strings.EqualFold(name, "NOT") {
+		h, _ := hintwords.SQL(name)
 		return h
 	}
-	if near := v.nearField(name, usable); near != "" {
-		if fn != "" {
-			return fmt.Sprintf("did you mean %q? To pass text to %s(), put it in quotes: %q", near, fn, name)
-		}
-		return fmt.Sprintf("did you mean %q?", near)
+	usable := v.usableFields()
+	if h := v.namedFieldHint(name, "", usable); h != "" {
+		return h
 	}
-	if fn != "" {
-		return fmt.Sprintf("a bare word in a function is a field; to pass text to %s(), put it in quotes: %q", fn, name)
-	}
-	if n := len(usable); n > 0 && n <= maxListedFields {
+	if len(usable) > 0 && len(usable) <= maxListedFields {
 		return "the fields are: " + strings.Join(usable, ", ")
 	}
 	return ""
+}
+
+// argumentHint is the advice for a name passed to the function fn that is
+// not a field. A bare word there is always a field, so the likeliest mistake
+// after a typo is text written without quotes.
+func (v *Validator) argumentHint(name, fn string) string {
+	if h := v.namedFieldHint(name, fn, v.usableFields()); h != "" {
+		return h
+	}
+	return fmt.Sprintf("a bare word in a function is a field; to pass text to %s(), put it in quotes: %q", fn, name)
+}
+
+// namedFieldHint is the advice that names what was meant: arithmetic written
+// without brackets, or the field a typo is closest to. It is "" when the
+// validator cannot tell. fn is the function the name was passed to, or "";
+// usable is [Validator.usableFields], which the caller may need again.
+func (v *Validator) namedFieldHint(name, fn string, usable []string) string {
+	if h := arithmeticHint(name, usable, fn); h != "" {
+		return h
+	}
+	near := v.nearField(name, usable)
+	switch {
+	case near == "":
+		return ""
+	case fn != "":
+		return fmt.Sprintf("did you mean %q? To pass text to %s(), put it in quotes: %q", near, fn, name)
+	}
+	return fmt.Sprintf("did you mean %q?", near)
 }
 
 // nearField suggests the usable field name closest to name. For a dotted
@@ -141,7 +136,7 @@ func arithmeticHint(name string, usable []string, fn string) string {
 		case known[part]:
 			b.WriteString("[" + part + "]")
 			fields++
-		case isPlainNumber(part):
+		case hintwords.IsNumber(part):
 			b.WriteString(part)
 		default:
 			return ""
@@ -159,18 +154,6 @@ func arithmeticHint(name string, usable []string, fn string) string {
 		return fmt.Sprintf("names may contain - and /, so this reads as one field; for arithmetic write the fields in brackets: %s(%s)", fn, b.String())
 	}
 	return fmt.Sprintf("names may contain - and /, so this reads as one field; arithmetic goes on the right of the operator or inside a function, with fields in brackets: %s", b.String())
-}
-
-func isPlainNumber(s string) bool {
-	if s == "" {
-		return false
-	}
-	for _, r := range s {
-		if (r < '0' || r > '9') && r != '.' {
-			return false
-		}
-	}
-	return true
 }
 
 // opHint is the advice when a field does not allow an operator: what it does
@@ -256,7 +239,7 @@ func numberHint(raw string) string {
 		return "write a number without separators: 1000 rather than 1,000"
 	case strings.ContainsAny(raw, "$€£%"):
 		return "write the number alone, without a symbol: 5"
-	case strings.HasPrefix(raw, "0x") || strings.ContainsAny(raw, "eE") && isPlainNumber(strings.NewReplacer("e", "", "E", "").Replace(raw)):
+	case strings.HasPrefix(raw, "0x") || strings.ContainsAny(raw, "eE") && hintwords.IsNumber(strings.NewReplacer("e", "", "E", "").Replace(raw)):
 		return "write a number in plain decimal form: 1000"
 	}
 	return "a number looks like 42, -3 or 1.5"
@@ -298,4 +281,21 @@ func (v *Validator) functionHint(name string) string {
 		return "the functions allowed here are: " + strings.Join(names, ", ")
 	}
 	return ""
+}
+
+// hasMissingTest reports whether the query holds IS or NULL as a word on its
+// own that is not a field, the trace an SQL missing-value test leaves.
+func (v *Validator) hasMissingTest(expr ast.Expression) bool {
+	found := false
+	ast.Walk(expr, func(node ast.Expression) bool {
+		if p, ok := node.(*ast.PresenceExpr); ok && !found {
+			name := p.Field.String()
+			if hintwords.IsMissingTest(name) {
+				_, declared := v.resolveField(name)
+				found = !declared
+			}
+		}
+		return !found
+	})
+	return found
 }

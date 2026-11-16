@@ -10,8 +10,10 @@ import (
 
 // Match returns the candidate closest to name, or "" when none is close
 // enough to be worth suggesting. A candidate that differs only in case always
-// qualifies; otherwise it must be within two edits and within a third of the
-// name's length, so "totl" finds "total" but "x" finds nothing. Ties go to
+// qualifies; otherwise the edits allowed grow with the name: none for a name
+// of one or two characters, one up to five, two beyond that. So "totl" finds
+// "total" but "x" finds nothing. An edit is an insertion, a deletion, a
+// substitution or a swap of two neighbours. Ties go to
 // the candidate that sorts first, so the answer does not depend on the order
 // of candidates.
 func Match(name string, candidates []string) string {

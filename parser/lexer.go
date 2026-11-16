@@ -39,7 +39,7 @@ func Lex(input string, maxLength int) ([]token.Token, error) {
 	l.run()
 
 	if err := l.errors.errOrNil(); err != nil {
-		return nil, annotate(input, err, false)
+		return nil, annotate(input, err, false, maxLength)
 	}
 	return l.tokens, nil
 }
@@ -80,7 +80,7 @@ func LexValue(input string, maxLength int) ([]token.Token, error) {
 	l.run()
 
 	if err := l.errors.errOrNil(); err != nil {
-		return nil, annotate(input, err, true)
+		return nil, annotate(input, err, true, maxLength)
 	}
 	return l.tokens, nil
 }
