@@ -73,6 +73,18 @@ semantic versioning.
 
 ### Fixed
 
+- Hints no longer give advice that does not apply. A word inside a quoted
+  value or a bracketed name is not read as SQL (`name="a select" AND total>`
+  now says to add a value), and an SQL word only explains the clause it is
+  in. A rewrite keeps the whole query and the field as written: `3<total.x`
+  gives `total.x>3` where it gave `total>3`, `[total]:1-5` gives
+  `[total]:1..5` where it gave `:1..5`, and `3<total AND 4<base` states the
+  rule where it dropped the second condition. A rewrite longer than the
+  caller's length limit is not offered. Every word of `name IS NULL` gets the
+  missing-value advice, whether or not `name` is a declared field.
+- A validation hint is built once per error. With a custom validator it used
+  to ask about every declared field twice.
+
 - An unquoted value that holds an unclosed call (`0%f(*`) is a string whether
   it is read inside a query or on its own, as with an unclosed group. The
   arithmetic look-ahead used to treat the open call as arithmetic when the

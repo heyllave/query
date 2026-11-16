@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/heyllave/query/ast"
+	"github.com/heyllave/query/internal/hintwords"
 	"github.com/heyllave/query/parser"
 	"github.com/heyllave/query/token"
 )
@@ -169,6 +170,10 @@ type Validator struct {
 	allowedOps    map[Op]bool
 	allowedFuncs  map[string]bool
 	errors        ErrorList
+	// missingTest is set for one Validate call when the query holds IS or
+	// NULL as a stray word, so every bare word of `name IS NULL` gets the
+	// same advice.
+	missingTest bool
 }
 
 // New creates a validator with the given field configs and options.
@@ -206,12 +211,13 @@ func (v *Validator) Validate(expr ast.Expression) error {
 	// Work on a copy so concurrent Validate calls do not share the error list.
 	w := *v
 	w.errors = nil
+	w.missingTest = w.hasMissingTest(expr)
 	w.validate(expr)
 	if w.allowedFuncs != nil {
 		for _, fc := range ast.Calls(expr) {
 			if !w.allowedFuncs[fc.Name] {
-				w.addError(ErrFunctionNotAllowed, fc.Position, "", "", "function %q is not allowed", fc.Name)
-				w.hint(func() string { return w.functionHint(fc.Name) })
+				w.addHinted(func() string { return w.functionHint(fc.Name) },
+					ErrFunctionNotAllowed, fc.Position, "", "", "function %q is not allowed", fc.Name)
 			}
 		}
 	}
@@ -405,9 +411,8 @@ func (v *Validator) checkValue(cfg FieldConfig, val *ast.Value, pos token.Positi
 		return
 	}
 	if !typeCompatible(cfg.Type, *val) {
-		v.addError(ErrTypeMismatch, pos, fieldName, "",
+		v.addHinted(func() string { return v.typeHint(cfg, val) }, ErrTypeMismatch, pos, fieldName, "",
 			"%s %q (%s) does not fit field %q (type %s)", what, val.Raw, val.Type, fieldName, cfg.Type)
-		v.hint(func() string { return v.typeHint(cfg, val) })
 	}
 }
 
@@ -517,8 +522,8 @@ func (v *Validator) validateFuncCallFields(fc *ast.FuncCallExpr) []resolvedField
 			fieldName := arg.Field.String()
 			cfg, ok := v.resolveField(fieldName)
 			if !ok {
-				v.addError(ErrFieldNotFound, fc.Position, fieldName, "", "unknown field %q in function %s()", fieldName, fc.Name)
-				v.hint(func() string { return v.fieldHint(fieldName, fc.Name) })
+				v.addHinted(func() string { return v.argumentHint(fieldName, fc.Name) },
+					ErrFieldNotFound, fc.Position, fieldName, "", "unknown field %q in function %s()", fieldName, fc.Name)
 				continue
 			}
 			fields = append(fields, resolvedField{name: fieldName, cfg: cfg})
@@ -555,12 +560,16 @@ func (v *Validator) validatePresence(p *ast.PresenceExpr) {
 	fieldName := p.Field.String()
 	cfg, ok := v.resolveField(fieldName)
 	if !ok {
-		v.addError(ErrFieldNotFound, p.Position, fieldName, "", "unknown field %q", fieldName)
-		v.hint(func() string { return v.bareWordHint(fieldName) })
+		v.addHinted(func() string { return v.bareWordHint(fieldName) },
+			ErrFieldNotFound, p.Position, fieldName, "", "unknown field %q", fieldName)
 		return
 	}
 	if !v.opGloballyAllowed(OpPresence) || !cfg.AllowsOp(OpPresence) {
-		v.addError(ErrOperatorNotAllowed, p.Position, fieldName, string(OpPresence),
+		hint := func() string { return v.opHint(fieldName, OpPresence) }
+		if v.missingTest {
+			hint = func() string { return hintwords.Missing }
+		}
+		v.addHinted(hint, ErrOperatorNotAllowed, p.Position, fieldName, string(OpPresence),
 			"presence check is not allowed for field %q", fieldName)
 	}
 }
@@ -608,26 +617,21 @@ func (v *Validator) lookupField(name string) (FieldConfig, bool) {
 	return FieldConfig{}, false
 }
 
-// addError records a failure. An unknown field and a refused operator get
-// their hint here; a site that knows more (the function a name was passed to,
-// the literal that did not fit) replaces it with [Validator.hint].
+// addError records a failure with the hint its kind implies: the nearest
+// field for an unknown one, the operators a field allows for a refused one.
+// A site that knows more (the function a name was passed to, the literal that
+// did not fit) calls [Validator.addHinted] with its own.
 func (v *Validator) addError(kind ErrorKind, pos token.Position, field, op, format string, args ...any) {
-	e := &Error{
-		Message:  fmt.Sprintf(format, args...),
-		Position: pos,
-		Kind:     kind,
-		Field:    field,
-		Op:       op,
-	}
-	v.errors = append(v.errors, e)
+	var hint func() string
 	switch kind { //nolint:exhaustive // the other kinds carry no generic hint
 	case ErrFieldNotFound:
-		v.hint(func() string { return v.fieldHint(field, "") })
+		hint = func() string { return v.fieldHint(field) }
 	case ErrOperatorNotAllowed:
 		if field != "" {
-			v.hint(func() string { return v.opHint(field, Op(op)) })
+			hint = func() string { return v.opHint(field, Op(op)) }
 		}
 	}
+	v.addHinted(hint, kind, pos, field, op, format, args...)
 }
 
 // maxHinted is how many errors of one validation get a hint. A hint compares
@@ -635,12 +639,20 @@ func (v *Validator) addError(kind ErrorKind, pos token.Position, field, op, form
 // names would cost its length times the size of the schema.
 const maxHinted = 8
 
-// hint sets the hint of the error just recorded, if it is among the first
-// maxHinted. It takes a function so that the hint is not computed otherwise.
-func (v *Validator) hint(text func() string) {
-	if n := len(v.errors); n > 0 && n <= maxHinted {
-		v.errors[n-1].Hint = text()
+// addHinted records a failure whose hint is hint(), computed once and only
+// for the first maxHinted errors. hint may be nil.
+func (v *Validator) addHinted(hint func() string, kind ErrorKind, pos token.Position, field, op, format string, args ...any) {
+	e := &Error{
+		Message:  fmt.Sprintf(format, args...),
+		Position: pos,
+		Kind:     kind,
+		Field:    field,
+		Op:       op,
 	}
+	if hint != nil && len(v.errors) < maxHinted {
+		e.Hint = hint()
+	}
+	v.errors = append(v.errors, e)
 }
 
 func tokenTypeToOp(tt token.Type, wildcard bool) Op {

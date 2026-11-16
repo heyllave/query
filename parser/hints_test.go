@@ -338,3 +338,147 @@ func TestParse_HintsAreBoundedOnLongInput(t *testing.T) {
 		t.Errorf("%d errors carry a hint, want %d", hinted, maxHinted)
 	}
 }
+
+// Text inside quotes or a bracketed name is data. A word in it that happens
+// to be SQL must not take the hint away from the real mistake.
+func TestParse_HintsIgnoreSQLWordsInsideText(t *testing.T) {
+	tests := []struct {
+		name  string
+		query string
+		want  string
+	}{
+		{"select in a quoted value", `name="a select" AND total>`, "add a value"},
+		{"like in a quoted value", `name="x like y" AND total>`, "add a value"},
+		{"is null in a quoted value", `name="is null" AND total=>5`, `name="is null" AND total>=5`},
+		{"limit in a bracketed name", `["order limit"]=1 AND total>`, "add a value"},
+		{"between in a quoted value", `name="between a and b" AND total==5`, `total=5`},
+		{"escaped quote before the word", `name="a \" select" AND total>`, "add a value"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Act
+			_, err := Parse(tt.query, 0)
+
+			// Assert
+			errs := Errors(err)
+			if len(errs) == 0 {
+				t.Fatalf("%q parsed, want an error", tt.query)
+			}
+			if !strings.Contains(errs[0].Hint, tt.want) {
+				t.Errorf("%q hint = %q, want one containing %q", tt.query, errs[0].Hint, tt.want)
+			}
+		})
+	}
+}
+
+// An SQL word explains the clause it is in, not a later one.
+func TestParse_SQLHintStaysInItsClause(t *testing.T) {
+	tests := []struct {
+		name  string
+		query string
+		want  string
+		not   string
+	}{
+		{"like in an earlier clause", "a LIKE b AND total>", "add a value", "LIKE"},
+		{"like in the failing clause", "x=1 AND name LIKE john%", "no LIKE", ""},
+		{"between keeps its own and", "x=1 AND total BETWEEN 1 AND 5", "x=1 AND total:1..5", ""},
+		{"error after a between clause", "x BETWEEN 1 AND 5 AND y==2", "single =", "two dots"},
+		{"not is a keyword here", "NOT state==draft", "NOT state=draft", "goes before"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Act
+			_, err := Parse(tt.query, 0)
+
+			// Assert
+			errs := Errors(err)
+			if len(errs) == 0 {
+				t.Fatalf("%q parsed, want an error", tt.query)
+			}
+			hint := errs[0].Hint
+			if !strings.Contains(hint, tt.want) || (tt.not != "" && strings.Contains(hint, tt.not)) {
+				t.Errorf("%q hint = %q, want one containing %q and not %q", tt.query, hint, tt.want, tt.not)
+			}
+		})
+	}
+}
+
+// A rewrite is the writer's whole query corrected: the same field, and
+// nothing dropped.
+func TestParse_RewritesKeepTheWholeQuery(t *testing.T) {
+	tests := []struct {
+		name  string
+		query string
+		want  string
+		not   string
+	}{
+		{"dotted field on the right", "3<total.x", "total.x>3", ""},
+		{"label key on the right", "3<labels.example.com/team", "labels.example.com/team>3", ""},
+		{"hyphenated field on the right", "3<unit-price", "unit-price>3", ""},
+		{"spaces around the operator", "3 < total", "total>3", ""},
+		{"earlier clause is kept", "a=1 AND 3<total", "a=1 AND total>3", ""},
+		{"later clause blocks the rewrite", "3<total AND 4<base", "starts with a field", "goes on the left"},
+		{"bracketed field in a range", "[total]:1-5", "[total]:1..5", " :1"},
+		{"quoted field in a range", `["a b"]:1-5`, `["a b"]:1..5`, " :1"},
+		{"dotted field in a range", "labels.x:1-5", "labels.x:1..5", " x:1"},
+		{"bracketed field, colon as equals", "[total]:john", "[total]=john", ""},
+		{"between leaves quoted text alone", `n="a  b" AND x BETWEEN 1 AND 5`, `n="a  b" AND x:1..5`, ""},
+		{"arithmetic rewrite skips quoted text", `[base]*2 > "a  b"`, "arithmetic goes on the right", `"ab"`},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Act
+			_, err := Parse(tt.query, 0)
+
+			// Assert
+			errs := Errors(err)
+			if len(errs) == 0 {
+				t.Fatalf("%q parsed, want an error", tt.query)
+			}
+			hint := errs[0].Hint
+			if !strings.Contains(hint, tt.want) || (tt.not != "" && strings.Contains(hint, tt.not)) {
+				t.Errorf("%q hint = %q, want one containing %q and not %q", tt.query, hint, tt.want, tt.not)
+			}
+		})
+	}
+}
+
+// A rewrite the caller's length limit would refuse is not suggested.
+func TestParse_RewritesRespectTheLengthLimit(t *testing.T) {
+	tests := []struct {
+		name    string
+		query   string
+		limit   int
+		rewrite string
+		offered bool
+	}{
+		{"wrapping in float exceeds the limit", "total*2>3", 9, "float([total]*2)>3", false},
+		{"the same query with room", "total*2>3", 18, "float([total]*2)>3", true},
+		{"AND is longer than &&", "a=1 && b=2", 10, "a=1 AND b=2", false},
+		{"AND fits exactly", "a=1 && b=2", 11, "a=1 AND b=2", true},
+		{"a shorter rewrite always fits", "a==b", 4, "a=b", true},
+		{"no limit", "total*2>3", 0, "float([total]*2)>3", true},
+		{"the limit counts characters, not bytes", "é==b", 4, "é=b", true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Act
+			_, err := Parse(tt.query, tt.limit)
+
+			// Assert
+			errs := Errors(err)
+			if len(errs) == 0 {
+				t.Fatalf("%q parsed, want an error", tt.query)
+			}
+			if got := strings.Contains(errs[0].Hint, tt.rewrite); got != tt.offered {
+				t.Errorf("%q under limit %d: hint = %q, rewrite offered = %v, want %v",
+					tt.query, tt.limit, errs[0].Hint, got, tt.offered)
+			}
+			if tt.offered {
+				if _, err := Parse(tt.rewrite, tt.limit); err != nil {
+					t.Errorf("offered rewrite %q fails under the same limit: %v", tt.rewrite, err)
+				}
+			}
+		})
+	}
+}

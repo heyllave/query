@@ -62,7 +62,7 @@ func Parse(input string, maxLength int) (ast.Expression, error) {
 	p := &parser{tokens: tokens}
 	expr := p.parseExpression()
 	if err := p.errors.errOrNil(); err != nil {
-		return nil, annotate(input, err, false)
+		return nil, annotate(input, err, false, maxLength)
 	}
 	if p.peek().Type != token.EOF {
 		tok := p.peek()
@@ -70,7 +70,7 @@ func Parse(input string, maxLength int) (ast.Expression, error) {
 			"unexpected %s after a complete condition", describe(tok)))
 	}
 	if err := p.errors.errOrNil(); err != nil {
-		return nil, annotate(input, err, false)
+		return nil, annotate(input, err, false, maxLength)
 	}
 	return expr, nil
 }
@@ -95,10 +95,10 @@ func ParseValue(input string, maxLength int) (ast.Expression, error) {
 	startPos := p.peek().Pos
 	val := p.parseValue()
 	if err := p.errors.errOrNil(); err != nil {
-		return nil, annotate(input, err, true)
+		return nil, annotate(input, err, true, maxLength)
 	}
 	if val == nil {
-		return nil, annotate(input, ErrorList{newError(CodeExpectedValue, ErrUnexpectedEOF, startPos, "expected a value expression")}, true)
+		return nil, annotate(input, ErrorList{newError(CodeExpectedValue, ErrUnexpectedEOF, startPos, "expected a value expression")}, true, maxLength)
 	}
 	if p.peek().Type != token.EOF {
 		tok := p.peek()
@@ -106,7 +106,7 @@ func ParseValue(input string, maxLength int) (ast.Expression, error) {
 			"unexpected %s after a complete value", describe(tok)))
 	}
 	if err := p.errors.errOrNil(); err != nil {
-		return nil, annotate(input, err, true)
+		return nil, annotate(input, err, true, maxLength)
 	}
 	return &ast.ValueExpr{Value: *val, Position: startPos}, nil
 }

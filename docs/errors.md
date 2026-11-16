@@ -104,6 +104,8 @@ for _, e := range parser.Errors(err) {
 
 ## Limits
 
+- A rewrite is your whole query corrected. If the corrected query would be longer than the length limit you parse under, or if part of the query would have to be dropped, the hint states the rule instead.
+- Words inside quotes or a bracketed name are data. `name="a select"` is not read as SQL.
 - Only the first eight errors of a query get a hint. A hint reads the query around its error, so this keeps a long failing query cheap when the length limit is lifted.
 - A run of the same unexpected character is one error that spans the run: `&&` is reported once, not twice.
 - An unknown field with no close match gets no hint, unless the field list is short enough to print (eight fields or fewer).

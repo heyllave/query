@@ -62,7 +62,7 @@ func TestValidate_Hints(t *testing.T) {
 		{"contains as a word", "name contains john", ErrFieldNotFound, "name=*john*"},
 		{"not after the field", "name NOT=x", ErrFieldNotFound, "NOT goes before"},
 		{"spelled-out unit", "created_at>now() - 7 days", ErrFieldNotFound, "7d"},
-		{"unquoted second word", "name=john smith", ErrFieldNotFound, "quote text that has spaces"},
+		{"unquoted second word", "name=john smith", ErrFieldNotFound, "in quotes if it has spaces"},
 
 		// Values that do not fit.
 		{"field without brackets", "total>base", ErrTypeMismatch, "[base]"},
@@ -254,4 +254,133 @@ func TestValidate_HintsAreBoundedOnManyErrors(t *testing.T) {
 	if hinted != maxHinted {
 		t.Errorf("%d errors carry a hint, want %d", hinted, maxHinted)
 	}
+}
+
+// Every error of an SQL missing-value test carries the advice for it, the
+// first word included, whether or not that word is a declared field.
+func TestValidate_MissingTestHintOnEveryWord(t *testing.T) {
+	tests := []struct {
+		name  string
+		query string
+	}{
+		{"declared field that allows presence", "name IS NULL"},
+		{"declared field that does not", "total IS NULL"},
+		{"undeclared field", "nickname IS NULL"},
+		{"is not null", "nickname IS NOT NULL"},
+		{"lower case", "nickname is null"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Act
+			list := validationErrors(t, New(hintFields), tt.query)
+
+			// Assert
+			if len(list) == 0 {
+				t.Fatalf("Validate(%q) passed, want errors", tt.query)
+			}
+			for _, e := range list {
+				if !strings.Contains(e.Hint, "NOT field") {
+					t.Errorf("Validate(%q): %s has hint %q, want the missing-value advice", tt.query, e.Message, e.Hint)
+				}
+			}
+		})
+	}
+}
+
+// A field that is really called is or null is a field, not SQL.
+func TestValidate_FieldsNamedLikeSQLAreNotAMissingTest(t *testing.T) {
+	// Arrange
+	fields := []FieldConfig{
+		{Name: "null", Type: TypeText, AllowedOps: TextOps},
+		{Name: "name", Type: TypeText, AllowedOps: TextOps},
+	}
+
+	// Act
+	list := validationErrors(t, New(fields), "null AND anme")
+
+	// Assert
+	if len(list) != 1 || !strings.Contains(list[0].Hint, `did you mean "name"?`) {
+		t.Errorf("errors = %v, want one typo hint for anme", list)
+	}
+}
+
+// A stray word gets advice about stray words, never the field list, however
+// that list is worded.
+func TestValidate_BareWordFallbackIsNotTheFieldList(t *testing.T) {
+	// Arrange: few enough fields that an unknown field in a comparison lists them.
+	v := New(hintFields[:3])
+
+	// Act
+	compared := validationErrors(t, v, "zzzzzz=1")
+	alone := validationErrors(t, v, "name=x zzzzzz")
+
+	// Assert
+	if len(compared) != 1 || compared[0].Hint != "the fields are: name, state, total" {
+		t.Errorf("comparison hint = %v, want the field list", compared)
+	}
+	if len(alone) != 1 || !strings.Contains(alone[0].Hint, "a word on its own") {
+		t.Errorf("stray word hint = %v, want the stray-word advice", alone)
+	}
+	if strings.Contains(alone[0].Hint, "zzzzzz") {
+		t.Errorf("stray word hint echoes the word as an example: %q", alone[0].Hint)
+	}
+}
+
+// counting records how many times the validator asks it about a field.
+type counting struct{ calls *int }
+
+func (c counting) GetFieldConfig(name string) (FieldConfig, bool) {
+	*c.calls++
+	for _, f := range hintFields {
+		if f.Name == name {
+			return f, true
+		}
+	}
+	return FieldConfig{}, false
+}
+
+func (counting) ValidateCustomRules(ast.Expression) error { return nil }
+
+// A hint is built once per error. With a custom validator each build asks
+// about every declared field, so building it twice doubles the calls.
+func TestValidate_HintIsBuiltOncePerError(t *testing.T) {
+	tests := []struct {
+		name  string
+		query string
+	}{
+		{"stray word", "name=x zzzzzz"},
+		{"name in a function", "lower(zzzzzz)=x"},
+		{"field in a comparison", "zzzzzz=1"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			calls := 0
+			v := New(hintFields, WithCustomValidator(counting{&calls}))
+			expr, err := parser.Parse(tt.query, 0)
+			if err != nil {
+				t.Fatal(err)
+			}
+			baseline := 0
+			_ = New(hintFields, WithCustomValidator(counting{&baseline})).Validate(mustParseHint(t, "name=x"))
+
+			// Act
+			_ = v.Validate(expr)
+
+			// Assert: the lookups a valid query makes, the failed lookup, and
+			// one pass over the declared fields for the hint.
+			if limit := baseline + 2 + len(hintFields); calls > limit {
+				t.Errorf("GetFieldConfig called %d times, want at most %d", calls, limit)
+			}
+		})
+	}
+}
+
+func mustParseHint(t *testing.T, query string) ast.Expression {
+	t.Helper()
+	expr, err := parser.Parse(query, 0)
+	if err != nil {
+		t.Fatalf("Parse(%q): %v", query, err)
+	}
+	return expr
 }
