@@ -341,10 +341,12 @@ func TestParseWith_SQLHintStopsAtTheClause(t *testing.T) {
 
 	// Assert
 	errs := parser.Errors(err)
-	if len(errs) != 3 {
-		t.Fatalf("got %d errors, want 3: %v", len(errs), err)
+	// The LIKE is one mistake, reported once; the missing AND after it is
+	// another.
+	if len(errs) != 2 {
+		t.Fatalf("got %d errors, want 2: %v", len(errs), err)
 	}
-	if last := errs[2].Hint; !strings.Contains(last, "join two conditions") {
+	if last := errs[1].Hint; !strings.Contains(last, "join two conditions") {
 		t.Errorf("hint for the last clause = %q, want the general advice", last)
 	}
 }
@@ -357,6 +359,41 @@ func TestParseWith_MissingAndRewritesParseStrictly(t *testing.T) {
 		t.Run(rewrite, func(t *testing.T) {
 			if _, err := parser.ParseWith(rewrite, strict); err != nil {
 				t.Errorf("ParseWith(%q) under strict options: %v", rewrite, err)
+			}
+		})
+	}
+}
+
+// One SQL word is one mistake, however many connectives it leaves missing.
+func TestParseWith_SQLWordIsReportedOnce(t *testing.T) {
+	strict := parser.Config{ExplicitAnd: true}
+	tests := []struct {
+		name, input string
+		want        int
+		wantHint    string
+	}{
+		{"LIKE", "name LIKE john", 1, "there is no LIKE"},
+		{"IS NULL", "name IS NULL", 1, "missing value"},
+		{"the general advice still counts each one", "a b c", 2, "join two conditions"},
+		{"two keyed lookups are two mistakes", "a[x]=1 AND b[y]=2", 2, "after a dot"},
+		{"an SQL word, then an unrelated missing connective", "name LIKE john AND a b", 2, ""},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Act
+			_, err := parser.ParseWith(tc.input, strict)
+
+			// Assert
+			errs := parser.Errors(err)
+			if len(errs) != tc.want {
+				var hints []string
+				for _, e := range errs {
+					hints = append(hints, e.Hint)
+				}
+				t.Fatalf("ParseWith(%q) reported %d errors %q, want %d", tc.input, len(errs), hints, tc.want)
+			}
+			if tc.wantHint != "" && !strings.Contains(errs[0].Hint, tc.wantHint) {
+				t.Errorf("hint = %q, want it to contain %q", errs[0].Hint, tc.wantHint)
 			}
 		})
 	}

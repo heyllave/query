@@ -132,6 +132,24 @@ def check_strict_options(lib):
         assert env.get("error") == "explicitAnd must be a boolean", env
 
 
+def check_unknown_keys(lib):
+    """A key a call does not take is an error, so a typo cannot pass for an option."""
+    env = lib.call("QueryParse", query="a=1 b=2", strict=True)
+    assert env.get("error", "").startswith('unknown key "strict"'), env
+    assert "result" not in env, env
+    # Two unknown keys always name the same one.
+    for _ in range(20):
+        env = lib.call("QueryParse", query="a=1", zeta=1, alpha=2)
+        assert env.get("error", "").startswith('unknown key "alpha"'), env
+    # A key another call takes is still unknown to this one.
+    assert lib.call("QueryParse", query="a=1", record={}).get("error", "").startswith('unknown key "record"')
+    assert lib.call("QueryEval", query="1+1", fields=[], record={}, explicitAnd=True).get("error", "").startswith('unknown key "explicitAnd"')
+    # Every listed key is accepted.
+    fields = [{"name": "a", "type": "integer"}]
+    env = lib.call("QueryMatch", query="a=1", fields=fields, record={"a": 1}, maxLength=64, explicitAnd=True, strictValues=True)
+    assert env.get("result") is True, env
+
+
 def check_threads(lib):
     """Calls from many threads at once agree with a single-threaded call."""
     fields = [{"name": "total", "type": "decimal"}]
@@ -167,7 +185,7 @@ def main():
         except AssertionError as err:
             failed += 1
             print(f"FAIL {tc['op']}: {tc['id']}: {err}")
-    for name, check in (("hostile input", check_hostile_input), ("strict options", check_strict_options),
+    for name, check in (("hostile input", check_hostile_input), ("strict options", check_strict_options), ("unknown keys", check_unknown_keys),
                         ("threads", check_threads)):
         try:
             check(lib)

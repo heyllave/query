@@ -96,6 +96,10 @@ test("the strict options refuse the lenient forms and are off by default", () =>
   assert.match(w.queryMatch("a=1 b=2", fields, '{"a":1,"b":2}', { explicitAnd: "yes" }).error, /explicitAnd must be a boolean/);
   assert.match(w.queryParseAndValidate("a=1 b=2", fields, { strictValues: 0 }).error, /strictValues must be a boolean/);
 
+  // So is an option the engine does not know.
+  assert.match(w.queryParse("a=1 b=2", { strict: true }).error, /unknown option "strict"/);
+  assert.match(w.queryMatch("a=1", fields, '{"a":1}', { explicitAnd: true, strictvalues: true }).error, /unknown option "strictvalues"/);
+
   // A strict failure's hint is one the strict grammar accepts.
   const keyed = w.queryParse('labels["team"]=x', { explicitAnd: true });
   assert.match(keyed.errors[0].hint, /labels\.team=x/);

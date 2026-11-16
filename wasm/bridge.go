@@ -42,15 +42,27 @@ func maxLengthArg(args []js.Value, i int) int {
 // optionsArg reads the optional last argument of a call that parses a query.
 // It is either the maxLength number, as before, or an object
 // {maxLength?, explicitAnd?, strictValues?}; a member that is absent keeps
-// its default. A member of the wrong type is an error and not a default: a
-// host that passes explicitAnd: 1 believes strict parsing is on, and must
-// not be answered as if it were.
+// its default. A member of the wrong type, or one the call does not know, is
+// an error and not a default: a host that passes explicitAnd: 1 or
+// strict: true believes strict parsing is on, and must not be answered as if
+// it were.
 func optionsArg(args []js.Value, i int) (bridgejson.Options, bridgejson.Envelope) {
 	o := bridgejson.Options{MaxLength: maxLengthArg(args, i)}
 	if len(args) <= i || args[i].Type() != js.TypeObject {
 		return o, nil
 	}
 	obj := args[i]
+	// A member this call does not know is an error for the same reason a
+	// member of the wrong type is: {strict: true} must not be answered as if
+	// strict parsing were on.
+	names := js.Global().Get("Object").Call("keys", obj)
+	for k := 0; k < names.Length(); k++ {
+		switch name := names.Index(k).String(); name {
+		case "maxLength", "explicitAnd", "strictValues":
+		default:
+			return o, bridgejson.Fail("unknown option \"" + name + "\"; the options are maxLength, explicitAnd, strictValues")
+		}
+	}
 	if v := obj.Get("maxLength"); !absent(v) {
 		if v.Type() != js.TypeNumber {
 			return o, bridgejson.Fail("maxLength must be a number")

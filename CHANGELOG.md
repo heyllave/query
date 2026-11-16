@@ -33,6 +33,13 @@ semantic versioning.
   lexical error that follows it, instead of only after that error is fixed.
 - The TypeScript client and the C library refuse a strict switch that is
   not a boolean (`explicitAnd: 1`), instead of parsing leniently.
+- Under `ExplicitAnd`, an SQL word is reported once. `name LIKE john` gave
+  the "there is no LIKE" advice twice, once for each word left without a
+  connective.
+- The C library refuses a request key the call does not take, and the
+  TypeScript client an option it does not know, so `"strict": true` is an
+  error instead of a lenient parse. If you sent extra keys to the C library,
+  remove them.
 - A Grammar page in the documentation: the EBNF the parser implements, how
   each ambiguous form is read, and what the language leaves out on purpose.
 

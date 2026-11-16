@@ -158,8 +158,8 @@ q.parseAndValidate(text, fields, { maxLength: 512, explicitAnd: true });
 {"query": "a=1 b=2", "explicitAnd": true, "strictValues": true}
 ```
 
-A switch that is not a boolean is an error in both, so a host cannot believe
-strict parsing is on when it is not.
+A switch that is not a boolean, or an option the call does not know, is an
+error in both, so a host cannot believe strict parsing is on when it is not.
 
 `parse`, `parseAndValidate` and `match` take them. `validate` and `stringify`
 work on a tree that is already parsed, and `eval` takes a value, not a

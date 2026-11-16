@@ -38,7 +38,27 @@ func annotate(input string, err error, value bool, cfg Config) error {
 			e.Hint = hintFor(q, e)
 		}
 	}
-	return list
+	return dropRepeatedSQL(list)
+}
+
+// dropRepeatedSQL removes a missing connective that only repeats the SQL
+// advice of the one before it. Under ExplicitAnd, `name LIKE john` is two
+// missing connectives, before LIKE and before john, and both are answered
+// "there is no LIKE": one mistake reported twice. The general advice is left
+// alone, since `a b c` really is missing two connectives.
+func dropRepeatedSQL(list ErrorList) ErrorList {
+	out := list[:0:0]
+	for _, e := range list {
+		if n := len(out); n > 0 {
+			prev := out[n-1]
+			if e.Code == CodeMissingAnd && prev.Code == CodeMissingAnd && e.Hint != "" &&
+				e.Hint == prev.Hint && e.Hint != hintMissingAnd && !strings.HasPrefix(e.Hint, hintKeyAfterDot) {
+				continue
+			}
+		}
+		out = append(out, e)
+	}
+	return out
 }
 
 // query is what every hint of one failed parse shares: the text, the mode,
@@ -534,6 +554,11 @@ func (c context) doubledOperator() string {
 	return fmt.Sprintf("to compare with text that starts with %q, put the value in quotes", string(c.ch))
 }
 
+const (
+	hintMissingAnd  = `join two conditions with AND or OR: a=1 AND b=2; quote text that has a space: name="John Doe"`
+	hintKeyAfterDot = "a key is written after a dot"
+)
+
 // missingAnd is the hint for two conditions with no connective, under
 // ExplicitAnd. A bracket directly after a name is a keyed lookup from another
 // language, and joining it with AND would produce exactly the misreading the
@@ -546,13 +571,13 @@ func (c context) missingAnd() string {
 		if key != "" && name != "" && !strings.ContainsAny(key, " \t\"[]") {
 			dotted := name + "." + key
 			if q := c.input[:c.off-len(name)] + dotted + c.input[end:]; c.parses(q) {
-				return fmt.Sprintf("a key is written after a dot: %s", q)
+				return fmt.Sprintf(hintKeyAfterDot+": %s", q)
 			}
-			return fmt.Sprintf("a key is written after a dot: %s", dotted)
+			return fmt.Sprintf(hintKeyAfterDot+": %s", dotted)
 		}
-		return "a key is written after a dot: labels.team"
+		return hintKeyAfterDot + ": labels.team"
 	}
-	return `join two conditions with AND or OR: a=1 AND b=2; quote text that has a space: name="John Doe"`
+	return hintMissingAnd
 }
 
 func (c context) unexpected(value bool) string {
