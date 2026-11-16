@@ -6,6 +6,15 @@ semantic versioning.
 
 ## Unreleased
 
+### Added
+
+- `query filter`, `query eval` and `query map` run a query over JSON records
+  from stdin, one object per line or one array, and write the matching
+  records, a value per record, or a reshaped object per record, the way `jq`
+  does. Without `--schema` the fields a query names are typed from the
+  records. `map` takes `name=<value expression>` entries or bare field paths;
+  `eval --raw` writes strings bare.
+
 ### Security
 
 - A tree sent to `validate` or `stringify` through the WASM and C bridges is
