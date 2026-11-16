@@ -69,6 +69,10 @@ func SQLOperator(op token.Type, wildcard bool) string {
 }
 
 // WildcardToLike converts a query wildcard pattern to a SQL LIKE pattern.
+// A literal %, _ or backslash in the pattern is escaped with a backslash, so
+// the clause that uses the result must declare it: LIKE ? ESCAPE '\'. Without
+// the ESCAPE clause a database with no default escape character (SQLite,
+// Oracle, SQL Server) reads those characters as wildcards again.
 //
 //	"John*"    → "John%"
 //	"*yota"    → "%yota"

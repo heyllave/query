@@ -77,12 +77,21 @@ async function main() {
     },
     visitQualifier(e: QualifierExpr): string {
       const field = e.field.join(".");
-      const op = e.value.wildcard ? "LIKE" : e.op;
-      const val = e.value.wildcard
-        ? String(e.value.raw).replace(/\*/g, "%")
-        : e.value.value;
-      params.push(val);
-      return `${field} ${op} $${params.length}`;
+      if (e.value.wildcard) {
+        // `*` matches anything; `\*` and `\\` are literals. LIKE's own
+        // metacharacters in the data are escaped, so the clause names the
+        // escape character.
+        const pattern = String(e.value.raw).replace(
+          /\\([*\\])|[*%_\\]/g,
+          (m: string, literal?: string) =>
+            literal === "*" ? "*" : literal === "\\" ? "\\\\" : m === "*" ? "%" : "\\" + m,
+        );
+        params.push(pattern);
+        const like = e.op === "!=" ? "NOT LIKE" : "LIKE";
+        return `${field} ${like} $${params.length} ESCAPE '\\'`;
+      }
+      params.push(e.value.value);
+      return `${field} ${e.op} $${params.length}`;
     },
     visitPresence(e: PresenceExpr): string {
       return `${e.field.join(".")} IS NOT NULL`;

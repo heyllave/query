@@ -165,10 +165,12 @@ func (v *sqlVisitor) VisitQualifier(e *ast.QualifierExpr) string {
 		}
 	}
 
-	// Wildcard: field LIKE $1 / field NOT LIKE $1
+	// Wildcard: field LIKE $1 ESCAPE '\' / field NOT LIKE $1 ESCAPE '\'.
+	// WildcardToLike escapes the data's own % and _ with a backslash, which
+	// is only an escape character in every database once the clause says so.
 	if e.IsWildcard() {
 		v.params = append(v.params, ast.WildcardToLike(e.Value.Str))
-		return fmt.Sprintf("%s %s $%d", field, ast.SQLOperator(e.Operator, true), len(v.params))
+		return fmt.Sprintf(`%s %s $%d ESCAPE '\'`, field, ast.SQLOperator(e.Operator, true), len(v.params))
 	}
 
 	// Standard comparison: field op <value>

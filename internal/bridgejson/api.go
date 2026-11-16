@@ -49,11 +49,13 @@ func Parse(query string, maxLength int) Envelope {
 }
 
 // Validate checks a JSON AST against field configs and answers with
-// {"valid": true} or {"valid": false, "errors", "validationErrors"}.
-func Validate(astJSON, fieldsJSON string) Envelope {
-	expr, err := JSONToAST(astJSON)
+// {"valid": true} or {"valid": false, "errors", "validationErrors"}. The
+// tree's text is held to maxLength as in [JSONToAST]; zero or less disables
+// the limit.
+func Validate(astJSON, fieldsJSON string, maxLength int) Envelope {
+	expr, err := JSONToAST(astJSON, maxLength)
 	if err != nil {
-		return Fail("invalid AST: " + err.Error())
+		return astFailure(err)
 	}
 	fields, err := ParseFields(fieldsJSON)
 	if err != nil {
@@ -69,11 +71,12 @@ func Validate(astJSON, fieldsJSON string) Envelope {
 	return Envelope{"valid": true}
 }
 
-// Stringify prints a JSON AST back as a query string.
-func Stringify(astJSON string) Envelope {
-	expr, err := JSONToAST(astJSON)
+// Stringify prints a JSON AST back as a query string. The tree's text is
+// held to maxLength as in [JSONToAST]; zero or less disables the limit.
+func Stringify(astJSON string, maxLength int) Envelope {
+	expr, err := JSONToAST(astJSON, maxLength)
 	if err != nil {
-		return Fail("invalid AST: " + err.Error())
+		return astFailure(err)
 	}
 	return ok(ast.String(expr))
 }
@@ -137,6 +140,15 @@ func decodeInputs(fieldsJSON, recordJSON string) ([]validate.FieldConfig, map[st
 		return nil, nil, Fail("invalid record: " + err.Error())
 	}
 	return fields, record, nil
+}
+
+// astFailure reports a JSON tree that could not be read. A part of it the
+// parser refused (oversized text, an unreadable fieldFunc) is listed under
+// "errors" with its code.
+func astFailure(err error) Envelope {
+	env := parseFailure(err)
+	env["error"] = "invalid AST: " + err.Error()
+	return env
 }
 
 // parseFailure reports a parse failure: "error" is the joined message and

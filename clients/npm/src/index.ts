@@ -58,8 +58,8 @@ export { visit, walk, fields, fieldToString } from "./types.js";
 // Extend the global scope for Go WASM functions.
 declare global {
   function queryParse(q: string, maxLength?: number): ParseResult;
-  function queryValidate(astJSON: string, fieldsJSON: string): ValidateResult;
-  function queryStringify(astJSON: string): StringifyResult;
+  function queryValidate(astJSON: string, fieldsJSON: string, maxLength?: number): ValidateResult;
+  function queryStringify(astJSON: string, maxLength?: number): StringifyResult;
   function queryParseAndValidate(
     q: string,
     fieldsJSON: string,
@@ -93,11 +93,15 @@ export interface QueryAPI {
    */
   parse(q: string, maxLength?: number): ParseResult;
 
-  /** Validate an AST against field configurations. */
-  validate(ast: Expression, fields: FieldConfig[]): ValidateResult;
+  /**
+   * Validate an AST against field configurations. `maxLength` bounds the
+   * text the tree carries as written (string values, field names), as in
+   * {@link parse}; pass the limit the tree was parsed under.
+   */
+  validate(ast: Expression, fields: FieldConfig[], maxLength?: number): ValidateResult;
 
-  /** Convert an AST back to a query string. */
-  stringify(ast: Expression): StringifyResult;
+  /** Convert an AST back to a query string; `maxLength` as in {@link validate}. */
+  stringify(ast: Expression, maxLength?: number): StringifyResult;
 
   /** Parse and validate in one call; `maxLength` as in {@link parse}. */
   parseAndValidate(q: string, fields: FieldConfig[], maxLength?: number): ParseResult;
@@ -190,12 +194,12 @@ export async function loadQuery(source: WasmSource = "./query.wasm"): Promise<Qu
       return queryParse(q, maxLength);
     },
 
-    validate(ast: Expression, fields: FieldConfig[]): ValidateResult {
-      return queryValidate(JSON.stringify(ast), JSON.stringify(fields));
+    validate(ast: Expression, fields: FieldConfig[], maxLength?: number): ValidateResult {
+      return queryValidate(JSON.stringify(ast), JSON.stringify(fields), maxLength);
     },
 
-    stringify(ast: Expression): StringifyResult {
-      return queryStringify(JSON.stringify(ast));
+    stringify(ast: Expression, maxLength?: number): StringifyResult {
+      return queryStringify(JSON.stringify(ast), maxLength);
     },
 
     parseAndValidate(q: string, fields: FieldConfig[], maxLength?: number): ParseResult {

@@ -28,13 +28,13 @@ Each function takes one NUL-terminated UTF-8 JSON object and returns one.
 | Function | Request | Success |
 |---|---|---|
 | `QueryParse` | `{"query", "maxLength"?}` | `{"result": tree}` |
-| `QueryValidate` | `{"ast", "fields"}` | `{"valid": true}` |
-| `QueryStringify` | `{"ast"}` | `{"result": "query text"}` |
+| `QueryValidate` | `{"ast", "fields", "maxLength"?}` | `{"valid": true}` |
+| `QueryStringify` | `{"ast", "maxLength"?}` | `{"result": "query text"}` |
 | `QueryParseAndValidate` | `{"query", "fields", "maxLength"?}` | `{"result": tree}` |
 | `QueryMatch` | `{"query", "fields", "record", "maxLength"?}` | `{"result": true}` |
 | `QueryEval` | `{"query", "fields", "record", "maxLength"?}` | `{"result": value}` |
 
-`maxLength` is the query length limit in characters; it defaults to 256 and `0` disables it.
+`maxLength` is the query length limit in characters; it defaults to 256 and `0` disables it. For a tree, it bounds the text the tree carries as written (string values, field names), so a tree parsed under a larger limit is validated or printed under the same one.
 
 A failure is `{"error": "message"}` with a list of coded entries: `errors` for syntax, `validationErrors` for validation. Each entry is `{code, message, offset, length}`. Show your own wording from `code`; the codes do not change, the messages may.
 

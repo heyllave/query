@@ -21,7 +21,9 @@ func FuzzBridgeRoundTrip(f *testing.F) {
 		f.Add(s)
 	}
 	f.Fuzz(func(t *testing.T, s string) {
-		expr, err := parser.Parse(s, 0)
+		// The bridge holds a decoded tree to the default limit, so only the
+		// tree of a query within that limit must come back.
+		expr, err := parser.Parse(s, DefaultMaxLength)
 		if err != nil {
 			return
 		}
@@ -34,7 +36,7 @@ func FuzzBridgeRoundTrip(f *testing.F) {
 		if err != nil {
 			t.Fatalf("marshal %q: %v", s, err)
 		}
-		back, err := JSONToAST(string(data))
+		back, err := JSONToAST(string(data), DefaultMaxLength)
 		if err != nil {
 			t.Fatalf("Parse(%q) encoded as %s, which does not decode: %v", s, data, err)
 		}

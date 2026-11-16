@@ -13,6 +13,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"unicode/utf8"
 
 	"github.com/heyllave/query/ast"
 	"github.com/heyllave/query/parser"
@@ -169,48 +170,108 @@ func valueToJSON(v *ast.Value) *Val {
 	}
 }
 
-// JSONToAST converts a JSON string back into an [ast.Expression].
-func JSONToAST(data string) (ast.Expression, error) {
+// maxASTJSONLength bounds the JSON form of a tree. A tree is hundreds of times
+// the size of the query it was read from (a short `f IN (...)` becomes one
+// qualifier node per element, and indentation multiplies that again), so the
+// bound is far above the query limit: it leaves room for any tree the parser
+// builds under [DefaultMaxLength] and still caps what one call can cost.
+const maxASTJSONLength = 1 << 20
+
+// tooLong is the parser's length-limit failure for a part of a JSON tree, so a
+// client sees the same code whichever way an oversized query arrives.
+func tooLong(what string, length, limit int) error {
+	return parser.ErrorList{{
+		Message: fmt.Sprintf("%s length %d exceeds maximum of %d characters", what, length, limit),
+		Code:    parser.CodeQueryTooLong,
+		Kind:    parser.ErrQueryTooLong,
+	}}
+}
+
+// decoder reads a JSON tree back into an AST under a query length limit.
+type decoder struct {
+	// limit is the query length limit, in characters, that text copied
+	// into the tree as written (a string value, a field name) is held to;
+	// zero or less disables it. Text the parser reads back (a call, a
+	// field function, an arithmetic value) is not held to it: the printer
+	// writes such text longer than its source (a space after each comma,
+	// a group around arithmetic over a string), so the tree of a query at
+	// the limit would not read back. Its cost is bounded by the tree cap.
+	limit int
+}
+
+// checkLength holds text that is printed as written to the query limit.
+func (d *decoder) checkLength(what, text string) error {
+	if n := utf8.RuneCountInString(text); d.limit > 0 && n > d.limit {
+		return tooLong(what, n, d.limit)
+	}
+	return nil
+}
+
+// JSONToAST converts a JSON string back into an [ast.Expression]. The tree is
+// untrusted: every part of it that [ast.String] prints as written is held to
+// what the parser could have produced under maxLength (the query length
+// limit in characters; zero or less disables it), so a tree that validates
+// cannot print as a different query.
+func JSONToAST(data string, maxLength int) (ast.Expression, error) {
+	if len(data) > maxASTJSONLength {
+		return nil, tooLong("AST JSON", len(data), maxASTJSONLength)
+	}
 	var node AST
 	if err := json.Unmarshal([]byte(data), &node); err != nil {
 		return nil, err
 	}
-	return nodeToAST(&node)
+	d := &decoder{limit: maxLength}
+	return d.nodeToAST(&node)
 }
 
-func nodeToAST(n *AST) (ast.Expression, error) {
+func (d *decoder) nodeToAST(n *AST) (ast.Expression, error) {
 	if n == nil {
 		return nil, fmt.Errorf("nil node")
 	}
 	switch n.Type {
 	case "binary":
-		op := token.And
-		if n.Op == "OR" {
+		var op token.Type
+		switch n.Op {
+		case "AND":
+			op = token.And
+		case "OR":
 			op = token.Or
+		default:
+			return nil, fmt.Errorf("unknown logical operator %q", n.Op)
 		}
-		left, err := nodeToAST(n.Left)
+		left, err := d.nodeToAST(n.Left)
 		if err != nil {
 			return nil, err
 		}
-		right, err := nodeToAST(n.Right)
+		right, err := d.nodeToAST(n.Right)
 		if err != nil {
 			return nil, err
 		}
 		return &ast.BinaryExpr{Op: op, Left: left, Right: right}, nil
 	case "not":
-		inner, err := nodeToAST(n.Expr)
+		inner, err := d.nodeToAST(n.Expr)
 		if err != nil {
 			return nil, err
 		}
 		return &ast.UnaryExpr{Op: token.Not, Expr: inner}, nil
 	case "qualifier":
-		val, err := jsonToValue(n.Value)
+		op, ok := symbolToToken(n.Op)
+		if !ok {
+			return nil, fmt.Errorf("unknown operator %q", n.Op)
+		}
+		if op == token.Range && n.EndValue == nil {
+			return nil, fmt.Errorf("operator %q needs an endValue", n.Op)
+		}
+		if err := d.checkFieldLength(n.Field); err != nil {
+			return nil, err
+		}
+		val, err := d.jsonToValue(n.Value)
 		if err != nil {
 			return nil, err
 		}
 		q := &ast.QualifierExpr{
 			Field:    ast.FieldPath(n.Field),
-			Operator: symbolToToken(n.Op),
+			Operator: op,
 			Value:    *val,
 		}
 		if n.FieldFunc != "" {
@@ -224,7 +285,7 @@ func nodeToAST(n *AST) (ast.Expression, error) {
 			q.Field = nil
 		}
 		if n.EndValue != nil {
-			ev, err := jsonToValue(n.EndValue)
+			ev, err := d.jsonToValue(n.EndValue)
 			if err != nil {
 				return nil, err
 			}
@@ -233,26 +294,54 @@ func nodeToAST(n *AST) (ast.Expression, error) {
 		}
 		return q, nil
 	case "presence":
+		if err := d.checkFieldLength(n.Field); err != nil {
+			return nil, err
+		}
 		return &ast.PresenceExpr{Field: ast.FieldPath(n.Field)}, nil
 	case "call":
 		return readCall("call", n.Call)
 	case "group":
-		inner, err := nodeToAST(n.Expr)
+		inner, err := d.nodeToAST(n.Expr)
 		if err != nil {
 			return nil, err
 		}
 		return &ast.GroupExpr{Expr: inner}, nil
 	case "selector":
-		sel := &ast.SelectorExpr{Selector: n.Selector}
-		if n.Base != nil {
-			base, err := nodeToAST(n.Base)
-			if err != nil {
-				return nil, err
+		// The selector name is printed as written, so it is one of the names
+		// the parser reads, in the shape it reads them: @first and @last stand
+		// alone, the others wrap an expression.
+		switch n.Selector {
+		case "first", "last":
+			if n.Inner != nil {
+				return nil, fmt.Errorf("selector %q takes no inner expression", n.Selector)
 			}
-			sel.Base = base
+		case "", "any", "all", "none":
+			if n.Inner == nil {
+				return nil, fmt.Errorf("selector %q needs an inner expression", n.Selector)
+			}
+		default:
+			return nil, fmt.Errorf("unknown selector %q", n.Selector)
 		}
+		// A selector binds to the single term before the '@'. A base of any
+		// other shape (a bare AND/OR/NOT, or none) would print as a query that
+		// groups differently from this tree, so it is refused rather than
+		// printed.
+		if n.Base == nil {
+			return nil, fmt.Errorf("selector needs a base expression")
+		}
+		switch n.Base.Type {
+		case "qualifier", "presence", "call", "group", "selector":
+		default:
+			return nil, fmt.Errorf("selector base cannot be a %q node; wrap it in a group", n.Base.Type)
+		}
+		sel := &ast.SelectorExpr{Selector: n.Selector}
+		base, err := d.nodeToAST(n.Base)
+		if err != nil {
+			return nil, err
+		}
+		sel.Base = base
 		if n.Inner != nil {
-			inner, err := nodeToAST(n.Inner)
+			inner, err := d.nodeToAST(n.Inner)
 			if err != nil {
 				return nil, err
 			}
@@ -274,17 +363,28 @@ func nodeToAST(n *AST) (ast.Expression, error) {
 // back as this very string (same content, same wildcard flag); anything else —
 // a space, a keyword, a number-looking or boolean-looking word, a `*` that is
 // meant literally — is quoted.
-func jsonToValue(v *Val) (*ast.Value, error) {
+func (d *decoder) jsonToValue(v *Val) (*ast.Value, error) {
 	if v == nil {
 		return nil, fmt.Errorf("nil value")
 	}
 	if v.Type == "string" {
+		// A string is printed as written (quoted or bare), so it is held
+		// to the query limit; every other value is read back through the
+		// parser, under the tree cap.
+		if err := d.checkLength("value", v.Raw); err != nil {
+			return nil, err
+		}
+		if s, ok := v.Value.(string); ok {
+			if err := d.checkLength("value", s); err != nil {
+				return nil, err
+			}
+		}
 		return stringValue(v), nil
 	}
 	if v.Type == "list" {
-		// A list is produced at match time, never by the parser; there is no
-		// source text to read back, so it keeps its raw form.
-		return &ast.Value{Type: ast.ValueList, Raw: v.Raw}, nil
+		// A list is produced at match time, never by the parser: it has no
+		// source text to read back, and its raw form would print unchecked.
+		return nil, fmt.Errorf("a list value cannot be written in a query")
 	}
 	parsed := readValue(v.Raw)
 	if parsed == nil || !sameValueType(parsed.Type.String(), v.Type) {
@@ -340,24 +440,39 @@ func sameValueType(parsed, declared string) bool {
 	return numeric(parsed) && numeric(declared)
 }
 
-func symbolToToken(op string) token.Type {
+// checkFieldLength holds a field path, as the printer writes it, to the
+// query limit.
+func (d *decoder) checkFieldLength(field []string) error {
+	n := len(field) - 1 // the dots between segments
+	for _, seg := range field {
+		n += utf8.RuneCountInString(seg)
+	}
+	if d.limit > 0 && n > d.limit {
+		return tooLong("field", n, d.limit)
+	}
+	return nil
+}
+
+// symbolToToken is the comparison operator a symbol names; ok is false for
+// text that is not one.
+func symbolToToken(op string) (tok token.Type, ok bool) {
 	switch op {
 	case "=":
-		return token.Eq
+		return token.Eq, true
 	case "!=":
-		return token.Neq
+		return token.Neq, true
 	case ">":
-		return token.Gt
+		return token.Gt, true
 	case ">=":
-		return token.Gte
+		return token.Gte, true
 	case "<":
-		return token.Lt
+		return token.Lt, true
 	case "<=":
-		return token.Lte
+		return token.Lte, true
 	case "..":
-		return token.Range
+		return token.Range, true
 	default:
-		return token.Eq
+		return token.Eq, false
 	}
 }
 

@@ -77,7 +77,29 @@ func TestExamples(t *testing.T) {
 	}
 }
 
-func run(t *testing.T, goBin, name string, args []string, wantOK bool) {
+// TestSQLExample_LikeDeclaresItsEscapeCharacter guards the clause the example
+// teaches: the pattern escapes % and _ with a backslash, which a database
+// only honours when the LIKE says ESCAPE.
+func TestSQLExample_LikeDeclaresItsEscapeCharacter(t *testing.T) {
+	if testing.Short() {
+		t.Skip("examples are run with `go run`, skipped in -short mode")
+	}
+	goBin, err := exec.LookPath("go")
+	if err != nil {
+		t.Skip("go toolchain not on PATH")
+	}
+	for _, q := range []string{"name=50%*", "name!=50%*"} {
+		t.Run(q, func(t *testing.T) {
+			out := run(t, goBin, "sql", []string{q}, true)
+
+			if !strings.Contains(out, `LIKE $1 ESCAPE '\'`) {
+				t.Errorf("no ESCAPE clause after LIKE in:\n%s", out)
+			}
+		})
+	}
+}
+
+func run(t *testing.T, goBin, name string, args []string, wantOK bool) string {
 	t.Helper()
 	cmd := exec.Command(goBin, append([]string{"run", "./" + filepath.Clean(name)}, args...)...)
 	cmd.Env = append(os.Environ(), "GOFLAGS=-mod=mod")
@@ -91,4 +113,5 @@ func run(t *testing.T, goBin, name string, args []string, wantOK bool) {
 	if strings.Contains(string(out), "panic:") {
 		t.Fatalf("go run ./examples/%s %v panicked:\n%s", name, args, out)
 	}
+	return string(out)
 }

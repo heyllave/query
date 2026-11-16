@@ -91,8 +91,8 @@ Params: [draft 50000]
 | Query | What it means | SQL |
 |---|---|---|
 | `created_at=2026-09-28` | The whole UTC day. `Value.DayOnly` is set. | `created_at >= $1 AND created_at < $2` |
-| `name=Jo*` | Wildcard, ignoring case. `e.IsWildcard()` is true. | `name ILIKE $1`, with `ast.WildcardToLike` for the pattern |
-| `name!=Jo*` | The negated wildcard. | `name NOT ILIKE $1` |
+| `name=Jo*` | Wildcard, ignoring case. `e.IsWildcard()` is true. | `name ILIKE $1 ESCAPE '\'`, with `ast.WildcardToLike` for the pattern |
+| `name!=Jo*` | The negated wildcard. | `name NOT ILIKE $1 ESCAPE '\'` |
 | `total!>5` | `NOT total>5`, so it is true when `total` is missing. | `NOT COALESCE(total > $1, FALSE)` |
 | `state NOT IN (a, b)` | `state!=a AND state!=b`, false when `state` is missing. | `state <> $1 AND state <> $2` |
 | `status` | Presence: the field exists and is not empty. | `status IS NOT NULL AND status <> ''` |
