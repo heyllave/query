@@ -3,19 +3,22 @@
 // Usage:
 //
 //	query explain "<expression>" [flags]
+//	query filter "<condition>" [flags] < records.jsonl
+//	query eval "<value expression>" [flags] < records.jsonl
+//	query map "name=<value expression>, ..." [flags] < records.jsonl
 //
-// Flags:
-//
-//	--json        emit AST as JSON
-//	--tokens      print lexer tokens instead of AST
-//	--schema      path to a JSON schema file for validation
-//	--positions   include source position spans on each node
+// explain prints how a query is read: its tree (--json for JSON, --positions
+// for spans), its tokens (--tokens), or its errors, optionally validated
+// against a field list (--schema). filter, eval and map read JSON records
+// from stdin, one per line or as one array, and write the records a
+// condition matches, a value per record, or a reshaped object per record.
 package main
 
 import (
 	"encoding/json"
 	"flag"
 	"fmt"
+	"io"
 	"os"
 	"strings"
 
@@ -26,7 +29,7 @@ import (
 )
 
 func main() {
-	os.Exit(run(os.Args[1:], os.Stdout, os.Stderr))
+	os.Exit(runWith(os.Args[1:], os.Stdin, os.Stdout, os.Stderr))
 }
 
 // schemaFile represents the JSON schema file format for --schema.
@@ -127,7 +130,12 @@ func loadSchema(path string) ([]validate.FieldConfig, error) {
 	return configs, nil
 }
 
+// run is runWith over an empty stdin, for the commands that do not read it.
 func run(args []string, stdout, stderr *os.File) int {
+	return runWith(args, strings.NewReader(""), stdout, stderr)
+}
+
+func runWith(args []string, stdin io.Reader, stdout, stderr *os.File) int {
 	if len(args) == 0 {
 		printUsage(stderr)
 		return 1
@@ -136,6 +144,12 @@ func run(args []string, stdout, stderr *os.File) int {
 	switch args[0] {
 	case "explain":
 		return runExplain(args[1:], stdout, stderr)
+	case "filter":
+		return runFilter(args[1:], stdin, stdout, stderr)
+	case "eval":
+		return runEval(args[1:], stdin, stdout, stderr)
+	case "map":
+		return runMap(args[1:], stdin, stdout, stderr)
 	case "help", "--help", "-h":
 		printUsage(stdout)
 		return 0
@@ -228,7 +242,7 @@ func runExplain(args []string, stdout, stderr *os.File) int {
 	return 0
 }
 
-func printErrors(query string, err error, stderr *os.File) {
+func printErrors(query string, err error, stderr io.Writer) {
 	errs := parser.Errors(err)
 	if len(errs) == 0 {
 		_, _ = fmt.Fprintf(stderr, "error: %s\n", err)
@@ -270,6 +284,10 @@ func printUsage(w *os.File) {
 	_, _ = fmt.Fprintln(w)
 	_, _ = fmt.Fprintln(w, "Commands:")
 	_, _ = fmt.Fprintln(w, "  explain    Parse a query expression and visualize the AST")
+	_, _ = fmt.Fprintln(w, "  filter     Write the JSON records on stdin that a condition matches")
+	_, _ = fmt.Fprintln(w, "  eval       Write a value expression's result for each JSON record on stdin")
+	_, _ = fmt.Fprintln(w, "  map        Reshape each JSON record on stdin into named values")
 	_, _ = fmt.Fprintln(w)
-	_, _ = fmt.Fprintln(w, "Run 'query explain --help' for flag details.")
+	_, _ = fmt.Fprintln(w, "Records are one JSON object per line, or one JSON array of objects.")
+	_, _ = fmt.Fprintln(w, "Run 'query <command> --help' for flag details.")
 }

@@ -617,7 +617,16 @@ Not language features, but worth knowing before deploying at scale:
 
 **Choose expr-lang** when you need a general-purpose expression engine for business rules, computed fields, or template evaluation where the full power of arithmetic, arrays, and ternary operators matters.
 
-## CLI — `query explain`
+## CLI — `query explain`, `filter`, `eval`, `map`
+
+`query filter`, `query eval` and `query map` run a query over JSON records from a pipe, the way `jq` does. Records are one object per line or one array; the fields a query names are typed from the records unless `--schema` gives a field list.
+
+```bash
+query filter 'state=draft AND total>50000' < events.jsonl             # matching records, unchanged
+query eval -r 'upper([name])' < events.jsonl                           # one value per record
+query map 'id, total=[total]*1.1, team=[labels.team]' < events.jsonl  # one reshaped object per record
+yq -o json '.events[]' data.yaml | query filter 'created_at>=now()-7d' | jq '{id}'
+```
 
 The `query explain` command parses a query expression and visualizes the AST for debugging:
 
@@ -680,6 +689,8 @@ go run ./cmd/query explain --json "status=active"
 | `--tokens` | Print lexer tokens instead of AST |
 | `--schema <path>` | Validate against a JSON schema file |
 | `--positions` | Include source position spans on each node |
+
+`filter`, `eval` and `map` take `--schema` and `--pretty`; `eval` also takes `--raw` (`-r`) to write strings bare. The [command line page](https://heyllave.github.io/query/cli/) compares them with `jq` and `yq`.
 
 ## Examples
 

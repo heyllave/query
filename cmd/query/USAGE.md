@@ -1,7 +1,7 @@
 # query CLI
 
-A debugging tool for the query language. Parses query expressions and visualizes
-their AST structure, token streams, and validation results.
+A command line for the query language: `explain` shows how a query is read,
+and `filter`, `eval` and `map` run one over JSON records from a pipe.
 
 ## Install
 
@@ -176,3 +176,35 @@ error: expected field name, got AND("AND")
   AND foo
   ^
 ```
+
+### `filter`, `eval`, `map`
+
+Read JSON records from stdin, one object per line or one array of objects,
+and write one result per record in the same shape.
+
+```bash
+$ query filter 'state=draft AND total>50000' < events.jsonl
+{"id":1,"state":"draft","total":60000}
+
+$ query eval '[total]*1.1' < events.jsonl
+66000
+
+$ query eval -r '[name]' < events.jsonl
+Joan
+
+$ query map 'id, total=[total]*1.1, team=[labels.team]' < events.jsonl
+{"id":1,"total":66000,"team":"payments"}
+```
+
+| Flag | Commands | Description |
+|------|----------|-------------|
+| `--schema <path>` | all | Validate against a field list instead of typing fields from the records |
+| `--pretty` | all | Indent the output |
+| `--raw`, `-r` | `eval` | Write strings without quotes, like `jq -r` |
+
+Without `--schema`, fields are typed from the records: numbers are decimal,
+booleans boolean, strings that read as dates datetime, objects nested, the rest
+text. A `map` entry is `name=<value expression>`, or a bare field path that
+stands for itself; keys keep the projection's order and a missing value is
+`null`. See the [command line page](https://heyllave.github.io/query/cli/) for
+the comparison with `jq` and `yq`.
