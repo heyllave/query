@@ -41,10 +41,13 @@ commits consumers pinned before it.
   a `list` value are errors; before, such text was printed as written, so a
   tree could validate and then print as a wider query naming fields it was
   never checked against (`"selector": "first OR secret=a*"`).
-- The same trees are bound in size. A value, field function or field name
-  longer than the default query limit (256 characters), or a tree whose JSON is
-  over 1 MiB, fails with the `queryTooLong` code. These used to be parsed
-  with no limit.
+- The same trees are bound in size. A string value or field name longer
+  than the query length limit, or a tree whose JSON is over 1 MiB, fails with
+  the `queryTooLong` code. These used to be parsed with no limit. `validate`
+  and `stringify` take the optional `maxLength` the other calls take (WASM:
+  a trailing number; C: the `"maxLength"` key), so a tree parsed under a
+  larger limit is checked under the same one; 256 is the default and 0
+  disables it.
 - `ast.WildcardToLike` documents that its result needs `ESCAPE '\'` in the
   `LIKE` clause, and `docs/sql.md`, `examples/sql` and the npm example now
   write it. Without the clause, SQLite, Oracle and SQL Server read an escaped

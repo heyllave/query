@@ -44,14 +44,14 @@ func jsParse(args []js.Value) bridgejson.Envelope {
 	return bridgejson.Parse(args[0].String(), maxLengthArg(args, 1))
 }
 
-// jsValidate is queryValidate(astJSON, fieldsJSON).
+// jsValidate is queryValidate(astJSON, fieldsJSON, maxLength?).
 func jsValidate(args []js.Value) bridgejson.Envelope {
-	return bridgejson.Validate(args[0].String(), args[1].String())
+	return bridgejson.Validate(args[0].String(), args[1].String(), maxLengthArg(args, 2))
 }
 
-// jsStringify is queryStringify(astJSON).
+// jsStringify is queryStringify(astJSON, maxLength?).
 func jsStringify(args []js.Value) bridgejson.Envelope {
-	return bridgejson.Stringify(args[0].String())
+	return bridgejson.Stringify(args[0].String(), maxLengthArg(args, 1))
 }
 
 // jsParseAndValidate is queryParseAndValidate(query, fieldsJSON, maxLength?).

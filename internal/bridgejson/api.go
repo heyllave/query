@@ -49,9 +49,11 @@ func Parse(query string, maxLength int) Envelope {
 }
 
 // Validate checks a JSON AST against field configs and answers with
-// {"valid": true} or {"valid": false, "errors", "validationErrors"}.
-func Validate(astJSON, fieldsJSON string) Envelope {
-	expr, err := JSONToAST(astJSON)
+// {"valid": true} or {"valid": false, "errors", "validationErrors"}. The
+// tree's text is held to maxLength as in [JSONToAST]; zero or less disables
+// the limit.
+func Validate(astJSON, fieldsJSON string, maxLength int) Envelope {
+	expr, err := JSONToAST(astJSON, maxLength)
 	if err != nil {
 		return astFailure(err)
 	}
@@ -69,9 +71,10 @@ func Validate(astJSON, fieldsJSON string) Envelope {
 	return Envelope{"valid": true}
 }
 
-// Stringify prints a JSON AST back as a query string.
-func Stringify(astJSON string) Envelope {
-	expr, err := JSONToAST(astJSON)
+// Stringify prints a JSON AST back as a query string. The tree's text is
+// held to maxLength as in [JSONToAST]; zero or less disables the limit.
+func Stringify(astJSON string, maxLength int) Envelope {
+	expr, err := JSONToAST(astJSON, maxLength)
 	if err != nil {
 		return astFailure(err)
 	}

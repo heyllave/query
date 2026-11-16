@@ -31,7 +31,7 @@ func goldenFor(query string) goldenEntry {
 		if err != nil {
 			panic(err)
 		}
-		entry.Print, _ = Stringify(string(tree))["result"].(string)
+		entry.Print, _ = Stringify(string(tree), DefaultMaxLength)["result"].(string)
 		return entry
 	}
 	list, _ := env["errors"].([]map[string]any)

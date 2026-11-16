@@ -22,7 +22,7 @@ func roundTrip(t *testing.T, q string) string {
 	if err != nil {
 		t.Fatalf("marshal: %v", err)
 	}
-	back, err := JSONToAST(string(data))
+	back, err := JSONToAST(string(data), DefaultMaxLength)
 	if err != nil {
 		t.Fatalf("JSONToAST(%s): %v", data, err)
 	}
@@ -83,7 +83,7 @@ func TestJSONToAST_QuotesAStringThatWouldNotReadBackBare(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			node := `{"type":"qualifier","op":"=","field":["f"],"value":` + tc.val + `}`
-			expr, err := JSONToAST(node)
+			expr, err := JSONToAST(node, DefaultMaxLength)
 			if err != nil {
 				t.Fatalf("JSONToAST: %v", err)
 			}
@@ -114,7 +114,7 @@ func TestJSONToAST_QuotesAStringThatWouldNotReadBackBare(t *testing.T) {
 func TestJSONToAST_BuildsARangeFromItsEndValue(t *testing.T) {
 	node := `{"type":"qualifier","op":"..","field":["total"],` +
 		`"value":{"type":"integer","raw":"100"},"endValue":{"type":"float","raw":"500.5"}}`
-	expr, err := JSONToAST(node)
+	expr, err := JSONToAST(node, DefaultMaxLength)
 	if err != nil {
 		t.Fatalf("JSONToAST: %v", err)
 	}
@@ -130,7 +130,7 @@ func TestJSONToAST_RefusesAValueWhoseTextIsNotItsType(t *testing.T) {
 		`{"type":"boolean","raw":"1"}`,
 	} {
 		node := `{"type":"qualifier","op":"=","field":["f"],"value":` + val + `}`
-		if _, err := JSONToAST(node); err == nil {
+		if _, err := JSONToAST(node, DefaultMaxLength); err == nil {
 			t.Errorf("JSONToAST(%s) succeeded, want an error", val)
 		}
 	}
@@ -201,7 +201,7 @@ func TestJSONToAST_RefusesTextThePrinterWouldWriteUnread(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			expr, err := JSONToAST(tc.node)
+			expr, err := JSONToAST(tc.node, DefaultMaxLength)
 			if err == nil {
 				t.Fatalf("JSONToAST succeeded and prints %q, want an error", ast.String(expr))
 			}
@@ -217,8 +217,8 @@ func TestValidate_ATreeCannotPrintAFieldItDidNotValidate(t *testing.T) {
 		`"base":{"type":"presence","field":["orders"]}}`
 
 	// Act
-	validated := Validate(tree, fields)
-	printed := Stringify(tree)
+	validated := Validate(tree, fields, DefaultMaxLength)
+	printed := Stringify(tree, DefaultMaxLength)
 
 	// Assert
 	if validated["valid"] == true {
@@ -231,7 +231,6 @@ func TestValidate_ATreeCannotPrintAFieldItDidNotValidate(t *testing.T) {
 
 func TestJSONToAST_HoldsATreeToTheQueryLengthLimit(t *testing.T) {
 	long := strings.Repeat("a", DefaultMaxLength+1)
-	sum := "1" + strings.Repeat("+1", DefaultMaxLength)
 	cases := []struct {
 		name string
 		node string
@@ -239,21 +238,18 @@ func TestJSONToAST_HoldsATreeToTheQueryLengthLimit(t *testing.T) {
 		{"a string value", `{"type":"qualifier","op":"=","field":["f"],"value":{"type":"string","raw":"` + long + `"}}`},
 		{"a string value's decoded content",
 			`{"type":"qualifier","op":"=","field":["f"],"value":{"type":"string","raw":"a","value":"` + long + `"}}`},
-		{"an arithmetic value", `{"type":"qualifier","op":"=","field":["f"],"value":{"type":"arith","raw":"` + sum + `"}}`},
-		{"an end value", `{"type":"qualifier","op":"..","field":["f"],"value":{"type":"integer","raw":"1"},` +
-			`"endValue":{"type":"arith","raw":"` + sum + `"}}`},
-		{"a field function", `{"type":"qualifier","op":"=","fieldFunc":"lower(` + long + `)","value":{"type":"integer","raw":"1"}}`},
 		{"a field name", `{"type":"presence","field":["` + long + `"]}`},
+		{"a field name in segments", `{"type":"presence","field":["` + strings.Repeat(`a","`, DefaultMaxLength/2) + `a"]}`},
 		{"the whole tree", `{"type":"presence","field":["f"]}` + strings.Repeat(" ", maxASTJSONLength)},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			_, err := JSONToAST(tc.node)
+			_, err := JSONToAST(tc.node, DefaultMaxLength)
 
 			if got := parser.Errors(err); len(got) != 1 || got[0].Code != parser.CodeQueryTooLong {
 				t.Fatalf("JSONToAST error = %v, want the %s failure", err, parser.CodeQueryTooLong)
 			}
-			for name, env := range map[string]Envelope{"validate": Validate(tc.node, `[]`), "stringify": Stringify(tc.node)} {
+			for name, env := range map[string]Envelope{"validate": Validate(tc.node, `[]`, DefaultMaxLength), "stringify": Stringify(tc.node, DefaultMaxLength)} {
 				if code := firstCode(wire(t, env)); code != string(parser.CodeQueryTooLong) {
 					t.Errorf("%s answered %v, want code %s", name, env, parser.CodeQueryTooLong)
 				}
@@ -263,21 +259,65 @@ func TestJSONToAST_HoldsATreeToTheQueryLengthLimit(t *testing.T) {
 }
 
 func TestJSONToAST_AcceptsTheTreeOfAQueryAtTheLengthLimit(t *testing.T) {
-	// An IN list lowers to one qualifier per element, the largest tree a query
-	// of a given length produces.
 	field := strings.Repeat("f", 120)
-	q := field + " IN (1" + strings.Repeat(",1", (DefaultMaxLength-len(field)-7)/2) + ")"
-	expr, err := parser.Parse(q, DefaultMaxLength)
-	if err != nil {
-		t.Fatalf("parse: %v", err)
+	args := "0" + strings.Repeat(",0", (DefaultMaxLength-4)/2)
+	for name, q := range map[string]string{
+		// An IN list lowers to one qualifier per element, the largest tree a
+		// query of a given length produces.
+		"an IN list": field + " IN (1" + strings.Repeat(",1", (DefaultMaxLength-len(field)-7)/2) + ")",
+		// The printer writes a call longer than its source (a space after
+		// each comma), so the tree carries more text than the query held.
+		"a predicate call":    "f(" + args[:DefaultMaxLength-3] + ")",
+		"a field function":    "f(" + args[:DefaultMaxLength-5] + ")=1",
+		"an arithmetic value": "x=" + strings.Repeat("1+", (DefaultMaxLength-3)/2) + "1",
+		"a field name":        strings.Repeat("a", DefaultMaxLength),
+		"a string value":      "x=" + strings.Repeat("a", DefaultMaxLength-2),
+	} {
+		t.Run(name, func(t *testing.T) {
+			if len(q) > DefaultMaxLength {
+				t.Fatalf("test query is %d characters", len(q))
+			}
+			expr, err := parser.Parse(q, DefaultMaxLength)
+			if err != nil {
+				t.Fatalf("parse: %v", err)
+			}
+			data, err := json.MarshalIndent(AstToJSON(expr), "", "  ")
+			if err != nil {
+				t.Fatal(err)
+			}
+			back, err := JSONToAST(string(data), DefaultMaxLength)
+			if err != nil {
+				t.Fatalf("JSONToAST refused a %d-byte tree of a %d-character query: %v", len(data), len(q), err)
+			}
+			if got, want := ast.String(back), ast.String(expr); got != want {
+				t.Errorf("tree prints %q, query prints %q", got, want)
+			}
+		})
 	}
-	data, err := json.MarshalIndent(AstToJSON(expr), "", "  ")
-	if err != nil {
-		t.Fatal(err)
-	}
+}
 
-	if _, err := JSONToAST(string(data)); err != nil {
-		t.Errorf("JSONToAST refused a %d-byte tree of a %d-byte query: %v", len(data), len(q), err)
+// A tree is held to the limit its query was parsed under, not to the
+// default: validate and stringify take the same maxLength as parse.
+func TestJSONToAST_HoldsATreeToTheCallersLimit(t *testing.T) {
+	q := "x=" + strings.Repeat("a", DefaultMaxLength+10)
+	env := Parse(q, 2*DefaultMaxLength)
+	tree, err := json.Marshal(env["result"])
+	if err != nil || env["error"] != nil {
+		t.Fatalf("Parse(%d chars, limit %d) = %v, %v", len(q), 2*DefaultMaxLength, env, err)
+	}
+	if code := firstCode(wire(t, Validate(string(tree), `[]`, DefaultMaxLength))); code != string(parser.CodeQueryTooLong) {
+		t.Errorf("Validate under the default limit answered %q, want %s", code, parser.CodeQueryTooLong)
+	}
+	if code := firstCode(wire(t, Stringify(string(tree), DefaultMaxLength))); code != string(parser.CodeQueryTooLong) {
+		t.Errorf("Stringify under the default limit answered %q, want %s", code, parser.CodeQueryTooLong)
+	}
+	for _, limit := range []int{2 * DefaultMaxLength, 0} {
+		if env := Validate(string(tree), `[{"name":"x","type":"text"}]`, limit); env["valid"] != true {
+			t.Errorf("Validate under limit %d answered %v", limit, env)
+		}
+		if env := Stringify(string(tree), limit); env["result"] != q {
+			t.Errorf("Stringify under limit %d answered %v", limit, env)
+		}
 	}
 }
 
@@ -293,7 +333,7 @@ func TestJSONToAST_RefusesASelectorWhoseBaseIsNotASingleTerm(t *testing.T) {
 		"no base":     `{"type":"selector","selector":"first"}`,
 	} {
 		t.Run(name, func(t *testing.T) {
-			if _, err := JSONToAST(node); err == nil {
+			if _, err := JSONToAST(node, DefaultMaxLength); err == nil {
 				t.Fatalf("JSONToAST accepted %s", node)
 			}
 		})
@@ -332,7 +372,7 @@ func TestJSONToAST_RefusesACallThatIsNotOne(t *testing.T) {
 		`{"type":"call","call":""}`,
 		`{"type":"call","call":"contains("}`,
 	} {
-		if _, err := JSONToAST(data); err == nil {
+		if _, err := JSONToAST(data, DefaultMaxLength); err == nil {
 			t.Errorf("JSONToAST(%s) accepted a call that is not a function call", data)
 		}
 	}

@@ -82,7 +82,7 @@ func TestCorpus_ThroughBridgeEnvelopes(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
-				got = wire(t, Guard(func() Envelope { return Stringify(string(tree)) }))
+				got = wire(t, Guard(func() Envelope { return Stringify(string(tree), DefaultMaxLength) }))
 			case "match":
 				got = wire(t, Guard(func() Envelope { return Match(tc.Query, fields, record, DefaultMaxLength) }))
 			case "eval":
@@ -154,8 +154,8 @@ func TestBridge_MalformedInputsNeverPanic(t *testing.T) {
 	for _, in := range junk {
 		t.Run(in, func(t *testing.T) {
 			calls := map[string]func() Envelope{
-				"validate":         func() Envelope { return Validate(in, in) },
-				"stringify":        func() Envelope { return Stringify(in) },
+				"validate":         func() Envelope { return Validate(in, in, DefaultMaxLength) },
+				"stringify":        func() Envelope { return Stringify(in, DefaultMaxLength) },
 				"parseAndValidate": func() Envelope { return ParseAndValidate("a=1", in, DefaultMaxLength) },
 				"match":            func() Envelope { return Match("a=1", in, in, DefaultMaxLength) },
 				"matchRecord":      func() Envelope { return Match("a=1", `[{"name":"a","type":"decimal"}]`, in, DefaultMaxLength) },

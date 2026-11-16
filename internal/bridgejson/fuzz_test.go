@@ -36,7 +36,7 @@ func FuzzBridgeRoundTrip(f *testing.F) {
 		if err != nil {
 			t.Fatalf("marshal %q: %v", s, err)
 		}
-		back, err := JSONToAST(string(data))
+		back, err := JSONToAST(string(data), DefaultMaxLength)
 		if err != nil {
 			t.Fatalf("Parse(%q) encoded as %s, which does not decode: %v", s, data, err)
 		}

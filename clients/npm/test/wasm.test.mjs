@@ -282,4 +282,12 @@ test("every entry point takes an optional maxLength in characters", () => {
   const accented = "state=" + "é".repeat(11);
   assert.equal(w.queryParse(accented, 17).error, undefined);
   assert.ok(w.queryParse(accented, 16).error);
+  // A tree is held to the limit it was parsed under, which validate and
+  // stringify take too.
+  const tree = JSON.stringify(w.queryParse(q, 0).result);
+  assert.ok(w.queryValidate(tree, f).error, "default limit applies to a tree");
+  assert.equal(w.queryValidate(tree, f, 0).error, undefined);
+  assert.equal(w.queryValidate(tree, f, 1000).valid, true);
+  assert.ok(w.queryStringify(tree).error);
+  assert.equal(w.queryStringify(tree, 0).result, q);
 });
