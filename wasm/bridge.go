@@ -30,13 +30,18 @@ func bridge(name string, need int, call func(args []js.Value) bridgejson.Envelop
 	})
 }
 
+// maxLengthArg reads the optional maxLength argument at index i, falling back
+// to the default limit when it is absent or not a number.
+func maxLengthArg(args []js.Value, i int) int {
+	if len(args) > i && args[i].Type() == js.TypeNumber {
+		return args[i].Int()
+	}
+	return bridgejson.DefaultMaxLength
+}
+
 // jsParse is queryParse(query, maxLength?).
 func jsParse(args []js.Value) bridgejson.Envelope {
-	maxLen := bridgejson.DefaultMaxLength
-	if len(args) > 1 && args[1].Type() == js.TypeNumber {
-		maxLen = args[1].Int()
-	}
-	return bridgejson.Parse(args[0].String(), maxLen)
+	return bridgejson.Parse(args[0].String(), maxLengthArg(args, 1))
 }
 
 // jsValidate is queryValidate(astJSON, fieldsJSON).
@@ -49,19 +54,19 @@ func jsStringify(args []js.Value) bridgejson.Envelope {
 	return bridgejson.Stringify(args[0].String())
 }
 
-// jsParseAndValidate is queryParseAndValidate(query, fieldsJSON).
+// jsParseAndValidate is queryParseAndValidate(query, fieldsJSON, maxLength?).
 func jsParseAndValidate(args []js.Value) bridgejson.Envelope {
-	return bridgejson.ParseAndValidate(args[0].String(), args[1].String())
+	return bridgejson.ParseAndValidate(args[0].String(), args[1].String(), maxLengthArg(args, 2))
 }
 
-// jsMatch is queryMatch(query, fieldsJSON, recordJSON).
+// jsMatch is queryMatch(query, fieldsJSON, recordJSON, maxLength?).
 func jsMatch(args []js.Value) bridgejson.Envelope {
-	return bridgejson.Match(args[0].String(), args[1].String(), args[2].String())
+	return bridgejson.Match(args[0].String(), args[1].String(), args[2].String(), maxLengthArg(args, 3))
 }
 
-// jsEval is queryEval(query, fieldsJSON, recordJSON).
+// jsEval is queryEval(query, fieldsJSON, recordJSON, maxLength?).
 func jsEval(args []js.Value) bridgejson.Envelope {
-	return bridgejson.Eval(args[0].String(), args[1].String(), args[2].String())
+	return bridgejson.Eval(args[0].String(), args[1].String(), args[2].String(), maxLengthArg(args, 3))
 }
 
 // toJSValue converts an envelope to a JavaScript object by way of JSON, so a

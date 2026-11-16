@@ -30,9 +30,11 @@ Each function takes one NUL-terminated UTF-8 JSON object and returns one.
 | `QueryParse` | `{"query", "maxLength"?}` | `{"result": tree}` |
 | `QueryValidate` | `{"ast", "fields"}` | `{"valid": true}` |
 | `QueryStringify` | `{"ast"}` | `{"result": "query text"}` |
-| `QueryParseAndValidate` | `{"query", "fields"}` | `{"result": tree}` |
-| `QueryMatch` | `{"query", "fields", "record"}` | `{"result": true}` |
-| `QueryEval` | `{"query", "fields", "record"}` | `{"result": value}` |
+| `QueryParseAndValidate` | `{"query", "fields", "maxLength"?}` | `{"result": tree}` |
+| `QueryMatch` | `{"query", "fields", "record", "maxLength"?}` | `{"result": true}` |
+| `QueryEval` | `{"query", "fields", "record", "maxLength"?}` | `{"result": value}` |
+
+`maxLength` is the query length limit in characters; it defaults to 256 and `0` disables it.
 
 A failure is `{"error": "message"}` with a list of coded entries: `errors` for syntax, `validationErrors` for validation. Each entry is `{code, message, offset, length}`. Show your own wording from `code`; the codes do not change, the messages may.
 

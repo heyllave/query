@@ -247,3 +247,39 @@ test("queryStringify builds a range from its end value", () => {
   };
   assert.equal(w.queryStringify(JSON.stringify(node)).result, "total:100..500");
 });
+
+test("queryParse carries a predicate function as a call node", () => {
+  const r = w.queryParse('contains(tags, "x") AND total>1');
+  assert.equal(r.error, undefined);
+  assert.equal(r.result.type, "binary");
+  assert.deepEqual(r.result.left, {
+    type: "call",
+    call: 'contains(tags, "x")',
+    fields: [["tags"]],
+  });
+  const alone = w.queryParse('startsWith(state, "dr")');
+  assert.equal(alone.result.type, "call");
+  const { result: str } = w.queryStringify(JSON.stringify(r.result));
+  assert.equal(str, 'contains(tags, "x") AND total>1');
+});
+
+test("queryParse lists the fields a fieldFunc reads", () => {
+  const r = w.queryParse("len(state)>3");
+  assert.equal(r.result.fieldFunc, "len(state)");
+  assert.deepEqual(r.result.field, undefined);
+  assert.deepEqual(r.result.fields, [["state"]]);
+});
+
+test("every entry point takes an optional maxLength in characters", () => {
+  const f = JSON.stringify(fields);
+  const q = "state=" + "x".repeat(300);
+  assert.ok(w.queryParseAndValidate(q, f).error, "default limit applies");
+  assert.equal(w.queryParseAndValidate(q, f, 0).error, undefined, "0 disables it");
+  assert.ok(w.queryMatch(q, f, "{}").error);
+  assert.equal(w.queryMatch(q, f, "{}", 1000).error, undefined);
+  assert.ok(w.queryEval("[base]", f, "{}", 3).error);
+  // Characters, not bytes: eleven two-byte letters fit under a limit of 13.
+  const accented = "state=" + "é".repeat(11);
+  assert.equal(w.queryParse(accented, 17).error, undefined);
+  assert.ok(w.queryParse(accented, 16).error);
+});
