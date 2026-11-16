@@ -590,6 +590,12 @@ func (l *lexer) isArithValueAhead() bool {
 	if ch == '(' {
 		return true
 	}
+	// A value that starts with a star is a wildcard pattern (`*0%"` matches
+	// text ending in `0%"`); no arithmetic begins with an operator, so the
+	// scan below must not take a later `%` or `+` for one.
+	if ch == '*' {
+		return false
+	}
 	// A field reference at the start routes to arithmetic, e.g. [base]*1.1.
 	if ch == '[' {
 		return true

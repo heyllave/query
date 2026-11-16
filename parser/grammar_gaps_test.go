@@ -203,3 +203,36 @@ func TestParse_RejectsInvalidUTF8(t *testing.T) {
 		t.Error("ParseValue accepted invalid UTF-8")
 	}
 }
+
+// A wildcard pattern that starts with a star and holds an arithmetic
+// operator is a pattern, not arithmetic: `A=*0%" "A"` used to parse because
+// the quoted string after it ended the look-ahead, but its printed form
+// `A=*0%" AND A` did not, so a saved rule could not be read back.
+func TestParse_LeadingStarIsAPatternNotArithmetic(t *testing.T) {
+	for _, q := range []string{`A=*0%"`, `A=*0%" AND A`, `A=*0+1`, `A=*0+"a"`, `A=*0%"x`} {
+		expr, err := Parse(q, 0)
+		if err != nil {
+			t.Errorf("Parse(%q): %v", q, err)
+			continue
+		}
+		out := ast.String(expr)
+		again, err := Parse(out, 0)
+		if err != nil {
+			t.Errorf("Parse(%q) printed as %q, which does not parse: %v", q, out, err)
+			continue
+		}
+		if got := ast.String(again); got != out {
+			t.Errorf("Parse(%q) printed as %q, reparsed and printed as %q", q, out, got)
+		}
+		var qual *ast.QualifierExpr
+		ast.Walk(expr, func(n ast.Expression) bool {
+			if q, ok := n.(*ast.QualifierExpr); ok && qual == nil {
+				qual = q
+			}
+			return true
+		})
+		if qual == nil || !qual.Value.Wildcard {
+			t.Errorf("Parse(%q) value = %+v, want a wildcard pattern", q, qual)
+		}
+	}
+}

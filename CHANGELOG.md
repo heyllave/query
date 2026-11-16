@@ -6,7 +6,12 @@ semantic versioning.
 
 ## Unreleased
 
-Nothing yet.
+### Fixed
+
+- A wildcard pattern that starts with `*` and holds an arithmetic character
+  (`A=*0%"`) is read as a pattern. The lexer's arithmetic look-ahead could
+  claim such a value and then refuse it, so a query like `A=*0%" "A"`
+  parsed while its printed form `A=*0%" AND A` did not.
 
 ## v0.1.0 - 2026-11-16
 
