@@ -675,7 +675,13 @@ func (l *lexer) isArithValueAhead() bool {
 				// Function call: a primary. Its arguments are the call's
 				// business (field names are fine there), so skip to the
 				// matching ')'.
-				i = l.skipCall(end) - 1
+				close := l.skipCall(end)
+				if close < 0 {
+					// A call left open is not arithmetic, for the same
+					// reason as a group left open.
+					return false
+				}
+				i = close - 1
 				continue
 			}
 			return false // bareword → unquoted string
@@ -695,8 +701,8 @@ func (l *lexer) isArithValueAhead() bool {
 }
 
 // skipCall returns the index just past the ')' that closes the call body
-// opening at l.input[open] (or len(input) when unclosed), skipping quoted
-// strings inside it.
+// opening at l.input[open], skipping quoted strings inside it, or -1 when it
+// never closes.
 func (l *lexer) skipCall(open int) int {
 	depth := 0
 	for i := open; i < len(l.input); i++ {
@@ -716,7 +722,7 @@ func (l *lexer) skipCall(open int) int {
 			}
 		}
 	}
-	return len(l.input)
+	return -1
 }
 
 // skipFieldRef returns the index of the ']' that closes the field reference
