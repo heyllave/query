@@ -10,7 +10,7 @@ import (
 	"github.com/heyllave/query/validate"
 )
 
-// DefaultMaxLength is the query length limit a bridge applies when the caller
+// DefaultMaxLength is the query length limit, in characters, a bridge applies when the caller
 // gives none.
 const DefaultMaxLength = 256
 
@@ -78,10 +78,10 @@ func Stringify(astJSON string) Envelope {
 	return ok(ast.String(expr))
 }
 
-// ParseAndValidate parses query under the default length limit, validates it
-// against the field configs and answers with its AST.
-func ParseAndValidate(query, fieldsJSON string) Envelope {
-	expr, err := parser.Parse(query, DefaultMaxLength)
+// ParseAndValidate parses query, validates it against the field configs and
+// answers with its AST. A maxLength of zero or less disables the length limit.
+func ParseAndValidate(query, fieldsJSON string, maxLength int) Envelope {
+	expr, err := parser.Parse(query, maxLength)
 	if err != nil {
 		return parseFailure(err)
 	}
@@ -96,12 +96,13 @@ func ParseAndValidate(query, fieldsJSON string) Envelope {
 }
 
 // Match compiles query as a predicate and evaluates it against a JSON record.
-func Match(query, fieldsJSON, recordJSON string) Envelope {
+// A maxLength of zero or less disables the length limit.
+func Match(query, fieldsJSON, recordJSON string, maxLength int) Envelope {
 	fields, record, fail := decodeInputs(fieldsJSON, recordJSON)
 	if fail != nil {
 		return fail
 	}
-	prog, err := eval.Compile(query, fields)
+	prog, err := eval.Compile(query, fields, eval.WithMaxLength(maxLength))
 	if err != nil {
 		return compileFailure(err)
 	}
@@ -109,13 +110,13 @@ func Match(query, fieldsJSON, recordJSON string) Envelope {
 }
 
 // Eval compiles query as a value expression and evaluates it against a JSON
-// record.
-func Eval(query, fieldsJSON, recordJSON string) Envelope {
+// record. A maxLength of zero or less disables the length limit.
+func Eval(query, fieldsJSON, recordJSON string, maxLength int) Envelope {
 	fields, record, fail := decodeInputs(fieldsJSON, recordJSON)
 	if fail != nil {
 		return fail
 	}
-	prog, err := eval.CompileValue(query, fields)
+	prog, err := eval.CompileValue(query, fields, eval.WithMaxLength(maxLength))
 	if err != nil {
 		return compileFailure(err)
 	}

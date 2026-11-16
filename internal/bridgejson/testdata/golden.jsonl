@@ -33,8 +33,8 @@
 {"query":"total=3","print":"total=3","ast":{"type":"qualifier","op":"=","field":["total"],"value":{"type":"integer","raw":"3","value":3}}}
 {"query":"state=90210","print":"state=90210","ast":{"type":"qualifier","op":"=","field":["state"],"value":{"type":"integer","raw":"90210","value":90210}}}
 {"query":"cpu=0","print":"cpu=0","ast":{"type":"qualifier","op":"=","field":["cpu"],"value":{"type":"integer","raw":"0","value":0}}}
-{"query":"len(state)>3","print":"len(state)>3","ast":{"type":"qualifier","op":">","value":{"type":"integer","raw":"3","value":3},"fieldFunc":"len(state)"}}
-{"query":"len(state)!>5","print":"NOT len(state)>5","ast":{"type":"not","expr":{"type":"qualifier","op":">","value":{"type":"integer","raw":"5","value":5},"fieldFunc":"len(state)"}}}
+{"query":"len(state)>3","print":"len(state)>3","ast":{"type":"qualifier","op":">","value":{"type":"integer","raw":"3","value":3},"fieldFunc":"len(state)","fields":[["state"]]}}
+{"query":"len(state)!>5","print":"NOT len(state)>5","ast":{"type":"not","expr":{"type":"qualifier","op":">","value":{"type":"integer","raw":"5","value":5},"fieldFunc":"len(state)","fields":[["state"]]}}}
 {"query":"state!=dr*","print":"state!=dr*","ast":{"type":"qualifier","op":"!=","field":["state"],"value":{"type":"string","raw":"dr*","value":"dr*","wildcard":true}}}
 {"query":"labels.dev=jane","print":"labels.dev=jane","ast":{"type":"qualifier","op":"=","field":["labels","dev"],"value":{"type":"string","raw":"jane","value":"jane"}}}
 {"query":"state","print":"state","ast":{"type":"presence","field":["state"]}}
@@ -45,11 +45,11 @@
 {"query":"state IN (dr*, paid)","print":"state=dr* OR state=paid","ast":{"type":"binary","op":"OR","left":{"type":"qualifier","op":"=","field":["state"],"value":{"type":"string","raw":"dr*","value":"dr*","wildcard":true}},"right":{"type":"qualifier","op":"=","field":["state"],"value":{"type":"string","raw":"paid","value":"paid"}}}}
 {"query":"created_at>=2026-01-01T10:00:00Z","print":"created_at>=2026-01-01T10:00:00Z","ast":{"type":"qualifier","op":">=","field":["created_at"],"value":{"type":"date","raw":"2026-01-01T10:00:00Z","value":"2026-01-01T10:00:00Z"}}}
 {"query":"created_at<2026-01-01","print":"created_at<2026-01-01","ast":{"type":"qualifier","op":"<","field":["created_at"],"value":{"type":"date","raw":"2026-01-01","value":"2026-01-01T00:00:00Z"}}}
-{"query":"lenght(state)>3","print":"lenght(state)>3","ast":{"type":"qualifier","op":">","value":{"type":"integer","raw":"3","value":3},"fieldFunc":"lenght(state)"}}
-{"query":"lower(state, state)=a","print":"lower(state, state)=a","ast":{"type":"qualifier","op":"=","value":{"type":"string","raw":"a","value":"a"},"fieldFunc":"lower(state, state)"}}
+{"query":"lenght(state)>3","print":"lenght(state)>3","ast":{"type":"qualifier","op":">","value":{"type":"integer","raw":"3","value":3},"fieldFunc":"lenght(state)","fields":[["state"]]}}
+{"query":"lower(state, state)=a","print":"lower(state, state)=a","ast":{"type":"qualifier","op":"=","value":{"type":"string","raw":"a","value":"a"},"fieldFunc":"lower(state, state)","fields":[["state"]]}}
 {"query":"state=10-3","print":"state=10-3","ast":{"type":"qualifier","op":"=","field":["state"],"value":{"type":"arithmetic","raw":"10-3","value":null}}}
 {"query":"state=550e8400-e29b-41d4-a716-446655440000","print":"state=550e8400-e29b-41d4-a716-446655440000","ast":{"type":"qualifier","op":"=","field":["state"],"value":{"type":"string","raw":"550e8400-e29b-41d4-a716-446655440000","value":"550e8400-e29b-41d4-a716-446655440000"}}}
-{"query":"lower(state)=draft","print":"lower(state)=draft","ast":{"type":"qualifier","op":"=","value":{"type":"string","raw":"draft","value":"draft"},"fieldFunc":"lower(state)"}}
+{"query":"lower(state)=draft","print":"lower(state)=draft","ast":{"type":"qualifier","op":"=","value":{"type":"string","raw":"draft","value":"draft"},"fieldFunc":"lower(state)","fields":[["state"]]}}
 {"query":"state=a\\(b","print":"state=a\\(b","ast":{"type":"qualifier","op":"=","field":["state"],"value":{"type":"string","raw":"a\\(b","value":"a(b"}}}
 {"query":"state=a\\*","print":"state=a\\*","ast":{"type":"qualifier","op":"=","field":["state"],"value":{"type":"string","raw":"a\\*","value":"a*"}}}
 {"query":"true=1","print":"[\"true\"]=1","ast":{"type":"qualifier","op":"=","field":["true"],"value":{"type":"integer","raw":"1","value":1}}}
@@ -62,15 +62,15 @@
 {"query":"café","print":"café","ast":{"type":"presence","field":["café"]}}
 {"query":"state=café","print":"state=café","ast":{"type":"qualifier","op":"=","field":["state"],"value":{"type":"string","raw":"café","value":"café"}}}
 {"query":"state NOT IN (draft, void)","print":"state!=draft AND state!=void","ast":{"type":"binary","op":"AND","left":{"type":"qualifier","op":"!=","field":["state"],"value":{"type":"string","raw":"draft","value":"draft"}},"right":{"type":"qualifier","op":"!=","field":["state"],"value":{"type":"string","raw":"void","value":"void"}}}}
-{"query":"lower(state) IN (draft, void)","print":"lower(state)=draft OR lower(state)=void","ast":{"type":"binary","op":"OR","left":{"type":"qualifier","op":"=","value":{"type":"string","raw":"draft","value":"draft"},"fieldFunc":"lower(state)"},"right":{"type":"qualifier","op":"=","value":{"type":"string","raw":"void","value":"void"},"fieldFunc":"lower(state)"}}}
+{"query":"lower(state) IN (draft, void)","print":"lower(state)=draft OR lower(state)=void","ast":{"type":"binary","op":"OR","left":{"type":"qualifier","op":"=","value":{"type":"string","raw":"draft","value":"draft"},"fieldFunc":"lower(state)","fields":[["state"]]},"right":{"type":"qualifier","op":"=","value":{"type":"string","raw":"void","value":"void"},"fieldFunc":"lower(state)","fields":[["state"]]}}}
 {"query":"state (total>1 OR total<0)","print":"state AND (total>1 OR total<0)","ast":{"type":"binary","op":"AND","left":{"type":"presence","field":["state"]},"right":{"type":"group","expr":{"type":"binary","op":"OR","left":{"type":"qualifier","op":">","field":["total"],"value":{"type":"integer","raw":"1","value":1}},"right":{"type":"qualifier","op":"<","field":["total"],"value":{"type":"integer","raw":"0","value":0}}}}}}
 {"query":"state total>1","print":"state AND total>1","ast":{"type":"binary","op":"AND","left":{"type":"presence","field":["state"]},"right":{"type":"qualifier","op":">","field":["total"],"value":{"type":"integer","raw":"1","value":1}}}}
 {"query":"state=10.0.0.1/24","print":"state=\"10.0.0.1/24\"","ast":{"type":"qualifier","op":"=","field":["state"],"value":{"type":"string","raw":"10.0.0.1/24","value":"10.0.0.1/24"}}}
 {"query":"labels.example.com/team=core","print":"labels.example.com/team=core","ast":{"type":"qualifier","op":"=","field":["labels","example","com/team"],"value":{"type":"string","raw":"core","value":"core"}}}
-{"query":"cpu=abs(1-8)","print":"cpu=abs((1-8))","ast":{"type":"qualifier","op":"=","field":["cpu"],"value":{"type":"function","raw":"abs(1-8)","value":null}}}
-{"query":"startsWith(secret, \"a\")"}
-{"query":"len(secret)>2","print":"len(secret)>2","ast":{"type":"qualifier","op":">","value":{"type":"integer","raw":"2","value":2},"fieldFunc":"len(secret)"}}
-{"query":"lower(secret)=abc","print":"lower(secret)=abc","ast":{"type":"qualifier","op":"=","value":{"type":"string","raw":"abc","value":"abc"},"fieldFunc":"lower(secret)"}}
+{"query":"cpu=abs(1-8)","print":"cpu=abs((1-8))","ast":{"type":"qualifier","op":"=","field":["cpu"],"value":{"type":"function","raw":"abs((1-8))","value":null}}}
+{"query":"startsWith(secret, \"a\")","print":"startsWith(secret, \"a\")","ast":{"type":"call","call":"startsWith(secret, \"a\")","fields":[["secret"]]}}
+{"query":"len(secret)>2","print":"len(secret)>2","ast":{"type":"qualifier","op":">","value":{"type":"integer","raw":"2","value":2},"fieldFunc":"len(secret)","fields":[["secret"]]}}
+{"query":"lower(secret)=abc","print":"lower(secret)=abc","ast":{"type":"qualifier","op":"=","value":{"type":"string","raw":"abc","value":"abc"},"fieldFunc":"lower(secret)","fields":[["secret"]]}}
 {"query":"(((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((a","codes":["nestingTooDeep"]}
 {"query":"name=checkout-*","print":"name=checkout-*","ast":{"type":"qualifier","op":"=","field":["name"],"value":{"type":"string","raw":"checkout-*","value":"checkout-*","wildcard":true}}}
 {"query":"name=checkout-pr-7505","print":"name=checkout-pr-7505","ast":{"type":"qualifier","op":"=","field":["name"],"value":{"type":"string","raw":"checkout-pr-7505","value":"checkout-pr-7505"}}}
@@ -110,7 +110,7 @@
 {"query":"ttl<1d","print":"ttl<1d","ast":{"type":"qualifier","op":"<","field":["ttl"],"value":{"type":"duration","raw":"1d","value":86400000000000}}}
 {"query":"cpu>=0.75 AND cpu<1","print":"cpu>=0.75 AND cpu<1","ast":{"type":"binary","op":"AND","left":{"type":"qualifier","op":">=","field":["cpu"],"value":{"type":"float","raw":"0.75","value":0.75}},"right":{"type":"qualifier","op":"<","field":["cpu"],"value":{"type":"integer","raw":"1","value":1}}}}
 {"query":"replicas:1..5","print":"replicas:1..5","ast":{"type":"qualifier","op":"..","field":["replicas"],"value":{"type":"integer","raw":"1","value":1},"endValue":{"type":"integer","raw":"5","value":5}}}
-{"query":"contains(lower(name), \"pr-7505\")"}
+{"query":"contains(lower(name), \"pr-7505\")","print":"contains(lower(name), \"pr-7505\")","ast":{"type":"call","call":"contains(lower(name), \"pr-7505\")","fields":[["name"]]}}
 {"query":"secret=1","print":"secret=1","ast":{"type":"qualifier","op":"=","field":["secret"],"value":{"type":"integer","raw":"1","value":1}}}
 {"query":"owner=dana*","print":"owner=dana*","ast":{"type":"qualifier","op":"=","field":["owner"],"value":{"type":"string","raw":"dana*","value":"dana*","wildcard":true}}}
 {"query":"owner=dana@example.com","print":"owner=dana@example.com","ast":{"type":"qualifier","op":"=","field":["owner"],"value":{"type":"string","raw":"dana@example.com","value":"dana@example.com"}}}
@@ -168,15 +168,15 @@
 {"query":"zip=\"\"","print":"zip=\"\"","ast":{"type":"qualifier","op":"=","field":["zip"],"value":{"type":"string","raw":"","value":"","quoted":true}}}
 {"query":"zip=\"100-0001\"","print":"zip=\"100-0001\"","ast":{"type":"qualifier","op":"=","field":["zip"],"value":{"type":"string","raw":"100-0001","value":"100-0001","quoted":true}}}
 {"query":"zip=100-0001","print":"zip=100-0001","ast":{"type":"qualifier","op":"=","field":["zip"],"value":{"type":"arithmetic","raw":"100-0001","value":null}}}
-{"query":"len(notes)=0","print":"len(notes)=0","ast":{"type":"qualifier","op":"=","value":{"type":"integer","raw":"0","value":0},"fieldFunc":"len(notes)"}}
-{"query":"len(zip)=5","print":"len(zip)=5","ast":{"type":"qualifier","op":"=","value":{"type":"integer","raw":"5","value":5},"fieldFunc":"len(zip)"}}
-{"query":"len(customer)>10","print":"len(customer)>10","ast":{"type":"qualifier","op":">","value":{"type":"integer","raw":"10","value":10},"fieldFunc":"len(customer)"}}
-{"query":"lower(customer)=alice*","print":"lower(customer)=alice*","ast":{"type":"qualifier","op":"=","value":{"type":"string","raw":"alice*","value":"alice*","wildcard":true},"fieldFunc":"lower(customer)"}}
-{"query":"upper(state)=PAID","print":"upper(state)=PAID","ast":{"type":"qualifier","op":"=","value":{"type":"string","raw":"PAID","value":"PAID"},"fieldFunc":"upper(state)"}}
-{"query":"trim(notes)=refund","print":"trim(notes)=refund","ast":{"type":"qualifier","op":"=","value":{"type":"string","raw":"refund","value":"refund"},"fieldFunc":"trim(notes)"}}
-{"query":"len(notes)>3","print":"len(notes)>3","ast":{"type":"qualifier","op":">","value":{"type":"integer","raw":"3","value":3},"fieldFunc":"len(notes)"}}
-{"query":"lenght(customer)>3","print":"lenght(customer)>3","ast":{"type":"qualifier","op":">","value":{"type":"integer","raw":"3","value":3},"fieldFunc":"lenght(customer)"}}
-{"query":"lower(customer, state)=a","print":"lower(customer, state)=a","ast":{"type":"qualifier","op":"=","value":{"type":"string","raw":"a","value":"a"},"fieldFunc":"lower(customer, state)"}}
+{"query":"len(notes)=0","print":"len(notes)=0","ast":{"type":"qualifier","op":"=","value":{"type":"integer","raw":"0","value":0},"fieldFunc":"len(notes)","fields":[["notes"]]}}
+{"query":"len(zip)=5","print":"len(zip)=5","ast":{"type":"qualifier","op":"=","value":{"type":"integer","raw":"5","value":5},"fieldFunc":"len(zip)","fields":[["zip"]]}}
+{"query":"len(customer)>10","print":"len(customer)>10","ast":{"type":"qualifier","op":">","value":{"type":"integer","raw":"10","value":10},"fieldFunc":"len(customer)","fields":[["customer"]]}}
+{"query":"lower(customer)=alice*","print":"lower(customer)=alice*","ast":{"type":"qualifier","op":"=","value":{"type":"string","raw":"alice*","value":"alice*","wildcard":true},"fieldFunc":"lower(customer)","fields":[["customer"]]}}
+{"query":"upper(state)=PAID","print":"upper(state)=PAID","ast":{"type":"qualifier","op":"=","value":{"type":"string","raw":"PAID","value":"PAID"},"fieldFunc":"upper(state)","fields":[["state"]]}}
+{"query":"trim(notes)=refund","print":"trim(notes)=refund","ast":{"type":"qualifier","op":"=","value":{"type":"string","raw":"refund","value":"refund"},"fieldFunc":"trim(notes)","fields":[["notes"]]}}
+{"query":"len(notes)>3","print":"len(notes)>3","ast":{"type":"qualifier","op":">","value":{"type":"integer","raw":"3","value":3},"fieldFunc":"len(notes)","fields":[["notes"]]}}
+{"query":"lenght(customer)>3","print":"lenght(customer)>3","ast":{"type":"qualifier","op":">","value":{"type":"integer","raw":"3","value":3},"fieldFunc":"lenght(customer)","fields":[["customer"]]}}
+{"query":"lower(customer, state)=a","print":"lower(customer, state)=a","ast":{"type":"qualifier","op":"=","value":{"type":"string","raw":"a","value":"a"},"fieldFunc":"lower(customer, state)","fields":[["customer"],["state"]]}}
 {"query":"paid=true","print":"paid=true","ast":{"type":"qualifier","op":"=","field":["paid"],"value":{"type":"boolean","raw":"true","value":true}}}
 {"query":"paid!=true","print":"paid!=true","ast":{"type":"qualifier","op":"!=","field":["paid"],"value":{"type":"boolean","raw":"true","value":true}}}
 {"query":"paid=yes","print":"paid=yes","ast":{"type":"qualifier","op":"=","field":["paid"],"value":{"type":"string","raw":"yes","value":"yes"}}}
@@ -210,7 +210,7 @@
 {"query":"NOT NOT state=void","print":"NOT NOT state=void","ast":{"type":"not","expr":{"type":"not","expr":{"type":"qualifier","op":"=","field":["state"],"value":{"type":"string","raw":"void","value":"void"}}}}}
 {"query":"state=draft and not paid=true or state=void","print":"state=draft AND NOT paid=true OR state=void","ast":{"type":"binary","op":"OR","left":{"type":"binary","op":"AND","left":{"type":"qualifier","op":"=","field":["state"],"value":{"type":"string","raw":"draft","value":"draft"}},"right":{"type":"not","expr":{"type":"qualifier","op":"=","field":["paid"],"value":{"type":"boolean","raw":"true","value":true}}}},"right":{"type":"qualifier","op":"=","field":["state"],"value":{"type":"string","raw":"void","value":"void"}}}}
 {"query":"paid=false total>1 qty>=1 state!=void customer=* created_at>2026-01-01","print":"paid=false AND total>1 AND qty>=1 AND state!=void AND customer=* AND created_at>2026-01-01","ast":{"type":"binary","op":"AND","left":{"type":"binary","op":"AND","left":{"type":"binary","op":"AND","left":{"type":"binary","op":"AND","left":{"type":"binary","op":"AND","left":{"type":"qualifier","op":"=","field":["paid"],"value":{"type":"boolean","raw":"false","value":false}},"right":{"type":"qualifier","op":">","field":["total"],"value":{"type":"integer","raw":"1","value":1}}},"right":{"type":"qualifier","op":">=","field":["qty"],"value":{"type":"integer","raw":"1","value":1}}},"right":{"type":"qualifier","op":"!=","field":["state"],"value":{"type":"string","raw":"void","value":"void"}}},"right":{"type":"qualifier","op":"=","field":["customer"],"value":{"type":"string","raw":"*","value":"*","wildcard":true}}},"right":{"type":"qualifier","op":">","field":["created_at"],"value":{"type":"date","raw":"2026-01-01","value":"2026-01-01T00:00:00Z"}}}}
-{"query":"lower(state)=paid AND email=*@example.* AND total>5","print":"lower(state)=paid AND email=*@example.* AND total>5","ast":{"type":"binary","op":"AND","left":{"type":"binary","op":"AND","left":{"type":"qualifier","op":"=","value":{"type":"string","raw":"paid","value":"paid"},"fieldFunc":"lower(state)"},"right":{"type":"qualifier","op":"=","field":["email"],"value":{"type":"string","raw":"*@example.*","value":"*@example.*","wildcard":true}}},"right":{"type":"qualifier","op":">","field":["total"],"value":{"type":"integer","raw":"5","value":5}}}}
+{"query":"lower(state)=paid AND email=*@example.* AND total>5","print":"lower(state)=paid AND email=*@example.* AND total>5","ast":{"type":"binary","op":"AND","left":{"type":"binary","op":"AND","left":{"type":"qualifier","op":"=","value":{"type":"string","raw":"paid","value":"paid"},"fieldFunc":"lower(state)","fields":[["state"]]},"right":{"type":"qualifier","op":"=","field":["email"],"value":{"type":"string","raw":"*@example.*","value":"*@example.*","wildcard":true}}},"right":{"type":"qualifier","op":">","field":["total"],"value":{"type":"integer","raw":"5","value":5}}}}
 {"query":"nope=1","print":"nope=1","ast":{"type":"qualifier","op":"=","field":["nope"],"value":{"type":"integer","raw":"1","value":1}}}
 {"query":"customer>a","print":"customer>a","ast":{"type":"qualifier","op":">","field":["customer"],"value":{"type":"string","raw":"a","value":"a"}}}
 {"query":"total=1*","print":"total=1*","ast":{"type":"qualifier","op":"=","field":["total"],"value":{"type":"string","raw":"1*","value":"1*","wildcard":true}}}
@@ -219,8 +219,8 @@
 {"query":"(state=draft","codes":["unclosedParen"]}
 {"query":"customer=\"Alice","codes":["unclosedString"]}
 {"query":"country NOT IN (ES, IE, JP)","print":"country!=ES AND country!=IE AND country!=JP","ast":{"type":"binary","op":"AND","left":{"type":"binary","op":"AND","left":{"type":"qualifier","op":"!=","field":["country"],"value":{"type":"string","raw":"ES","value":"ES"}},"right":{"type":"qualifier","op":"!=","field":["country"],"value":{"type":"string","raw":"IE","value":"IE"}}},"right":{"type":"qualifier","op":"!=","field":["country"],"value":{"type":"string","raw":"JP","value":"JP"}}}}
-{"query":"lower(state) IN (paid, void)","print":"lower(state)=paid OR lower(state)=void","ast":{"type":"binary","op":"OR","left":{"type":"qualifier","op":"=","value":{"type":"string","raw":"paid","value":"paid"},"fieldFunc":"lower(state)"},"right":{"type":"qualifier","op":"=","value":{"type":"string","raw":"void","value":"void"},"fieldFunc":"lower(state)"}}}
-{"query":"lower(state) NOT IN (draft, issued, paid)","print":"lower(state)!=draft AND lower(state)!=issued AND lower(state)!=paid","ast":{"type":"binary","op":"AND","left":{"type":"binary","op":"AND","left":{"type":"qualifier","op":"!=","value":{"type":"string","raw":"draft","value":"draft"},"fieldFunc":"lower(state)"},"right":{"type":"qualifier","op":"!=","value":{"type":"string","raw":"issued","value":"issued"},"fieldFunc":"lower(state)"}},"right":{"type":"qualifier","op":"!=","value":{"type":"string","raw":"paid","value":"paid"},"fieldFunc":"lower(state)"}}}
+{"query":"lower(state) IN (paid, void)","print":"lower(state)=paid OR lower(state)=void","ast":{"type":"binary","op":"OR","left":{"type":"qualifier","op":"=","value":{"type":"string","raw":"paid","value":"paid"},"fieldFunc":"lower(state)","fields":[["state"]]},"right":{"type":"qualifier","op":"=","value":{"type":"string","raw":"void","value":"void"},"fieldFunc":"lower(state)","fields":[["state"]]}}}
+{"query":"lower(state) NOT IN (draft, issued, paid)","print":"lower(state)!=draft AND lower(state)!=issued AND lower(state)!=paid","ast":{"type":"binary","op":"AND","left":{"type":"binary","op":"AND","left":{"type":"qualifier","op":"!=","value":{"type":"string","raw":"draft","value":"draft"},"fieldFunc":"lower(state)","fields":[["state"]]},"right":{"type":"qualifier","op":"!=","value":{"type":"string","raw":"issued","value":"issued"},"fieldFunc":"lower(state)","fields":[["state"]]}},"right":{"type":"qualifier","op":"!=","value":{"type":"string","raw":"paid","value":"paid"},"fieldFunc":"lower(state)","fields":[["state"]]}}}
 {"query":"notes (state=draft OR state=void)","print":"notes AND (state=draft OR state=void)","ast":{"type":"binary","op":"AND","left":{"type":"presence","field":["notes"]},"right":{"type":"group","expr":{"type":"binary","op":"OR","left":{"type":"qualifier","op":"=","field":["state"],"value":{"type":"string","raw":"draft","value":"draft"}},"right":{"type":"qualifier","op":"=","field":["state"],"value":{"type":"string","raw":"void","value":"void"}}}}}}
 {"query":"state IN ()","codes":["emptyInList"]}
 {"query":"total","print":"total","ast":{"type":"presence","field":["total"]}}
@@ -259,7 +259,7 @@
 {"query":"state IN (draft, issued)","print":"state=draft OR state=issued","ast":{"type":"binary","op":"OR","left":{"type":"qualifier","op":"=","field":["state"],"value":{"type":"string","raw":"draft","value":"draft"}},"right":{"type":"qualifier","op":"=","field":["state"],"value":{"type":"string","raw":"issued","value":"issued"}}}}
 {"query":"state in (draft)","print":"state=draft","ast":{"type":"qualifier","op":"=","field":["state"],"value":{"type":"string","raw":"draft","value":"draft"}}}
 {"query":"state NOT IN (draft, issued)","print":"state!=draft AND state!=issued","ast":{"type":"binary","op":"AND","left":{"type":"qualifier","op":"!=","field":["state"],"value":{"type":"string","raw":"draft","value":"draft"}},"right":{"type":"qualifier","op":"!=","field":["state"],"value":{"type":"string","raw":"issued","value":"issued"}}}}
-{"query":"lower(name) IN (ab, cd)","print":"lower(name)=ab OR lower(name)=cd","ast":{"type":"binary","op":"OR","left":{"type":"qualifier","op":"=","value":{"type":"string","raw":"ab","value":"ab"},"fieldFunc":"lower(name)"},"right":{"type":"qualifier","op":"=","value":{"type":"string","raw":"cd","value":"cd"},"fieldFunc":"lower(name)"}}}
+{"query":"lower(name) IN (ab, cd)","print":"lower(name)=ab OR lower(name)=cd","ast":{"type":"binary","op":"OR","left":{"type":"qualifier","op":"=","value":{"type":"string","raw":"ab","value":"ab"},"fieldFunc":"lower(name)","fields":[["name"]]},"right":{"type":"qualifier","op":"=","value":{"type":"string","raw":"cd","value":"cd"},"fieldFunc":"lower(name)","fields":[["name"]]}}}
 {"query":"labels.team=core","print":"labels.team=core","ast":{"type":"qualifier","op":"=","field":["labels","team"],"value":{"type":"string","raw":"core","value":"core"}}}
 {"query":"labels.\"odd key\"=x","codes":["expectedField"]}
 {"query":"[cpu limit]>5","codes":["unclosedFieldRef","unexpectedChar"]}
@@ -268,18 +268,18 @@
 {"query":"total>[base]*1.1","print":"total>[base]*1.1","ast":{"type":"qualifier","op":">","field":["total"],"value":{"type":"arithmetic","raw":"[base]*1.1","value":null}}}
 {"query":"total>=[base]+[cpu]","print":"total>=[base]+[cpu]","ast":{"type":"qualifier","op":">=","field":["total"],"value":{"type":"arithmetic","raw":"[base]+[cpu]","value":null}}}
 {"query":"total>(1+2)*3","print":"total>(1+2)*3","ast":{"type":"qualifier","op":">","field":["total"],"value":{"type":"arithmetic","raw":"(1+2)*3","value":null}}}
-{"query":"total>10*-3","print":"total>10*(-3)","ast":{"type":"qualifier","op":">","field":["total"],"value":{"type":"arithmetic","raw":"10*-3","value":null}}}
+{"query":"total>10*-3","print":"total>10*(-3)","ast":{"type":"qualifier","op":">","field":["total"],"value":{"type":"arithmetic","raw":"10*(-3)","value":null}}}
 {"query":"total>10%3","print":"total>10%3","ast":{"type":"qualifier","op":">","field":["total"],"value":{"type":"arithmetic","raw":"10%3","value":null}}}
 {"query":"n>1+2*3-4/5","print":"n>1+2*3-4/5","ast":{"type":"qualifier","op":">","field":["n"],"value":{"type":"arithmetic","raw":"1+2*3-4/5","value":null}}}
-{"query":"lower(name)=john","print":"lower(name)=john","ast":{"type":"qualifier","op":"=","value":{"type":"string","raw":"john","value":"john"},"fieldFunc":"lower(name)"}}
-{"query":"len(name)>5","print":"len(name)>5","ast":{"type":"qualifier","op":">","value":{"type":"integer","raw":"5","value":5},"fieldFunc":"len(name)"}}
-{"query":"contains(name, \"urgent\")"}
-{"query":"startsWith(name, \"a\")"}
-{"query":"year(created_at)=2026","print":"year(created_at)=2026","ast":{"type":"qualifier","op":"=","value":{"type":"integer","raw":"2026","value":2026},"fieldFunc":"year(created_at)"}}
-{"query":"addDays(created_at, 7)>now()","print":"addDays(created_at, 7)>now()","ast":{"type":"qualifier","op":">","value":{"type":"function","raw":"now()","value":null},"fieldFunc":"addDays(created_at, 7)"}}
-{"query":"round(total, 2)=10.5","print":"round(total, 2)=10.5","ast":{"type":"qualifier","op":"=","value":{"type":"float","raw":"10.5","value":10.5},"fieldFunc":"round(total, 2)"}}
-{"query":"abs([total]-[base])>5","print":"abs(([total]-[base]))>5","ast":{"type":"qualifier","op":">","value":{"type":"integer","raw":"5","value":5},"fieldFunc":"abs(([total]-[base]))"}}
-{"query":"min(len(name)+1, 9)>2","print":"min((len(name)+1), 9)>2","ast":{"type":"qualifier","op":">","value":{"type":"integer","raw":"2","value":2},"fieldFunc":"min((len(name)+1), 9)"}}
+{"query":"lower(name)=john","print":"lower(name)=john","ast":{"type":"qualifier","op":"=","value":{"type":"string","raw":"john","value":"john"},"fieldFunc":"lower(name)","fields":[["name"]]}}
+{"query":"len(name)>5","print":"len(name)>5","ast":{"type":"qualifier","op":">","value":{"type":"integer","raw":"5","value":5},"fieldFunc":"len(name)","fields":[["name"]]}}
+{"query":"contains(name, \"urgent\")","print":"contains(name, \"urgent\")","ast":{"type":"call","call":"contains(name, \"urgent\")","fields":[["name"]]}}
+{"query":"startsWith(name, \"a\")","print":"startsWith(name, \"a\")","ast":{"type":"call","call":"startsWith(name, \"a\")","fields":[["name"]]}}
+{"query":"year(created_at)=2026","print":"year(created_at)=2026","ast":{"type":"qualifier","op":"=","value":{"type":"integer","raw":"2026","value":2026},"fieldFunc":"year(created_at)","fields":[["created_at"]]}}
+{"query":"addDays(created_at, 7)>now()","print":"addDays(created_at, 7)>now()","ast":{"type":"qualifier","op":">","value":{"type":"function","raw":"now()","value":null},"fieldFunc":"addDays(created_at, 7)","fields":[["created_at"]]}}
+{"query":"round(total, 2)=10.5","print":"round(total, 2)=10.5","ast":{"type":"qualifier","op":"=","value":{"type":"float","raw":"10.5","value":10.5},"fieldFunc":"round(total, 2)","fields":[["total"]]}}
+{"query":"abs([total]-[base])>5","print":"abs(([total]-[base]))>5","ast":{"type":"qualifier","op":">","value":{"type":"integer","raw":"5","value":5},"fieldFunc":"abs(([total]-[base]))","fields":[["total"],["base"]]}}
+{"query":"min(len(name)+1, 9)>2","print":"min((len(name)+1), 9)>2","ast":{"type":"qualifier","op":">","value":{"type":"integer","raw":"2","value":2},"fieldFunc":"min((len(name)+1), 9)","fields":[["name"]]}}
 {"query":"items@(sku=abc)","print":"items@(sku=abc)","ast":{"type":"selector","inner":{"type":"qualifier","op":"=","field":["sku"],"value":{"type":"string","raw":"abc","value":"abc"}},"base":{"type":"presence","field":["items"]}}}
 {"query":"items@(qty>2 AND sku=a*)","print":"items@(qty>2 AND sku=a*)","ast":{"type":"selector","inner":{"type":"binary","op":"AND","left":{"type":"qualifier","op":">","field":["qty"],"value":{"type":"integer","raw":"2","value":2}},"right":{"type":"qualifier","op":"=","field":["sku"],"value":{"type":"string","raw":"a*","value":"a*","wildcard":true}}},"base":{"type":"presence","field":["items"]}}}
 {"query":"NOT items@(sku=abc)","print":"NOT items@(sku=abc)","ast":{"type":"not","expr":{"type":"selector","inner":{"type":"qualifier","op":"=","field":["sku"],"value":{"type":"string","raw":"abc","value":"abc"}},"base":{"type":"presence","field":["items"]}}}}
@@ -345,9 +345,9 @@
 {"query":"a>==1","codes":["unexpectedChar"]}
 {"query":"a:=1","codes":["unexpectedChar"]}
 {"query":"x IN (=a)","codes":["unexpectedChar"]}
-{"query":"min([a]+1, 9)>2","print":"min(([a]+1), 9)>2","ast":{"type":"qualifier","op":">","value":{"type":"integer","raw":"2","value":2},"fieldFunc":"min(([a]+1), 9)"}}
-{"query":"f([a] + 1 , [b] * 2)=1","print":"f(([a]+1), ([b]*2))=1","ast":{"type":"qualifier","op":"=","value":{"type":"integer","raw":"1","value":1},"fieldFunc":"f(([a]+1), ([b]*2))"}}
-{"query":"n>abs([a]-[b])","print":"n>abs(([a]-[b]))","ast":{"type":"qualifier","op":">","field":["n"],"value":{"type":"function","raw":"abs([a]-[b])","value":null}}}
+{"query":"min([a]+1, 9)>2","print":"min(([a]+1), 9)>2","ast":{"type":"qualifier","op":">","value":{"type":"integer","raw":"2","value":2},"fieldFunc":"min(([a]+1), 9)","fields":[["a"]]}}
+{"query":"f([a] + 1 , [b] * 2)=1","print":"f(([a]+1), ([b]*2))=1","ast":{"type":"qualifier","op":"=","value":{"type":"integer","raw":"1","value":1},"fieldFunc":"f(([a]+1), ([b]*2))","fields":[["a"],["b"]]}}
+{"query":"n>abs([a]-[b])","print":"n>abs(([a]-[b]))","ast":{"type":"qualifier","op":">","field":["n"],"value":{"type":"function","raw":"abs(([a]-[b]))","value":null}}}
 {"query":"x=lower(labels.team)","print":"x=lower(labels.team)","ast":{"type":"qualifier","op":"=","field":["x"],"value":{"type":"function","raw":"lower(labels.team)","value":null}}}
 {"query":"x=lower([labels.team])","print":"x=lower(labels.team)","ast":{"type":"qualifier","op":"=","field":["x"],"value":{"type":"function","raw":"lower(labels.team)","value":null}}}
 {"query":"x=lower(labels.example.com/team)","print":"x=lower(labels.example.com/team)","ast":{"type":"qualifier","op":"=","field":["x"],"value":{"type":"function","raw":"lower(labels.example.com/team)","value":null}}}

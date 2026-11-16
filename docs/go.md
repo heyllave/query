@@ -16,7 +16,7 @@ permalink: /go/
 go get github.com/heyllave/query
 ```
 
-The module has no dependencies outside the standard library. Until the first tagged release, pin a commit.
+The module has no dependencies outside the standard library. Pin a tag: `go get github.com/heyllave/query@v0.1.0`.
 
 ## Describe your fields
 
