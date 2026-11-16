@@ -6,6 +6,15 @@ semantic versioning.
 
 ## Unreleased
 
+### Changed
+
+- A `"` inside an unquoted value (`A=x"y`, `A=*0%"`) is a parse error with
+  the `unexpectedChar` code. Such a value could not be printed back: a
+  pattern may not be quoted, and left bare the quote started a string for
+  whatever read the query next, so `A=0%"* "A"` parsed while its printed
+  form `A=0%"* AND A` did not. Quote the whole value and write the quote as
+  `\"`.
+
 ### Fixed
 
 - A wildcard pattern that starts with `*` and holds an arithmetic character

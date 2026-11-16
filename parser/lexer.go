@@ -688,7 +688,10 @@ func (l *lexer) isArithValueAhead() bool {
 			}
 		}
 	}
-	return found
+	// A group left open is not arithmetic. Deciding that here keeps the
+	// answer the same whether the value is read inside a query (where the
+	// scan would run on into the next term) or on its own.
+	return found && depth == 0
 }
 
 // skipCall returns the index just past the ')' that closes the call body
@@ -798,6 +801,7 @@ func (l *lexer) lexUnquotedStringValue() {
 	start := l.pos
 	var buf strings.Builder
 	hasWildcard := false
+	quoteSeen := false
 	var literalStars []int // byte offsets in buf of escaped stars
 
 	for l.pos < len(l.input) {
@@ -825,6 +829,15 @@ func (l *lexer) lexUnquotedStringValue() {
 		}
 		if ch == '*' {
 			hasWildcard = true
+		}
+		if ch == '"' && !quoteSeen {
+			// A quote inside a bare value cannot be printed back: the
+			// value may not be quoted if it is a pattern, and left bare
+			// the quote starts a string for whatever reads the query
+			// next. Refused here, so a saved query always reads back.
+			quoteSeen = true
+			l.errors.add(newError(CodeUnexpectedChar, ErrSyntax, token.Position{Offset: l.pos, Length: 1},
+				`unexpected '"' inside an unquoted value; quote the whole value and write the quote as \"`))
 		}
 		buf.WriteByte(ch)
 		l.pos++

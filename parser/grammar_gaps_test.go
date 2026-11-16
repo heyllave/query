@@ -205,11 +205,10 @@ func TestParse_RejectsInvalidUTF8(t *testing.T) {
 }
 
 // A wildcard pattern that starts with a star and holds an arithmetic
-// operator is a pattern, not arithmetic: `A=*0%" "A"` used to parse because
-// the quoted string after it ended the look-ahead, but its printed form
-// `A=*0%" AND A` did not, so a saved rule could not be read back.
+// operator is a pattern, not arithmetic: the arithmetic look-ahead used to
+// claim `*0+1` and the arithmetic lexer then refused the leading star.
 func TestParse_LeadingStarIsAPatternNotArithmetic(t *testing.T) {
-	for _, q := range []string{`A=*0%"`, `A=*0%" AND A`, `A=*0+1`, `A=*0+"a"`, `A=*0%"x`} {
+	for _, q := range []string{`A=*0+1`, `A=*0+1 AND A`, `A=*0%1`, `A=*0/1x`, `A=*0*`} {
 		expr, err := Parse(q, 0)
 		if err != nil {
 			t.Errorf("Parse(%q): %v", q, err)
@@ -234,5 +233,54 @@ func TestParse_LeadingStarIsAPatternNotArithmetic(t *testing.T) {
 		if qual == nil || !qual.Value.Wildcard {
 			t.Errorf("Parse(%q) value = %+v, want a wildcard pattern", q, qual)
 		}
+	}
+}
+
+// A quote inside an unquoted value is refused. Such a value cannot be
+// printed back: a pattern may not be quoted, and left bare the quote starts a
+// string for whatever reads the query next (`A=0%"* "A"` parsed while its
+// printed form `A=0%"* AND A` did not).
+func TestParse_RejectsQuoteInUnquotedValue(t *testing.T) {
+	for _, q := range []string{`A=x"y`, `A=*0%"`, `A=0%"* "A"`, `A=*"`, `x IN (a"b, c)`, `A=0%"a"x`} {
+		_, err := Parse(q, 0)
+		if err == nil {
+			t.Errorf("Parse(%q) accepted a quote inside an unquoted value", q)
+			continue
+		}
+		if list := Errors(err); len(list) == 0 || list[0].Code != CodeUnexpectedChar {
+			t.Errorf("Parse(%q) errors = %v, want unexpectedChar first", q, err)
+		}
+	}
+	for _, q := range []string{`A="x\"y"`, `A="0%\"*"`, `A=0%"a"`, `A=*x`, `"a\"b"=1`} {
+		if _, err := Parse(q, 0); err != nil {
+			t.Errorf("Parse(%q): %v", q, err)
+		}
+	}
+}
+
+// An unquoted value with an open parenthesis is a string whether it is read
+// inside a query or on its own. The arithmetic look-ahead used to run past
+// the value into the next term inside a query and decide on what it found
+// there, so `A:0%(*..A` held a pattern while ParseValue("0%(*") refused it.
+func TestParse_OpenParenInValueIsAStringEverywhere(t *testing.T) {
+	for _, q := range []string{`A:0%(*..A`, `A=0%(* AND B=1`, `A=0%(1`, `A=0%(1 AND B`} {
+		expr, err := Parse(q, 0)
+		if err != nil {
+			t.Errorf("Parse(%q): %v", q, err)
+			continue
+		}
+		out := ast.String(expr)
+		again, err := Parse(out, 0)
+		if err != nil {
+			t.Errorf("Parse(%q) printed as %q, which does not parse: %v", q, out, err)
+			continue
+		}
+		if got := ast.String(again); got != out {
+			t.Errorf("Parse(%q) printed as %q, reparsed and printed as %q", q, out, got)
+		}
+	}
+	v := parseFieldRefValue(t, `0%(*`)
+	if v.Type != ast.ValueString || !v.Wildcard {
+		t.Errorf("ParseValue(\"0%%(*\") = %+v, want a wildcard string", v)
 	}
 }
