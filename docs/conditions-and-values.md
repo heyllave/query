@@ -64,5 +64,8 @@ The two grammars do not accept each other's input, but only one direction is an 
 | `Compile("[base]*1.1")` | Parse error. There is no comparison. |
 | `CompileValue("state=draft AND total>5")` | Parse error at `AND`. |
 | `CompileValue("state=draft")` | **No error.** The result is the text `state=draft`. |
+| `CompileValue("base+1")` | **No error.** The result is the text `base+1`. Write `[base]+1`. |
+| `CompileValue("base")` | **No error.** The result is the text `base`. Write `[base]`. |
+| `CompileValue("base*1.1")` | Parse error. `base*1.1` is read as a malformed wildcard. Write `[base]*1.1`. |
 
-The last row is the one to watch. In the value grammar an unquoted word is text and `=` is not an operator, so a simple condition passed to `CompileValue` by mistake comes back as a string. If a value expression returns its own source text, it was probably meant for `Compile`.
+The rows marked "No error" are the ones to watch. In the value grammar an unquoted word is text and `=` is not an operator, so a simple condition, or a field written without brackets, comes back as a string. If a value expression returns its own source text, either it was meant for `Compile` or a field is missing its brackets. See [when a word is a field and when it is text]({{ '/syntax/' | relative_url }}#when-a-word-is-a-field-and-when-it-is-text).

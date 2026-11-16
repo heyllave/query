@@ -130,17 +130,9 @@ ast.String(expr)   // the query text; parsing it gives the same tree
 ## Debug a query
 
 ```bash
-go run github.com/heyllave/query/cmd/query explain "status=active AND priority>3"
+go run github.com/heyllave/query/cmd/query@latest explain "status=active AND priority>3"
 ```
 
-```
-AndExpr
-├── QualifierExpr (=)
-│   ├── Field: status
-│   └── Value: active (string)
-└── QualifierExpr (>)
-    ├── Field: priority
-    └── Value: 3 (integer)
-```
+The [command line]({{ '/cli/' | relative_url }}) page covers its flags: tokens, JSON, positions and validation against a field list.
 
 The full API is on [pkg.go.dev](https://pkg.go.dev/github.com/heyllave/query), and runnable programs are in [`examples/`](https://github.com/heyllave/query/tree/main/examples).
