@@ -30,7 +30,7 @@ A query runs in time proportional to its length and the size of the record. The 
 
 ## Versions
 
-Until the first tagged release the Go API may still change between commits, so pin a commit. From `v1.0.0` on, versions follow semantic versioning: the grammar, the error codes, the JSON tree and the exported Go API only change incompatibly in a major version.
+Pin a tag (`go get github.com/heyllave/query@v0.1.0`). Before `v1.0.0` the Go API may still change between minor versions; the changelog lists every such change. From `v1.0.0` on, versions follow semantic versioning: the grammar, the error codes, the JSON tree and the exported Go API only change incompatibly in a major version.
 
 Changes are listed in the [changelog](https://github.com/heyllave/query/blob/main/CHANGELOG.md).
 

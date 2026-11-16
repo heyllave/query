@@ -80,7 +80,34 @@ cpu>[cpu_limit]
 created_at>=now()-7d
 ```
 
-Operators are `+ - * / %`, with the usual precedence and parentheses. A bare word is never a field reference in arithmetic, because it would collide with hyphenated names such as `customer-id`.
+Operators are `+ - * / %`, with the usual precedence and parentheses. A bare word is never a field reference in arithmetic, because it would collide with hyphenated names such as `customer-id`. Arithmetic may start with a number or with a field: `total>2*[unit-price]`.
+
+## When a word is a field and when it is text
+
+A bare word means different things in different places.
+
+| Position | A bare word is | To get the other meaning |
+|---|---|---|
+| Left of an operator: `state=draft` | a field | (the left side is always a field or a function) |
+| Right of an operator, and in arithmetic: `state=draft`, `[base]*1.1` | text | brackets for a field: `total>[base]` |
+| Inside a function's parentheses: `upper(name)` | a field | quotes for text: `contains(tags, "urgent")` |
+
+So `upper(name)` and `upper([name])` are the same query, and both print as `upper(name)`.
+
+Brackets are needed inside a call in two cases:
+
+- **The name holds a character a bare name cannot**, such as a space: `upper(["billing address"])`.
+- **The argument is arithmetic**: `abs([a]-[b])`, `round([price]/3, 2)`. Arithmetic follows the value-side rule, so `abs(a-b)` looks for one field named `a-b`.
+
+Mistakes here are not always errors:
+
+| Written | What happens |
+|---|---|
+| `total>=base*1.1` | Parse error. `base*1.1` is read as a malformed wildcard. |
+| `total>base` | Validation error. The text `base` is not a number. |
+| `name=other_field` | **No error.** Compares `name` with the text `other_field`. Write `name=[other_field]`. |
+| `contains(tags, urgent)` | Validation error, unless a field named `urgent` exists. Write `"urgent"`. |
+| `upper("name")` | **No error.** Upper-cases the text `name`, giving `NAME`. |
 
 ## Functions
 
