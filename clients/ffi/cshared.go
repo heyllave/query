@@ -31,7 +31,7 @@
 // off lenient forms of the grammar: with "explicitAnd" a space between two
 // conditions is an error (code missingAnd), and with "strictValues" an
 // unquoted value may not contain =, < or >. A value that is not a boolean is
-// an error. A key the call does not list is ignored.
+// an error, and so is a key the call does not list.
 //
 // A failure answers {"error": message} with "errors" (parse) or
 // "validationErrors" (validation) listing each failure's stable code and span.
@@ -56,6 +56,9 @@ import "C"
 
 import (
 	"encoding/json"
+	"fmt"
+	"slices"
+	"strings"
 	"unsafe"
 
 	"github.com/heyllave/query/internal/bridgejson"
@@ -113,6 +116,45 @@ func (r request) options() (bridgejson.Options, bridgejson.Envelope) {
 	return o, nil
 }
 
+// unknownKey returns a member of the request that is not in keys, the first
+// in sorted order so the same request always names the same one. ok is false
+// when every member is known; the name alone cannot say so, because "" is a
+// key JSON allows.
+func (r request) unknownKey(keys []string) (name string, ok bool) {
+	var unknown []string
+	for k, v := range r {
+		if slices.Contains(keys, k) {
+			continue
+		}
+		// A binding that fills one struct for every call sends the members
+		// this call has no use for as null. That asks for nothing, so it is
+		// read as absent; a strict switch is never excused this way.
+		if string(v) == "null" && slices.Contains(inputKeys, k) {
+			continue
+		}
+		unknown = append(unknown, k)
+	}
+	if len(unknown) == 0 {
+		return "", false
+	}
+	slices.Sort(unknown)
+	return unknown[0], true
+}
+
+// The members each call takes.
+var (
+	parseKeys    = []string{"query", "maxLength", "explicitAnd", "strictValues"}
+	validateKeys = []string{"ast", "fields", "maxLength"}
+	printKeys    = []string{"ast", "maxLength"}
+	checkKeys    = []string{"query", "fields", "maxLength", "explicitAnd", "strictValues"}
+	matchKeys    = []string{"query", "fields", "record", "maxLength", "explicitAnd", "strictValues"}
+	evalKeys     = []string{"query", "fields", "record", "maxLength"}
+)
+
+// inputKeys are the members that carry a call's input, as opposed to the
+// switches that change how it is read.
+var inputKeys = []string{"query", "ast", "fields", "record", "maxLength"}
+
 func (r request) raw(key, fallback string) string {
 	if v, ok := r[key]; ok {
 		return string(v)
@@ -122,7 +164,11 @@ func (r request) raw(key, fallback string) string {
 
 // call decodes the request, runs fn and returns its envelope as a malloc'd C
 // string the caller frees with QueryFree.
-func call(req *C.char, fn func(request) bridgejson.Envelope) *C.char {
+//
+// keys are the members the call understands. Any other member is an error
+// and not ignored: a host that sends "strict": true and gets an answer
+// believes strict parsing is on.
+func call(req *C.char, keys []string, fn func(request) bridgejson.Envelope) *C.char {
 	env := bridgejson.Guard(func() bridgejson.Envelope {
 		if req == nil {
 			return bridgejson.Fail("invalid request JSON")
@@ -130,6 +176,9 @@ func call(req *C.char, fn func(request) bridgejson.Envelope) *C.char {
 		var r request
 		if err := json.Unmarshal([]byte(C.GoString(req)), &r); err != nil || r == nil {
 			return bridgejson.Fail("invalid request JSON")
+		}
+		if unknown, ok := r.unknownKey(keys); ok {
+			return bridgejson.Fail(fmt.Sprintf("unknown key %q; this call takes %s", unknown, strings.Join(keys, ", ")))
 		}
 		return fn(r)
 	})
@@ -142,7 +191,7 @@ func call(req *C.char, fn func(request) bridgejson.Envelope) *C.char {
 
 //export QueryParse
 func QueryParse(req *C.char) *C.char {
-	return call(req, func(r request) bridgejson.Envelope {
+	return call(req, parseKeys, func(r request) bridgejson.Envelope {
 		opts, fail := r.options()
 		if fail != nil {
 			return fail
@@ -153,7 +202,7 @@ func QueryParse(req *C.char) *C.char {
 
 //export QueryValidate
 func QueryValidate(req *C.char) *C.char {
-	return call(req, func(r request) bridgejson.Envelope {
+	return call(req, validateKeys, func(r request) bridgejson.Envelope {
 		maxLen, fail := r.maxLength()
 		if fail != nil {
 			return fail
@@ -164,7 +213,7 @@ func QueryValidate(req *C.char) *C.char {
 
 //export QueryStringify
 func QueryStringify(req *C.char) *C.char {
-	return call(req, func(r request) bridgejson.Envelope {
+	return call(req, printKeys, func(r request) bridgejson.Envelope {
 		maxLen, fail := r.maxLength()
 		if fail != nil {
 			return fail
@@ -175,7 +224,7 @@ func QueryStringify(req *C.char) *C.char {
 
 //export QueryParseAndValidate
 func QueryParseAndValidate(req *C.char) *C.char {
-	return call(req, func(r request) bridgejson.Envelope {
+	return call(req, checkKeys, func(r request) bridgejson.Envelope {
 		opts, fail := r.options()
 		if fail != nil {
 			return fail
@@ -186,7 +235,7 @@ func QueryParseAndValidate(req *C.char) *C.char {
 
 //export QueryMatch
 func QueryMatch(req *C.char) *C.char {
-	return call(req, func(r request) bridgejson.Envelope {
+	return call(req, matchKeys, func(r request) bridgejson.Envelope {
 		opts, fail := r.options()
 		if fail != nil {
 			return fail
@@ -197,7 +246,7 @@ func QueryMatch(req *C.char) *C.char {
 
 //export QueryEval
 func QueryEval(req *C.char) *C.char {
-	return call(req, func(r request) bridgejson.Envelope {
+	return call(req, evalKeys, func(r request) bridgejson.Envelope {
 		maxLen, fail := r.maxLength()
 		if fail != nil {
 			return fail

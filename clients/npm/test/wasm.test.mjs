@@ -96,6 +96,39 @@ test("the strict options refuse the lenient forms and are off by default", () =>
   assert.match(w.queryMatch("a=1 b=2", fields, '{"a":1,"b":2}', { explicitAnd: "yes" }).error, /explicitAnd must be a boolean/);
   assert.match(w.queryParseAndValidate("a=1 b=2", fields, { strictValues: 0 }).error, /strictValues must be a boolean/);
 
+  // So is an option the engine does not know.
+  assert.match(w.queryParse("a=1 b=2", { strict: true }).error, /unknown option "strict"/);
+  assert.match(w.queryMatch("a=1", fields, '{"a":1}', { explicitAnd: true, strictvalues: true }).error, /unknown option "strictvalues"/);
+
+  // Two unknown options always name the same one, the one the C library names.
+  assert.match(w.queryParse("a=1", { zeta: 1, alpha: 2 }).error, /unknown option "alpha"/);
+  // An option set to undefined is an absent one, known or not.
+  assert.equal(w.queryParse("a=1", { strict: undefined, explicitAnd: undefined }).error, undefined);
+
+  // An options argument that is neither a number nor an object is refused,
+  // not read as the default.
+  for (const bad of [true, "strict", [], [1]]) {
+    assert.match(w.queryParse("a=1 b=2", bad).error, /options must be a number/, JSON.stringify(bad));
+  }
+  assert.equal(w.queryParse("a=1 b=2", null).error, undefined);
+  assert.equal(w.queryParse("a=1 b=2", undefined).error, undefined);
+
+  // A call with no grammar to be strict about refuses the switches, and
+  // still takes its length limit as an object.
+  const record = '{"a":1}';
+  assert.match(w.queryEval("1+1", fields, record, { explicitAnd: true }).error, /unknown option "explicitAnd"/);
+  assert.equal(w.queryEval("1+1", fields, record, { maxLength: 1 }).errors[0].code, "queryTooLong");
+  assert.equal(w.queryEval("1+1", fields, record, { maxLength: 9 }).result, 2);
+  assert.match(w.queryEval("1+1", fields, record, "9").error, /options must be a number/);
+  const ast = JSON.stringify(w.queryParse("a=1").result);
+  assert.match(w.queryValidate(ast, fields, { strict: true }).error, /unknown option "strict"/);
+  assert.match(w.queryStringify(ast, { strict: true }).error, /unknown option "strict"/);
+  assert.equal(w.queryStringify(ast, undefined).result, "a=1");
+
+  // An argument after the options would be ignored, so it is refused.
+  assert.match(w.queryMatch("a=1", fields, record, 256, { explicitAnd: true }).error, /too many arguments/);
+  assert.equal(w.queryMatch("a=1", fields, record, 256, undefined).result, true);
+
   // A strict failure's hint is one the strict grammar accepts.
   const keyed = w.queryParse('labels["team"]=x', { explicitAnd: true });
   assert.match(keyed.errors[0].hint, /labels\.team=x/);

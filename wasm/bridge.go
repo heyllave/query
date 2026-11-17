@@ -4,21 +4,34 @@ package main
 
 import (
 	"encoding/json"
+	"fmt"
+	"slices"
+	"strings"
 	"syscall/js"
 
 	"github.com/heyllave/query/internal/bridgejson"
 )
 
 // bridge adapts a call to a JavaScript function. need is how many leading
-// arguments are required, all strings; the envelope comes from
-// internal/bridgejson, which the C bridge shares, so every client sees the
-// same shapes. A Go panic becomes an error envelope instead of tearing down
-// the WASM instance (and with it every later call from the page).
+// arguments are required, all strings, and one optional argument may follow
+// them; the envelope comes from internal/bridgejson, which the C bridge
+// shares, so every client sees the same shapes. A Go panic becomes an error
+// envelope instead of tearing down the WASM instance (and with it every later
+// call from the page).
 func bridge(name string, need int, call func(args []js.Value) bridgejson.Envelope) js.Func {
 	return js.FuncOf(func(_ js.Value, args []js.Value) any {
 		return toJSValue(bridgejson.Guard(func() bridgejson.Envelope {
+			// A wrapper that forwards an optional argument passes undefined.
+			for len(args) > need && absent(args[len(args)-1]) {
+				args = args[:len(args)-1]
+			}
 			if len(args) < need {
 				return bridgejson.Fail(name + ": missing arguments")
+			}
+			// An argument past the last one would be ignored, and the caller
+			// who passed options there would not know.
+			if len(args) > need+1 {
+				return bridgejson.Fail(name + ": too many arguments")
 			}
 			for _, a := range args[:need] {
 				if a.Type() != js.TypeString {
@@ -30,28 +43,56 @@ func bridge(name string, need int, call func(args []js.Value) bridgejson.Envelop
 	})
 }
 
-// maxLengthArg reads the optional maxLength argument at index i, falling back
-// to the default limit when it is absent or not a number.
-func maxLengthArg(args []js.Value, i int) int {
-	if len(args) > i && args[i].Type() == js.TypeNumber {
-		return args[i].Int()
-	}
-	return bridgejson.DefaultMaxLength
+// The options each kind of call takes. Only a call that parses a condition
+// has a grammar to be strict about.
+var (
+	lengthOption = []string{"maxLength"}
+	parseOptions = []string{"maxLength", "explicitAnd", "strictValues"}
+)
+
+// maxLengthArg reads the optional last argument of a call that takes no
+// grammar switches: the maxLength number, or an object {maxLength?}.
+func maxLengthArg(args []js.Value, i int) (int, bridgejson.Envelope) {
+	o, fail := optionsArg(args, i, lengthOption)
+	return o.MaxLength, fail
 }
 
-// optionsArg reads the optional last argument of a call that parses a query.
-// It is either the maxLength number, as before, or an object
-// {maxLength?, explicitAnd?, strictValues?}; a member that is absent keeps
-// its default. A member of the wrong type is an error and not a default: a
-// host that passes explicitAnd: 1 believes strict parsing is on, and must
-// not be answered as if it were.
-func optionsArg(args []js.Value, i int) (bridgejson.Options, bridgejson.Envelope) {
-	o := bridgejson.Options{MaxLength: maxLengthArg(args, i)}
-	if len(args) <= i || args[i].Type() != js.TypeObject {
+// optionsArg reads the optional last argument of a call. It is either the
+// maxLength number, as before, or an object with the members named in known;
+// a member that is absent keeps its default.
+//
+// Anything else is an error and not a default: a member of the wrong type, a
+// member the call does not know, or an argument that is neither a number nor
+// an object. A host that passes explicitAnd: 1, strict: true or a bare true
+// believes strict parsing is on, and must not be answered as if it were.
+func optionsArg(args []js.Value, i int, known []string) (bridgejson.Options, bridgejson.Envelope) {
+	o := bridgejson.Options{MaxLength: bridgejson.DefaultMaxLength}
+	if len(args) <= i || absent(args[i]) || args[i].Type() == js.TypeNull {
 		return o, nil
 	}
-	obj := args[i]
-	if v := obj.Get("maxLength"); !absent(v) {
+	arg := args[i]
+	if arg.Type() == js.TypeNumber {
+		o.MaxLength = arg.Int()
+		return o, nil
+	}
+	list := strings.Join(known, ", ")
+	if arg.Type() != js.TypeObject || js.Global().Get("Array").Call("isArray", arg).Bool() {
+		return o, bridgejson.Fail("options must be a number, the maxLength, or an object with " + list)
+	}
+	// Sorted, as the C library does, so both name the same member when
+	// several are unknown. A member set to undefined is an absent one.
+	names := js.Global().Get("Object").Call("keys", arg)
+	var unknown []string
+	for k := 0; k < names.Length(); k++ {
+		if name := names.Index(k).String(); !slices.Contains(known, name) && !absent(arg.Get(name)) {
+			unknown = append(unknown, name)
+		}
+	}
+	if len(unknown) > 0 {
+		slices.Sort(unknown)
+		return o, bridgejson.Fail(fmt.Sprintf("unknown option %q; this call takes %s", unknown[0], list))
+	}
+	if v := arg.Get("maxLength"); !absent(v) {
 		if v.Type() != js.TypeNumber {
 			return o, bridgejson.Fail("maxLength must be a number")
 		}
@@ -61,8 +102,8 @@ func optionsArg(args []js.Value, i int) (bridgejson.Options, bridgejson.Envelope
 		key string
 		dst *bool
 	}{{"explicitAnd", &o.ExplicitAnd}, {"strictValues", &o.StrictValues}} {
-		v := obj.Get(sw.key)
-		if absent(v) {
+		v := arg.Get(sw.key)
+		if absent(v) || !slices.Contains(known, sw.key) {
 			continue
 		}
 		if v.Type() != js.TypeBoolean {
@@ -77,7 +118,7 @@ func absent(v js.Value) bool { return v.Type() == js.TypeUndefined }
 
 // jsParse is queryParse(query, maxLength? | options?).
 func jsParse(args []js.Value) bridgejson.Envelope {
-	o, fail := optionsArg(args, 1)
+	o, fail := optionsArg(args, 1, parseOptions)
 	if fail != nil {
 		return fail
 	}
@@ -86,17 +127,25 @@ func jsParse(args []js.Value) bridgejson.Envelope {
 
 // jsValidate is queryValidate(astJSON, fieldsJSON, maxLength?).
 func jsValidate(args []js.Value) bridgejson.Envelope {
-	return bridgejson.Validate(args[0].String(), args[1].String(), maxLengthArg(args, 2))
+	maxLen, fail := maxLengthArg(args, 2)
+	if fail != nil {
+		return fail
+	}
+	return bridgejson.Validate(args[0].String(), args[1].String(), maxLen)
 }
 
 // jsStringify is queryStringify(astJSON, maxLength?).
 func jsStringify(args []js.Value) bridgejson.Envelope {
-	return bridgejson.Stringify(args[0].String(), maxLengthArg(args, 1))
+	maxLen, fail := maxLengthArg(args, 1)
+	if fail != nil {
+		return fail
+	}
+	return bridgejson.Stringify(args[0].String(), maxLen)
 }
 
 // jsParseAndValidate is queryParseAndValidate(query, fieldsJSON, maxLength? | options?).
 func jsParseAndValidate(args []js.Value) bridgejson.Envelope {
-	o, fail := optionsArg(args, 2)
+	o, fail := optionsArg(args, 2, parseOptions)
 	if fail != nil {
 		return fail
 	}
@@ -105,7 +154,7 @@ func jsParseAndValidate(args []js.Value) bridgejson.Envelope {
 
 // jsMatch is queryMatch(query, fieldsJSON, recordJSON, maxLength? | options?).
 func jsMatch(args []js.Value) bridgejson.Envelope {
-	o, fail := optionsArg(args, 3)
+	o, fail := optionsArg(args, 3, parseOptions)
 	if fail != nil {
 		return fail
 	}
@@ -114,7 +163,11 @@ func jsMatch(args []js.Value) bridgejson.Envelope {
 
 // jsEval is queryEval(query, fieldsJSON, recordJSON, maxLength?).
 func jsEval(args []js.Value) bridgejson.Envelope {
-	return bridgejson.Eval(args[0].String(), args[1].String(), args[2].String(), maxLengthArg(args, 3))
+	maxLen, fail := maxLengthArg(args, 3)
+	if fail != nil {
+		return fail
+	}
+	return bridgejson.Eval(args[0].String(), args[1].String(), args[2].String(), maxLen)
 }
 
 // toJSValue converts an envelope to a JavaScript object by way of JSON, so a

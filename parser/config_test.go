@@ -341,11 +341,94 @@ func TestParseWith_SQLHintStopsAtTheClause(t *testing.T) {
 
 	// Assert
 	errs := parser.Errors(err)
-	if len(errs) != 3 {
-		t.Fatalf("got %d errors, want 3: %v", len(errs), err)
+	// The LIKE is one mistake, reported once; the missing AND after it is
+	// another.
+	if len(errs) != 2 {
+		t.Fatalf("got %d errors, want 2: %v", len(errs), err)
 	}
-	if last := errs[2].Hint; !strings.Contains(last, "join two conditions") {
+	if last := errs[1].Hint; !strings.Contains(last, "join two conditions") {
 		t.Errorf("hint for the last clause = %q, want the general advice", last)
+	}
+}
+
+// An SQL word is one mistake however many connectives it leaves missing, but
+// only the errors that stand next to it are folded into it. A second SQL
+// word, in the same clause or another, is its own error; and a connective
+// that is really missing further on is kept, so fixing the SQL word does not
+// reveal an error the first answer hid.
+func TestParseWith_SQLWordIsReportedOncePerUse(t *testing.T) {
+	const general = "join two conditions"
+	tests := []struct {
+		name    string
+		input   string
+		offsets []int
+		hints   []string
+	}{
+		{"like", "name LIKE john", []int{5}, []string{"no LIKE"}},
+		{"is null", "name IS NULL", []int{5}, []string{"NOT field"}},
+		{"is not null", "name IS NOT NULL", []int{5}, []string{"NOT field"}},
+		{"order by", "state=draft ORDER BY total", []int{12}, []string{"only conditions"}},
+		{"statement", "SELECT a FROM t", []int{7}, []string{"only conditions"}},
+		{"quoted value", `name LIKE "john"`, []int{5}, []string{"no LIKE"}},
+		{"two clauses", "a LIKE b AND c LIKE d", []int{2, 15}, []string{"no LIKE", "no LIKE"}},
+		{"three clauses", "a LIKE b AND c LIKE d AND e LIKE f", []int{2, 15, 28}, []string{"no LIKE", "no LIKE", "no LIKE"}},
+		{"two missing tests", "a IS NULL AND b IS NULL", []int{2, 16}, []string{"NOT field", "NOT field"}},
+		{"statement around a connective", "SELECT a AND b LIMIT 5", []int{7, 15}, []string{"only conditions", "only conditions"}},
+		{"missing connectives after it", "a LIKE b c=1 d=2", []int{2, 9, 13}, []string{"no LIKE", general, general}},
+		{"after a group", "(a LIKE b) c=1 d=2", []int{3, 11, 15}, []string{"no LIKE", general, general}},
+		{"twice in one clause", "a LIKE b c LIKE d", []int{2, 9, 11}, []string{"no LIKE", general, "no LIKE"}},
+		{"no SQL word", "a b c", []int{2, 4}, []string{general, general}},
+		{"a number after it", "a=1 LIMIT 5", []int{4}, []string{"only conditions"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Act
+			_, err := parser.ParseWith(tt.input, parser.Config{ExplicitAnd: true})
+
+			// Assert
+			errs := parser.Errors(err)
+			if len(errs) != len(tt.offsets) {
+				t.Fatalf("ParseWith(%q) gave %d errors, want %d: %v", tt.input, len(errs), len(tt.offsets), err)
+			}
+			for i, e := range errs {
+				if e.Code != parser.CodeMissingAnd || e.Position.Offset != tt.offsets[i] || !strings.Contains(e.Hint, tt.hints[i]) {
+					t.Errorf("error %d = %s at %d, hint %q; want missingAnd at %d with a hint containing %q",
+						i, e.Code, e.Position.Offset, e.Hint, tt.offsets[i], tt.hints[i])
+				}
+			}
+		})
+	}
+}
+
+// A missing connective does not hide the token the parser stops at after it:
+// the writer who adds the AND is not then handed an error the first answer
+// left out.
+func TestParseWith_MissingAndKeepsTheErrorAfterIt(t *testing.T) {
+	// Act
+	_, err := parser.ParseWith("a=1 x 5 b=2", parser.Config{ExplicitAnd: true})
+
+	// Assert
+	errs := parser.Errors(err)
+	if len(errs) != 2 || errs[0].Code != parser.CodeMissingAnd || errs[0].Position.Offset != 4 ||
+		errs[1].Code != parser.CodeUnexpected || errs[1].Position.Offset != 6 {
+		t.Fatalf("got %v, want missingAnd at 4 then unexpected at 6", err)
+	}
+
+	// The default grammar reports the same stray token.
+	_, err = parser.ParseWith("a=1 x 5 b=2", parser.Config{})
+	if errs := parser.Errors(err); len(errs) != 1 || errs[0].Code != parser.CodeUnexpected || errs[0].Position.Offset != 6 {
+		t.Fatalf("lenient: got %v, want unexpected at 6", err)
+	}
+}
+
+// How many errors come back does not depend on how many of them get a hint.
+func TestParseWith_SQLWordFoldingIgnoresTheHintLimit(t *testing.T) {
+	// Act
+	_, err := parser.ParseWith("a LIKE b c d e f g h i j k l", parser.Config{ExplicitAnd: true})
+
+	// Assert: the LIKE, then one for each of the ten words after b.
+	if errs := parser.Errors(err); len(errs) != 11 {
+		t.Fatalf("got %d errors, want 11: %v", len(errs), err)
 	}
 }
 
@@ -357,6 +440,41 @@ func TestParseWith_MissingAndRewritesParseStrictly(t *testing.T) {
 		t.Run(rewrite, func(t *testing.T) {
 			if _, err := parser.ParseWith(rewrite, strict); err != nil {
 				t.Errorf("ParseWith(%q) under strict options: %v", rewrite, err)
+			}
+		})
+	}
+}
+
+// One SQL word is one mistake, however many connectives it leaves missing.
+func TestParseWith_SQLWordIsReportedOnce(t *testing.T) {
+	strict := parser.Config{ExplicitAnd: true}
+	tests := []struct {
+		name, input string
+		want        int
+		wantHint    string
+	}{
+		{"LIKE", "name LIKE john", 1, "there is no LIKE"},
+		{"IS NULL", "name IS NULL", 1, "missing value"},
+		{"the general advice still counts each one", "a b c", 2, "join two conditions"},
+		{"two keyed lookups are two mistakes", "a[x]=1 AND b[y]=2", 2, "after a dot"},
+		{"an SQL word, then an unrelated missing connective", "name LIKE john AND a b", 2, ""},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Act
+			_, err := parser.ParseWith(tc.input, strict)
+
+			// Assert
+			errs := parser.Errors(err)
+			if len(errs) != tc.want {
+				var hints []string
+				for _, e := range errs {
+					hints = append(hints, e.Hint)
+				}
+				t.Fatalf("ParseWith(%q) reported %d errors %q, want %d", tc.input, len(errs), hints, tc.want)
+			}
+			if tc.wantHint != "" && !strings.Contains(errs[0].Hint, tc.wantHint) {
+				t.Errorf("hint = %q, want it to contain %q", errs[0].Hint, tc.wantHint)
 			}
 		})
 	}

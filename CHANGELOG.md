@@ -33,6 +33,11 @@ semantic versioning.
   lexical error that follows it, instead of only after that error is fixed.
 - The TypeScript client and the C library refuse a strict switch that is
   not a boolean (`explicitAnd: 1`), instead of parsing leniently.
+- Under `ExplicitAnd`, an SQL word is reported once for each time it is
+  used. `name LIKE john` gave the "there is no LIKE" advice twice, once for
+  each word left without a connective. A second SQL word, and a connective
+  that is really missing after one (`a LIKE b c=1`), are still their own
+  errors.
 - A Grammar page in the documentation: the EBNF the parser implements, how
   each ambiguous form is read, and what the language leaves out on purpose.
 
@@ -88,6 +93,20 @@ semantic versioning.
 
 ### Changed
 
+- **Breaking for the C library.** A request key the call does not take is an
+  error, so `"strict": true` is no longer a lenient parse. A caller that
+  sends extra keys has to remove them; `clients/ffi/README.md` lists the keys
+  of each call. An input of another call sent as `null` (`"fields": null` to
+  `QueryParse`) is still read as absent, so a binding that fills one struct
+  for every call keeps working.
+- **Breaking for the TypeScript client.** A call refuses an option it does
+  not know, an options argument that is neither a number nor an object, and
+  an argument after the options. These were ignored before. `validate`,
+  `stringify` and `eval` take `{maxLength}` only: they have no condition
+  grammar to be strict about.
+- Under `ExplicitAnd`, a missing connective no longer hides the token the
+  parser stops at after it: `a=1 x 5` reports the missing `AND` and the stray
+  `5`, where it reported only the first.
 - Error messages name a token by its text (`unexpected "*"`) instead of its
   lexer form (`unexpected token *("*")`), and `Error()` appends the hint in
   parentheses. Codes and positions are unchanged, with one exception below.

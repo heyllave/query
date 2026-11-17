@@ -15,12 +15,17 @@ Each function takes one NUL-terminated UTF-8 JSON object and returns one.
 
 | Function | Request | Success |
 |---|---|---|
-| `QueryParse` | `{"query", "maxLength"?}` | `{"result": ast}` |
-| `QueryValidate` | `{"ast", "fields"}` | `{"valid": true}` or `{"valid": false, "errors", "validationErrors"}` |
-| `QueryStringify` | `{"ast"}` | `{"result": "query text"}` |
-| `QueryParseAndValidate` | `{"query", "fields"}` | `{"result": ast}` |
-| `QueryMatch` | `{"query", "fields", "record"}` | `{"result": true}` |
-| `QueryEval` | `{"query", "fields", "record"}` | `{"result": value}` |
+| `QueryParse` | `{"query", "maxLength"?, "explicitAnd"?, "strictValues"?}` | `{"result": ast}` |
+| `QueryValidate` | `{"ast", "fields", "maxLength"?}` | `{"valid": true}` or `{"valid": false, "errors", "validationErrors"}` |
+| `QueryStringify` | `{"ast", "maxLength"?}` | `{"result": "query text"}` |
+| `QueryParseAndValidate` | `{"query", "fields", "maxLength"?, "explicitAnd"?, "strictValues"?}` | `{"result": ast}` |
+| `QueryMatch` | `{"query", "fields", "record", "maxLength"?, "explicitAnd"?, "strictValues"?}` | `{"result": true}` |
+| `QueryEval` | `{"query", "fields", "record", "maxLength"?}` | `{"result": value}` |
+
+The table lists every key a call takes. Any other key is an error, so a
+misspelt option cannot pass for one. The one exception is an input of another
+call (`query`, `ast`, `fields`, `record`, `maxLength`) sent as `null`, which
+is read as absent, so a binding can fill one struct for every call.
 
 A failure is `{"error": "message"}` with `errors` (syntax) or
 `validationErrors` (validation): lists of `{code, message, offset, length}`,

@@ -132,6 +132,35 @@ def check_strict_options(lib):
         assert env.get("error") == "explicitAnd must be a boolean", env
 
 
+def check_unknown_keys(lib):
+    """A key a call does not take is an error, so a typo cannot pass for an option."""
+    env = lib.call("QueryParse", query="a=1 b=2", strict=True)
+    assert env.get("error", "").startswith('unknown key "strict"'), env
+    assert "result" not in env, env
+    # Two unknown keys always name the same one.
+    for _ in range(20):
+        env = lib.call("QueryParse", query="a=1", zeta=1, alpha=2)
+        assert env.get("error", "").startswith('unknown key "alpha"'), env
+    # The empty key is a key like any other, and does not hide the ones after it.
+    assert lib.call("QueryParse", **{"query": "a=1", "": 0}).get("error", "").startswith('unknown key ""')
+    env = lib.call("QueryParse", **{"query": "a=1 b=2", "strict": True, "": 0})
+    assert env.get("error", "").startswith('unknown key ""') and "result" not in env, env
+    # A key another call takes is still unknown to this one.
+    assert lib.call("QueryParse", query="a=1", record={}).get("error", "").startswith('unknown key "record"')
+    assert lib.call("QueryEval", query="1+1", fields=[], record={}, explicitAnd=True).get("error", "").startswith('unknown key "explicitAnd"')
+    # An input of another call sent as null asks for nothing, so a binding
+    # that fills one struct for every call keeps working. A switch is never
+    # excused this way, and neither is an input that carries a value.
+    assert "result" in lib.call("QueryParse", query="a=1", fields=None, record=None, ast=None)
+    assert lib.call("QueryEval", query="1+1", fields=[], record={}, explicitAnd=None).get("error", "").startswith('unknown key "explicitAnd"')
+    assert lib.call("QueryParse", query="a=1", strict=None).get("error", "").startswith('unknown key "strict"')
+    assert lib.call("QueryParse", query="a=1", fields=[]).get("error", "").startswith('unknown key "fields"')
+    # Every listed key is accepted.
+    fields = [{"name": "a", "type": "integer"}]
+    env = lib.call("QueryMatch", query="a=1", fields=fields, record={"a": 1}, maxLength=64, explicitAnd=True, strictValues=True)
+    assert env.get("result") is True, env
+
+
 def check_threads(lib):
     """Calls from many threads at once agree with a single-threaded call."""
     fields = [{"name": "total", "type": "decimal"}]
@@ -167,7 +196,7 @@ def main():
         except AssertionError as err:
             failed += 1
             print(f"FAIL {tc['op']}: {tc['id']}: {err}")
-    for name, check in (("hostile input", check_hostile_input), ("strict options", check_strict_options),
+    for name, check in (("hostile input", check_hostile_input), ("strict options", check_strict_options), ("unknown keys", check_unknown_keys),
                         ("threads", check_threads)):
         try:
             check(lib)
