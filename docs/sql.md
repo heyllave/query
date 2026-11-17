@@ -85,7 +85,7 @@ Params: [draft 50000]
 - **Bind every literal as a parameter.** Never write a value into the SQL text.
 - **Map every field to a column through your own table.** A validated tree is not safe to interpolate. Nested keys such as `labels.example.com/team` are caller-supplied text, so bind the key too (`labels ->> $1`).
 - **Map every function through your own table**, with its argument count.
-- **Keep the length limit.** The default is 256 bytes.
+- **Keep the length limit.** The default is 256 characters.
 
 ## Details that are easy to get wrong
 
