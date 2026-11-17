@@ -62,7 +62,10 @@ func dropRepeatedSQL(q *query, list ErrorList) ErrorList {
 	out := list[:0:0]
 	var prev *Error
 	for _, e := range list {
-		repeat := prev != nil && prev.Code == CodeMissingAnd && e.Code == CodeMissingAnd &&
+		// The token the parser stops at after the SQL word (the 5 of LIMIT 5)
+		// is the same mistake again, as the next missing connective is.
+		repeat := prev != nil && prev.Code == CodeMissingAnd &&
+			(e.Code == CodeMissingAnd || e.Code == CodeUnexpected) &&
 			q.directlyAfter(prev.Position.Offset, e.Position.Offset) &&
 			q.sqlNear(prev.Position.Offset) && q.sqlNear(e.Position.Offset)
 		prev = e

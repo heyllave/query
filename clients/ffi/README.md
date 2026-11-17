@@ -23,7 +23,9 @@ Each function takes one NUL-terminated UTF-8 JSON object and returns one.
 | `QueryEval` | `{"query", "fields", "record", "maxLength"?}` | `{"result": value}` |
 
 The table lists every key a call takes. Any other key is an error, so a
-misspelt option cannot pass for one.
+misspelt option cannot pass for one. The one exception is an input of another
+call (`query`, `ast`, `fields`, `record`, `maxLength`) sent as `null`, which
+is read as absent, so a binding can fill one struct for every call.
 
 A failure is `{"error": "message"}` with `errors` (syntax) or
 `validationErrors` (validation): lists of `{code, message, offset, length}`,

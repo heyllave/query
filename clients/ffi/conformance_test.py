@@ -148,6 +148,13 @@ def check_unknown_keys(lib):
     # A key another call takes is still unknown to this one.
     assert lib.call("QueryParse", query="a=1", record={}).get("error", "").startswith('unknown key "record"')
     assert lib.call("QueryEval", query="1+1", fields=[], record={}, explicitAnd=True).get("error", "").startswith('unknown key "explicitAnd"')
+    # An input of another call sent as null asks for nothing, so a binding
+    # that fills one struct for every call keeps working. A switch is never
+    # excused this way, and neither is an input that carries a value.
+    assert "result" in lib.call("QueryParse", query="a=1", fields=None, record=None, ast=None)
+    assert lib.call("QueryEval", query="1+1", fields=[], record={}, explicitAnd=None).get("error", "").startswith('unknown key "explicitAnd"')
+    assert lib.call("QueryParse", query="a=1", strict=None).get("error", "").startswith('unknown key "strict"')
+    assert lib.call("QueryParse", query="a=1", fields=[]).get("error", "").startswith('unknown key "fields"')
     # Every listed key is accepted.
     fields = [{"name": "a", "type": "integer"}]
     env = lib.call("QueryMatch", query="a=1", fields=fields, record={"a": 1}, maxLength=64, explicitAnd=True, strictValues=True)

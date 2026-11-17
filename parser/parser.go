@@ -69,7 +69,11 @@ func ParseWith(input string, cfg Config) (ast.Expression, error) {
 	}
 	p := &parser{tokens: tokens, explicitAnd: cfg.ExplicitAnd}
 	expr := p.parseExpression()
-	if err := p.errors.errOrNil(); err != nil {
+	// A missing connective is recorded and parsed as the AND it would have
+	// been, so the parser is still in step with the text and what it stops at
+	// next is a real error too. Any other error has left it out of step, and
+	// a token it stops at then proves nothing.
+	if err := p.errors.errOrNil(); err != nil && !p.onlyMissingAnds() {
 		return nil, annotate(input, err, false, cfg)
 	}
 	if p.peek().Type != token.EOF {
@@ -178,6 +182,17 @@ func (p *parser) parseLogicalAnd() ast.Expression {
 		}
 	}
 	return left
+}
+
+// onlyMissingAnds reports whether every error so far is a missing
+// connective, the one error the parser carries on from unharmed.
+func (p *parser) onlyMissingAnds() bool {
+	for _, e := range p.errors {
+		if e.Code != CodeMissingAnd {
+			return false
+		}
+	}
+	return true
 }
 
 // canStartTerm reports whether a token type can start a fresh term (qualifier,

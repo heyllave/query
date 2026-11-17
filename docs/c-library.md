@@ -36,7 +36,7 @@ Each function takes one NUL-terminated UTF-8 JSON object and returns one.
 
 `maxLength` is the query length limit in characters; it defaults to 256 and `0` disables it. For a tree, it bounds the text the tree carries as written (string values, field names), so a tree parsed under a larger limit is validated or printed under the same one.
 
-`QueryParse`, `QueryParseAndValidate` and `QueryMatch` also take two optional booleans, `"explicitAnd"` and `"strictValues"`, which turn off lenient forms of the grammar: `{"query": "a=1 b=2", "explicitAnd": true}` fails with the code `missingAnd`. A key a call does not take is an error, so a misspelt option cannot pass for one. See [Grammar](../grammar/#strict-options).
+`QueryParse`, `QueryParseAndValidate` and `QueryMatch` also take two optional booleans, `"explicitAnd"` and `"strictValues"`, which turn off lenient forms of the grammar: `{"query": "a=1 b=2", "explicitAnd": true}` fails with the code `missingAnd`. A key a call does not take is an error, so a misspelt option cannot pass for one. An input of another call sent as `null` (`"fields": null` to `QueryParse`) is read as absent. See [Grammar](../grammar/#strict-options).
 
 A failure is `{"error": "message"}` with a list of coded entries: `errors` for syntax, `validationErrors` for validation. Each entry is `{code, message, offset, length}`, plus `hint` when the engine can tell what was meant. Show your own wording from `code`; the codes do not change, the messages may.
 

@@ -122,10 +122,17 @@ func (r request) options() (bridgejson.Options, bridgejson.Envelope) {
 // key JSON allows.
 func (r request) unknownKey(keys []string) (name string, ok bool) {
 	var unknown []string
-	for k := range r {
-		if !slices.Contains(keys, k) {
-			unknown = append(unknown, k)
+	for k, v := range r {
+		if slices.Contains(keys, k) {
+			continue
 		}
+		// A binding that fills one struct for every call sends the members
+		// this call has no use for as null. That asks for nothing, so it is
+		// read as absent; a strict switch is never excused this way.
+		if string(v) == "null" && slices.Contains(inputKeys, k) {
+			continue
+		}
+		unknown = append(unknown, k)
 	}
 	if len(unknown) == 0 {
 		return "", false
@@ -143,6 +150,10 @@ var (
 	matchKeys    = []string{"query", "fields", "record", "maxLength", "explicitAnd", "strictValues"}
 	evalKeys     = []string{"query", "fields", "record", "maxLength"}
 )
+
+// inputKeys are the members that carry a call's input, as opposed to the
+// switches that change how it is read.
+var inputKeys = []string{"query", "ast", "fields", "record", "maxLength"}
 
 func (r request) raw(key, fallback string) string {
 	if v, ok := r[key]; ok {

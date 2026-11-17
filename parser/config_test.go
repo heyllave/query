@@ -378,6 +378,7 @@ func TestParseWith_SQLWordIsReportedOncePerUse(t *testing.T) {
 		{"after a group", "(a LIKE b) c=1 d=2", []int{3, 11, 15}, []string{"no LIKE", general, general}},
 		{"twice in one clause", "a LIKE b c LIKE d", []int{2, 9, 11}, []string{"no LIKE", general, "no LIKE"}},
 		{"no SQL word", "a b c", []int{2, 4}, []string{general, general}},
+		{"a number after it", "a=1 LIMIT 5", []int{4}, []string{"only conditions"}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -396,6 +397,27 @@ func TestParseWith_SQLWordIsReportedOncePerUse(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// A missing connective does not hide the token the parser stops at after it:
+// the writer who adds the AND is not then handed an error the first answer
+// left out.
+func TestParseWith_MissingAndKeepsTheErrorAfterIt(t *testing.T) {
+	// Act
+	_, err := parser.ParseWith("a=1 x 5 b=2", parser.Config{ExplicitAnd: true})
+
+	// Assert
+	errs := parser.Errors(err)
+	if len(errs) != 2 || errs[0].Code != parser.CodeMissingAnd || errs[0].Position.Offset != 4 ||
+		errs[1].Code != parser.CodeUnexpected || errs[1].Position.Offset != 6 {
+		t.Fatalf("got %v, want missingAnd at 4 then unexpected at 6", err)
+	}
+
+	// The default grammar reports the same stray token.
+	_, err = parser.ParseWith("a=1 x 5 b=2", parser.Config{})
+	if errs := parser.Errors(err); len(errs) != 1 || errs[0].Code != parser.CodeUnexpected || errs[0].Position.Offset != 6 {
+		t.Fatalf("lenient: got %v, want unexpected at 6", err)
 	}
 }
 
