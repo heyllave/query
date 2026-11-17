@@ -44,9 +44,15 @@ If you need business rules, computed fields or templates, a general expression e
 
 ## Where to go next
 
-- [Conditions and values]({{ '/conditions-and-values/' | relative_url }}): the two kinds of query, `Compile` and `CompileValue`.
-- [Syntax]({{ '/syntax/' | relative_url }}): every operator, value and function.
-- [Errors and hints]({{ '/errors/' | relative_url }}): what a rejected query tells you, and the fixes it suggests.
-- [Filtering a list with SQL]({{ '/sql/' | relative_url }}): the parse, validate and translate route.
-- [Command line]({{ '/cli/' | relative_url }}): `query explain`, to see how a query is read, and `filter`, `eval` and `map`, to run one over JSON records like `jq`.
-- [Stability]({{ '/stability/' | relative_url }}): what you can rely on, and what enforces it.
+| You want to | Start at |
+|---|---|
+| Write a query | [Syntax]({{ '/syntax/' | relative_url }}), or the [playground]({{ '/playground/' | relative_url }}) |
+| Add a filter to a list endpoint | [Filtering a list with SQL]({{ '/sql/' | relative_url }}) |
+| Match records in memory, or compute a value | [Conditions and values]({{ '/conditions-and-values/' | relative_url }}), then [Go]({{ '/go/' | relative_url }}) or [TypeScript]({{ '/typescript/' | relative_url }}) |
+| Call it from Python, Ruby, Java or anything else | [C library]({{ '/c-library/' | relative_url }}) |
+| Filter JSON in a shell | [Command line]({{ '/cli/' | relative_url }}), and [query and jq]({{ '/jq/' | relative_url }}) |
+| Show a rejected query to a person | [Errors and hints]({{ '/errors/' | relative_url }}) |
+| Accept queries from scripts and saved links | [Strict options]({{ '/grammar/' | relative_url }}#strict-options) |
+| Know what will not change under you | [Stability]({{ '/stability/' | relative_url }}) |
+
+The documentation has three parts. [Language]({{ '/language/' | relative_url }}) is what a query can say. [Clients]({{ '/clients/' | relative_url }}) is how you reach the engine from Go, TypeScript, C and a shell. [Guides]({{ '/guides/' | relative_url }}) take one job from start to finish.

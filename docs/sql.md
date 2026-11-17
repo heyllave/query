@@ -1,6 +1,7 @@
 ---
 title: Filtering a list with SQL
-nav_order: 7
+nav_order: 1
+parent: Guides
 permalink: /sql/
 ---
 

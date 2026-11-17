@@ -1,6 +1,7 @@
 ---
 title: C library
-nav_order: 6
+nav_order: 3
+parent: Clients
 permalink: /c-library/
 ---
 

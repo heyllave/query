@@ -1,6 +1,7 @@
 ---
 title: TypeScript
-nav_order: 5
+nav_order: 2
+parent: Clients
 permalink: /typescript/
 ---
 

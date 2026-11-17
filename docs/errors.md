@@ -1,6 +1,7 @@
 ---
 title: Errors and hints
-nav_order: 3.5
+nav_order: 3
+parent: Language
 permalink: /errors/
 ---
 

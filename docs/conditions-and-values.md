@@ -1,6 +1,7 @@
 ---
 title: Conditions and values
-nav_order: 2.5
+nav_order: 2
+parent: Language
 permalink: /conditions-and-values/
 ---
 
