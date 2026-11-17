@@ -6,6 +6,8 @@ semantic versioning.
 
 ## Unreleased
 
+## v0.2.0 - 2026-11-17
+
 ### Added
 
 - Strict parsing options, for a host whose queries come from scripts and

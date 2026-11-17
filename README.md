@@ -494,7 +494,7 @@ What a caller can rely on, and what holds the library to it:
 
 Limits that apply to every query: 256 characters unless `WithMaxLength` says otherwise, `parser.MaxNesting` (128) levels of nesting, and ±`eval.MaxCalendarDays` for day arithmetic. A query runs in time proportional to its length and the size of the record; there are no loops, no recursion and no user-defined functions in the language.
 
-Pin a tag (`go get github.com/heyllave/query@v0.1.0`). Before `v1.0.0` the Go API may still change between minor versions; the changelog lists every such change. From `v1.0.0` on, versions follow semantic versioning: the grammar, the error codes, the JSON tree and the exported Go API only change incompatibly in a major version. See `SECURITY.md` for what counts as a vulnerability and how to report one.
+Pin a tag (`go get github.com/heyllave/query@v0.2.0`). Before `v1.0.0` the Go API may still change between minor versions; the changelog lists every such change. From `v1.0.0` on, versions follow semantic versioning: the grammar, the error codes, the JSON tree and the exported Go API only change incompatibly in a major version. See `SECURITY.md` for what counts as a vulnerability and how to report one.
 
 ## Operators
 
