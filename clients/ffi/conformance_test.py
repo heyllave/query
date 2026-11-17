@@ -141,6 +141,10 @@ def check_unknown_keys(lib):
     for _ in range(20):
         env = lib.call("QueryParse", query="a=1", zeta=1, alpha=2)
         assert env.get("error", "").startswith('unknown key "alpha"'), env
+    # The empty key is a key like any other, and does not hide the ones after it.
+    assert lib.call("QueryParse", **{"query": "a=1", "": 0}).get("error", "").startswith('unknown key ""')
+    env = lib.call("QueryParse", **{"query": "a=1 b=2", "strict": True, "": 0})
+    assert env.get("error", "").startswith('unknown key ""') and "result" not in env, env
     # A key another call takes is still unknown to this one.
     assert lib.call("QueryParse", query="a=1", record={}).get("error", "").startswith('unknown key "record"')
     assert lib.call("QueryEval", query="1+1", fields=[], record={}, explicitAnd=True).get("error", "").startswith('unknown key "explicitAnd"')

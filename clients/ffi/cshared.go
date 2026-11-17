@@ -117,8 +117,10 @@ func (r request) options() (bridgejson.Options, bridgejson.Envelope) {
 }
 
 // unknownKey returns a member of the request that is not in keys, the first
-// in sorted order so the same request always names the same one, or "".
-func (r request) unknownKey(keys []string) string {
+// in sorted order so the same request always names the same one. ok is false
+// when every member is known; the name alone cannot say so, because "" is a
+// key JSON allows.
+func (r request) unknownKey(keys []string) (name string, ok bool) {
 	var unknown []string
 	for k := range r {
 		if !slices.Contains(keys, k) {
@@ -126,10 +128,10 @@ func (r request) unknownKey(keys []string) string {
 		}
 	}
 	if len(unknown) == 0 {
-		return ""
+		return "", false
 	}
 	slices.Sort(unknown)
-	return unknown[0]
+	return unknown[0], true
 }
 
 // The members each call takes.
@@ -164,7 +166,7 @@ func call(req *C.char, keys []string, fn func(request) bridgejson.Envelope) *C.c
 		if err := json.Unmarshal([]byte(C.GoString(req)), &r); err != nil || r == nil {
 			return bridgejson.Fail("invalid request JSON")
 		}
-		if unknown := r.unknownKey(keys); unknown != "" {
+		if unknown, ok := r.unknownKey(keys); ok {
 			return bridgejson.Fail(fmt.Sprintf("unknown key %q; this call takes %s", unknown, strings.Join(keys, ", ")))
 		}
 		return fn(r)

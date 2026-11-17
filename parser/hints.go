@@ -3,6 +3,7 @@ package parser
 import (
 	"errors"
 	"fmt"
+	"sort"
 	"strings"
 	"unicode"
 	"unicode/utf8"
@@ -30,6 +31,9 @@ func annotate(input string, err error, value bool, cfg Config) error {
 	}
 	list = mergeRepeats(input, list)
 	q := &query{input: input, value: value, maxLength: cfg.MaxLength, cfg: cfg}
+	// Before the hints, so how many errors come back never depends on how
+	// many of them get a hint.
+	list = dropRepeatedSQL(q, list)
 	for i, e := range list {
 		if i == maxHinted {
 			break
@@ -38,27 +42,87 @@ func annotate(input string, err error, value bool, cfg Config) error {
 			e.Hint = hintFor(q, e)
 		}
 	}
-	return dropRepeatedSQL(list)
+	return list
 }
 
-// dropRepeatedSQL removes a missing connective that only repeats the SQL
-// advice of the one before it. Under ExplicitAnd, `name LIKE john` is two
-// missing connectives, before LIKE and before john, and both are answered
-// "there is no LIKE": one mistake reported twice. The general advice is left
-// alone, since `a b c` really is missing two connectives.
-func dropRepeatedSQL(list ErrorList) ErrorList {
+// dropRepeatedSQL removes a missing connective that only repeats the one
+// before it. Under ExplicitAnd, `name LIKE john` is two missing connectives,
+// before LIKE and before john, and both are about the LIKE: one mistake
+// reported twice.
+//
+// An error is a repeat only when it stands directly after the previous
+// missing connective and both are next to the SQL word. So a second SQL word
+// in another clause (a LIKE b AND c LIKE d) is its own error, and a
+// connective that is really missing further on (a LIKE b c=1) is kept: fixing
+// the LIKE must not reveal an error this answer hid.
+func dropRepeatedSQL(q *query, list ErrorList) ErrorList {
+	if q.value {
+		return list
+	}
 	out := list[:0:0]
+	var prev *Error
 	for _, e := range list {
-		if n := len(out); n > 0 {
-			prev := out[n-1]
-			if e.Code == CodeMissingAnd && prev.Code == CodeMissingAnd && e.Hint != "" &&
-				e.Hint == prev.Hint && e.Hint != hintMissingAnd && !strings.HasPrefix(e.Hint, hintKeyAfterDot) {
-				continue
-			}
+		repeat := prev != nil && prev.Code == CodeMissingAnd && e.Code == CodeMissingAnd &&
+			q.directlyAfter(prev.Position.Offset, e.Position.Offset) &&
+			q.sqlNear(prev.Position.Offset) && q.sqlNear(e.Position.Offset)
+		prev = e
+		if !repeat {
+			out = append(out, e)
 		}
-		out = append(out, e)
 	}
 	return out
+}
+
+// sqlNear reports whether a word borrowed from SQL is used as a keyword at
+// off or directly before it: the LIKE itself, or the john after it.
+func (q *query) sqlNear(off int) bool {
+	words := q.bareWords()
+	// The first word that starts after off; the one before it starts at or
+	// before off.
+	i := sort.Search(len(words), func(i int) bool { return words[i].start > off }) - 1
+	if i >= 0 && words[i].start == off {
+		if q.sqlWord(words[i]) {
+			return true
+		}
+		i--
+	}
+	if i < 0 {
+		return false
+	}
+	w := words[i]
+	return w.end <= off && strings.TrimSpace(q.input[w.end:off]) == "" && q.sqlWord(w)
+}
+
+// sqlWord reports whether w is a word of SQL used as a keyword. A field may
+// be called limit or from, so a word used as a name is not one.
+func (q *query) sqlWord(w word) bool {
+	text := q.input[w.start:w.end]
+	if w.field || isConnective(text) {
+		return false
+	}
+	_, ok := hintwords.SQL(text)
+	return ok
+}
+
+// directlyAfter reports whether the token at off follows the one at prev
+// with only space between them.
+func (q *query) directlyAfter(prev, off int) bool {
+	in := q.input
+	if prev < 0 || prev >= len(in) || off > len(in) {
+		return false
+	}
+	var end int
+	switch r, _ := utf8.DecodeRuneInString(in[prev:]); {
+	case r == '"':
+		end = skipQuoted(in, prev)
+	case r == '[':
+		end = skipBracketed(in, prev)
+	case isWordRune(r):
+		end = prev + len(firstWord(in[prev:]))
+	default:
+		return false
+	}
+	return end <= off && strings.TrimSpace(in[end:off]) == ""
 }
 
 // query is what every hint of one failed parse shares: the text, the mode,
@@ -237,7 +301,9 @@ func hintFor(q *query, e *Error) string {
 	c := newContext(q, off)
 	value := q.value
 
-	if !value && sqlCodes[e.Code] {
+	// A missing AND takes the SQL advice only next to the SQL word. Further
+	// along the clause (a LIKE b c=1) the connective really is missing.
+	if !value && sqlCodes[e.Code] && (e.Code != CodeMissingAnd || q.sqlNear(off)) {
 		if h := c.sqlHint(); h != "" {
 			return h
 		}

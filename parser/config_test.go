@@ -351,6 +351,65 @@ func TestParseWith_SQLHintStopsAtTheClause(t *testing.T) {
 	}
 }
 
+// An SQL word is one mistake however many connectives it leaves missing, but
+// only the errors that stand next to it are folded into it. A second SQL
+// word, in the same clause or another, is its own error; and a connective
+// that is really missing further on is kept, so fixing the SQL word does not
+// reveal an error the first answer hid.
+func TestParseWith_SQLWordIsReportedOncePerUse(t *testing.T) {
+	const general = "join two conditions"
+	tests := []struct {
+		name    string
+		input   string
+		offsets []int
+		hints   []string
+	}{
+		{"like", "name LIKE john", []int{5}, []string{"no LIKE"}},
+		{"is null", "name IS NULL", []int{5}, []string{"NOT field"}},
+		{"is not null", "name IS NOT NULL", []int{5}, []string{"NOT field"}},
+		{"order by", "state=draft ORDER BY total", []int{12}, []string{"only conditions"}},
+		{"statement", "SELECT a FROM t", []int{7}, []string{"only conditions"}},
+		{"quoted value", `name LIKE "john"`, []int{5}, []string{"no LIKE"}},
+		{"two clauses", "a LIKE b AND c LIKE d", []int{2, 15}, []string{"no LIKE", "no LIKE"}},
+		{"three clauses", "a LIKE b AND c LIKE d AND e LIKE f", []int{2, 15, 28}, []string{"no LIKE", "no LIKE", "no LIKE"}},
+		{"two missing tests", "a IS NULL AND b IS NULL", []int{2, 16}, []string{"NOT field", "NOT field"}},
+		{"statement around a connective", "SELECT a AND b LIMIT 5", []int{7, 15}, []string{"only conditions", "only conditions"}},
+		{"missing connectives after it", "a LIKE b c=1 d=2", []int{2, 9, 13}, []string{"no LIKE", general, general}},
+		{"after a group", "(a LIKE b) c=1 d=2", []int{3, 11, 15}, []string{"no LIKE", general, general}},
+		{"twice in one clause", "a LIKE b c LIKE d", []int{2, 9, 11}, []string{"no LIKE", general, "no LIKE"}},
+		{"no SQL word", "a b c", []int{2, 4}, []string{general, general}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Act
+			_, err := parser.ParseWith(tt.input, parser.Config{ExplicitAnd: true})
+
+			// Assert
+			errs := parser.Errors(err)
+			if len(errs) != len(tt.offsets) {
+				t.Fatalf("ParseWith(%q) gave %d errors, want %d: %v", tt.input, len(errs), len(tt.offsets), err)
+			}
+			for i, e := range errs {
+				if e.Code != parser.CodeMissingAnd || e.Position.Offset != tt.offsets[i] || !strings.Contains(e.Hint, tt.hints[i]) {
+					t.Errorf("error %d = %s at %d, hint %q; want missingAnd at %d with a hint containing %q",
+						i, e.Code, e.Position.Offset, e.Hint, tt.offsets[i], tt.hints[i])
+				}
+			}
+		})
+	}
+}
+
+// How many errors come back does not depend on how many of them get a hint.
+func TestParseWith_SQLWordFoldingIgnoresTheHintLimit(t *testing.T) {
+	// Act
+	_, err := parser.ParseWith("a LIKE b c d e f g h i j k l", parser.Config{ExplicitAnd: true})
+
+	// Assert: the LIKE, then one for each of the ten words after b.
+	if errs := parser.Errors(err); len(errs) != 11 {
+		t.Fatalf("got %d errors, want 11: %v", len(errs), err)
+	}
+}
+
 // A rewrite offered for a missing AND is itself accepted under the same
 // options.
 func TestParseWith_MissingAndRewritesParseStrictly(t *testing.T) {
