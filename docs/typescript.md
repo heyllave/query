@@ -72,6 +72,10 @@ Every call takes an optional last argument, `maxLength`: the query length limit 
 
 `parse`, `parseAndValidate` and `match` accept an object in its place, which also carries the strict switches: `q.parse(text, { maxLength: 512, explicitAnd: true, strictValues: true })`. With `explicitAnd`, `a=1 b=2` fails with the code `missingAnd`. See [Grammar](../grammar/#strict-options).
 
+`validate`, `stringify` and `eval` accept `{ maxLength }` as an object too, and nothing else: they have no condition grammar to be strict about.
+
+What a call does not understand is an error, not a default, so a host cannot believe strict parsing is on when it is not. That covers an option the call does not take (`{ strict: true }`, or `explicitAnd` passed to `eval`), a switch that is not a boolean, an argument that is neither a number nor an object (`q.parse(text, true)`), and an argument after the options.
+
 ```ts
 const long = q.parse(text, 1000);
 q.validate(long.result!, fields, 1000);
