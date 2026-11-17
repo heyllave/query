@@ -153,8 +153,14 @@ func TestMatch_StrictOptions(t *testing.T) {
 // Callers can store the original convenience functions without adapting their
 // function types when opting in to the newer parsing API elsewhere.
 func TestLegacyMatchAndEvalFunctionTypes(t *testing.T) {
-	var match func(string, []validate.FieldConfig, map[string]any) (bool, error) = query.Match
-	var value func(string, []validate.FieldConfig, map[string]any) (any, error) = query.Eval
+	// Named types, so the assignments below check the signatures: they stop
+	// compiling if Match or Eval gains a parameter.
+	type (
+		matchFunc func(string, []validate.FieldConfig, map[string]any) (bool, error)
+		evalFunc  func(string, []validate.FieldConfig, map[string]any) (any, error)
+	)
+	var match matchFunc = query.Match
+	var value evalFunc = query.Eval
 	record := map[string]any{"state": "draft", "total": 5.0}
 	got, err := match("state=draft", testFields, record)
 	if err != nil || !got {
