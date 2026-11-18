@@ -6,6 +6,8 @@ semantic versioning.
 
 ## Unreleased
 
+## v0.4.0 - 2026-11-18
+
 ### Added
 
 - List fields in a schema. A field of the new `validate.TypeList` declares
