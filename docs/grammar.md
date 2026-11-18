@@ -24,14 +24,14 @@ accepted in any case.
 query      = or_expr ;
 
 or_expr    = and_expr { "OR" and_expr } ;
-and_expr   = chain { [ "AND" ] chain } ;       (* see "Implicit AND" below *)
+and_expr   = unary { [ "AND" ] unary } ;       (* see "Implicit AND" below *)
 
+unary      = "NOT" unary | chain ;             (* NOT a@first is NOT (a@first) *)
 chain      = term { "@" selector } ;
 selector   = "first" | "last"
            | [ "any" | "all" | "none" ] "(" or_expr ")" ;
 
-term       = "NOT" chain
-           | "(" or_expr ")"
+term       = "(" or_expr ")"
            | condition ;
 
 condition  = subject [ comparison ] ;          (* no comparison: presence, or a predicate call *)
@@ -89,6 +89,47 @@ An unquoted value ends at a space, `)`, `[`, `]`, `..`, and at a `,` inside
 an `IN` list or a call. Inside one, `\*`, `\\`, `\(` and `\)` stand for the
 literal character. Anything else goes in quotes.
 
+### Keywords are not reserved
+
+`AND`, `OR`, `NOT` and `IN` are keywords only where a connective can stand.
+Everywhere else they are ordinary words:
+
+- **After an operator there are no keywords.** `name=AND` and
+  `name IN (and, or, not, in)` compare with text.
+- **A keyword is a field name when something names it as one:** an operator,
+  a dot, `@` or `IN` directly after it (`not=1`, `not.x=1`, `not@first`), or
+  a dot before it (`labels.and=x`).
+- **A longer word is not a keyword.** `NOTname=a` is the field `NOTname`.
+- **A keyword cannot name a function.** `not(x)` is a negated group.
+
+Under the default grammar a `NOT` with nothing after it is also read as a
+word (`NOT` alone is the term `not`). `ExplicitAnd` refuses that form.
+
+### The type of an unquoted value
+
+A value's type comes from how it is written, not from the field. The first
+of these that fits the whole value is used:
+
+| Order | Shape | Type | Example |
+|---|---|---|---|
+| 1 | `true` or `false`, in lower case | boolean | `true` |
+| 2 | a date, with or without a time | date | `2026-11-16`, `2026-11-16T10:00:00Z` |
+| 3 | digits and a unit | duration | `7d` |
+| 4 | a number | integer or float | `-5`, `1.5` |
+| 5 | numbers, dates or durations joined by `+ - * / %` | arithmetic | `10-3`, `10/2`, `3d-1` |
+| 6 | text with a `*` at one end or both | pattern | `check*` |
+| 7 | anything else | text | `10-x`, `1.2.3`, `7days`, `a/b`, `TRUE` |
+
+So `10-3` is a subtraction and `10-x` is text. A value that has the shape of
+a number, a date, a duration or arithmetic and is meant as text goes in
+quotes: `name="10-3"`. A field declared as text refuses arithmetic rather
+than guess, and takes a lone number, date or duration as its text.
+
+These characters are text inside an unquoted value: `!` `:` `@` `+` `-` `/`
+`%`, and `,` outside an `IN` list or a call. These are not: `=` `<` `>` end
+the default grammar's reading in surprising ways and are refused under
+`StrictValues`, even after a backslash.
+
 ## Where text could be read two ways
 
 A grammar this small still has places where the same characters could mean
@@ -121,7 +162,7 @@ programs can turn the lenient forms off:
 
 | Option | Default | When on |
 |---|---|---|
-| `ExplicitAnd` | off | A space is no longer an `AND`. `a=1 b=2`, `frontend checkout` and `labels[team]=x` are errors with the code `missingAnd`. Write `a=1 AND b=2`; quote text that has a space. |
+| `ExplicitAnd` | off | A space is no longer an `AND`. `a=1 b=2`, `frontend checkout` and `labels[team]=x` are errors with the code `missingAnd`. Write `a=1 AND b=2`; quote text that has a space. A `NOT` with nothing to negate (`a=1 AND NOT`, `NOT` alone) is an error too, as a dangling `AND` already is; the text is searched for as `"not"`. |
 | `StrictValues` | off | `=`, `<` and `>` are refused inside an unquoted value, so `a=1+b=2` and `a=b=c` are errors (`unexpectedChar`). A value that holds one is quoted: `url="https://x/?a=b"`. |
 
 ```go
@@ -144,7 +185,7 @@ without any stored query changing its meaning.
 With `ExplicitAnd` the grammar's one optional connective becomes required:
 
 ```ebnf
-and_expr   = chain { "AND" chain } ;
+and_expr   = unary { "AND" unary } ;
 ```
 
 The TypeScript client and the C library take the same switches:

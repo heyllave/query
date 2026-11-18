@@ -6,6 +6,23 @@ semantic versioning.
 
 ## Unreleased
 
+### Changed
+
+- Under `ExplicitAnd`, a `NOT` with nothing after it to negate is an error:
+  `a=1 AND NOT`, `NOT` alone, `(NOT)` and `NOT OR b=2`. It was read as the
+  bare term `not`, so a query cut short searched for that word. A dangling
+  `AND` or `OR` was already an error. `not=1`, `not.x=1`, `not@first` and
+  `"not"` are unchanged, and so is the default grammar.
+
+### Fixed
+
+- A word that cannot stand alone as a term now gets a hint that shows it in
+  quotes: `812`, `2026-11-16`, `v1.2`, `foo@bar.com` and `checkout*`. The
+  last one was given the advice for arithmetic.
+- The grammar page gave `NOT a@first` two derivations. `NOT` now has its own
+  rule, which is how the parser has always read it. The page also states
+  when a keyword is a name and how an unquoted value gets its type.
+
 ## v0.2.0 - 2026-11-17
 
 ### Added

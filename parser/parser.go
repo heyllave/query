@@ -231,10 +231,21 @@ func (p *parser) isFieldToken() bool {
 
 // keywordIsField reports whether a NOT keyword at the current position is a
 // field name rather than a negation: `not=1`, `not`, `(not)`, `not@first`.
+//
+// Under ExplicitAnd only the forms where something names it as a field are
+// kept (`not=1`, `not.x`, `not@first`, `not IN (...)`). A NOT with nothing
+// after it to negate (`a=1 AND NOT`, `(NOT)`, `NOT OR b=2`) is a connective
+// left dangling, the same mistake as a dangling AND, and is refused the same
+// way instead of being read as the bare term "not".
 func (p *parser) keywordIsField() bool {
 	next := p.peekAt(1).Type
-	return next.IsOperator() || next == token.EOF || next == token.RParen ||
-		next == token.Dot || next == token.At || next == token.In || next == token.And || next == token.Or
+	if next.IsOperator() || next == token.Dot || next == token.At || next == token.In {
+		return true
+	}
+	if p.explicitAnd {
+		return false
+	}
+	return next == token.EOF || next == token.RParen || next == token.And || next == token.Or
 }
 
 // parseChainExpr parses a term optionally followed by one or more selector
