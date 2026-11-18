@@ -1,6 +1,7 @@
 ---
 title: Syntax
-nav_order: 3
+nav_order: 1
+parent: Language
 permalink: /syntax/
 ---
 
@@ -165,6 +166,6 @@ A host can declare a field as a list and describe its elements. The condition in
 
 ## Limits
 
-- A query is at most 256 bytes unless the host raises the limit.
+- A query is at most 256 characters unless the host raises the limit.
 - Groups, negations, selectors and calls nest at most 128 levels deep.
 - Day arithmetic accepts at most about 10,000 years in either direction.

@@ -6,6 +6,16 @@ semantic versioning.
 
 ## Unreleased
 
+### Changed
+
+- The documentation is in three parts: Language, Clients and Guides. Page
+  addresses are unchanged.
+
+### Added
+
+- A "query and jq" guide: the two tools on the same records, with the cases
+  where they return different answers.
+
 ## v0.4.0 - 2026-11-18
 
 ### Added

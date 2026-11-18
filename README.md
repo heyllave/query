@@ -692,6 +692,8 @@ go run ./cmd/query explain --json "status=active"
 
 `filter`, `eval` and `map` take `--schema` and `--pretty`; `eval` also takes `--raw` (`-r`) to write strings bare. The [command line page](https://heyllave.github.io/query/cli/) compares them with `jq` and `yq`.
 
+[query and jq](https://heyllave.github.io/query/jq/) runs the two side by side on the same records: untidy data, time zones, nested lists, and where `jq` is the tool to use.
+
 ## Examples
 
 See the [`examples/`](examples/) directory for runnable programs:

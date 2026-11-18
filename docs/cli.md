@@ -1,6 +1,7 @@
 ---
 title: Command line
-nav_order: 6.5
+nav_order: 4
+parent: Clients
 permalink: /cli/
 ---
 
@@ -176,28 +177,12 @@ Without `--schema`, the fields a query names are typed from the records: a numbe
 
 ### Next to jq and yq
 
-The language has no object construction beyond `map`, no aggregation across records and no paths that yield several values, so `jq` and `yq` stay in the pipe for those. They compose:
+`query` filters and reshapes one record at a time. It does not group, aggregate or edit files, so `jq` and `yq` stay in the pipe for those, and they compose:
 
 ```bash
 yq -o json '.events[]' data.yaml | query filter 'state=draft AND total>50000' | jq '{id, total}'
 ```
 
-| Task | jq | query |
-|---|---|---|
-| Equality and a number | `select(.state == "draft" and .total > 50000)` | `filter 'state=draft AND total>50000'` |
-| Prefix, ignoring case | `select(.name \| ascii_downcase \| startswith("jo"))` | `filter 'name=jo*'` |
-| One of several | `select(.state \| IN("draft","issued"))` | `filter 'state IN (draft, issued)'` |
-| Date range | `select(.created_at >= "2026-01-01" and .created_at <= "2026-03-31")` | `filter 'created_at:2026-01-01..2026-03-31'` |
-| Last seven days | `--arg t "$(date -u -d '7 days ago' +%FT%TZ)" 'select(.created_at >= $t)'` | `filter 'created_at>=now()-7d'` |
-| Nested field | `select(.labels.team == "payments")` | `filter 'labels.team=payments'` |
-| Present and not empty | `select(.tire_size != null and .tire_size != "")` | `filter 'tire_size'` |
-| Two fields | `select(.cpu > .cpu_limit)` | `filter 'cpu>[cpu_limit]'` |
-| Any list element | `select(any(.orders[]; .status == "shipped"))` | `filter 'orders@(status=shipped)'` |
-| Every list element | `select(all(.orders[]; .price > 0))` | `filter 'orders@all(price>0)'` |
-| A value | `.total * 1.1` | `eval '[total]*1.1'` |
-| A string, bare | `-r .name` | `eval -r '[name]'` |
-| Reshape | `{id, total: (.total * 1.1)}` | `map 'id, total=[total]*1.1'` |
-| Group and count | `group_by(.state) \| map(length)` | not in the language |
-| Edit in place | `yq -i '.replicas = 3' deploy.yaml` | not in the language |
-
 YAML is read through `yq -o json`: the library has no dependencies, and the standard library has no YAML parser.
+
+[query and jq]({{ '/jq/' | relative_url }}) puts the two side by side on the same records: where a `query` filter is shorter, where it gives a different and more useful answer, and where `jq` is the tool to use.
