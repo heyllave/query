@@ -20,6 +20,7 @@ const (
 	TypeDate                           // date (YYYY-MM-DD)
 	TypeDatetime                       // date and time
 	TypeDuration                       // duration (1d, 4h, etc.)
+	TypeList                           // a list of elements, asked about with a selector
 )
 
 var fieldValueTypeNames = [...]string{
@@ -30,6 +31,7 @@ var fieldValueTypeNames = [...]string{
 	TypeDate:     "date",
 	TypeDatetime: "datetime",
 	TypeDuration: "duration",
+	TypeList:     "list",
 }
 
 // String returns the name of the field value type.
@@ -80,6 +82,8 @@ func DefaultOps(t FieldValueType) []Op {
 		return DateOps
 	case TypeDuration:
 		return DurationOps
+	case TypeList:
+		return ListOps
 	default:
 		return nil
 	}
@@ -116,13 +120,64 @@ var BoolOps = []Op{OpEq, OpNeq}
 // DurationOps are the operators valid for duration fields.
 var DurationOps = []Op{OpEq, OpNeq, OpGt, OpGte, OpLt, OpLte, OpRange}
 
+// ListOps are the operators valid for a list field itself: only the bare
+// name, which asks whether the list is there. Everything else about a list
+// is asked with a selector.
+var ListOps = []Op{OpPresence}
+
+// DefaultSelectors are the selectors a list field accepts when its config
+// names none: one spelling for each question. `@last` is left out because
+// it asks what `@first` asks, and `@any(...)` because it is `@(...)`. A host
+// that wants them lists them in [FieldConfig.Selectors].
+var DefaultSelectors = []string{ast.SelectorFirst, ast.SelectorExists, ast.SelectorAll, ast.SelectorNone}
+
 // FieldConfig declares the name, type, and allowed operations for a query field.
+//
+// A field of [TypeList] is asked about with a selector (`forks@first`,
+// `forks@(name=x)`). Elements declares the fields of one element, which is
+// what the condition inside a selector may name; an element field may itself
+// be a list. Once a schema declares a list, a selector on any other field is
+// an error.
 type FieldConfig struct {
 	Name       string         // field name
 	Type       FieldValueType // data type
 	AllowedOps []Op           // allowed operations
 	Searchable bool           // included in free-text search
 	Nested     bool           // has sub-fields (like labels.*)
+	Elements   []FieldConfig  // for TypeList: the fields of one element
+	Selectors  []string       // for TypeList: the selectors allowed; nil means DefaultSelectors
+}
+
+// AllowsSelector reports whether a list field accepts the selector, named as
+// [ast.SelectorExpr] holds it ("first", "all", "" for `@(...)`).
+func (f FieldConfig) AllowsSelector(name string) bool {
+	for _, allowed := range f.selectors() {
+		if allowed == name {
+			return true
+		}
+	}
+	return false
+}
+
+// SelectorForms lists the selectors a list field accepts as they are
+// written: "@first", "@(...)", "@all(...)". It is nil for any other field.
+func (f FieldConfig) SelectorForms() []string {
+	if f.Type != TypeList {
+		return nil
+	}
+	names := f.selectors()
+	forms := make([]string, len(names))
+	for i, name := range names {
+		forms[i] = ast.SelectorForm(name)
+	}
+	return forms
+}
+
+func (f FieldConfig) selectors() []string {
+	if f.Selectors == nil {
+		return DefaultSelectors
+	}
+	return f.Selectors
 }
 
 // AllowsOp reports whether the field allows the given operator.

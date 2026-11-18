@@ -386,3 +386,30 @@ test("a doubled character is one error spanning both", () => {
   assert.equal(errors[0].length, 2);
   assert.match(errors[0].hint, /AND/);
 });
+
+test("a declared list field checks its selectors and its elements", () => {
+  const lists = JSON.stringify([
+    { Name: "name", Type: "text" },
+    {
+      Name: "forks",
+      Type: "list",
+      Elements: [
+        { Name: "name", Type: "text" },
+        { Name: "replicas", Type: "integer" },
+      ],
+    },
+  ]);
+  const ok = w.queryParseAndValidate("forks@(name=a AND replicas>2)", lists);
+  assert.equal(ok.error, undefined);
+  assert.equal(ok.errors, undefined);
+  assert.equal(w.queryMatch("forks@(replicas>2)", lists, '{"forks":[{"name":"a","replicas":3}]}').result, true);
+
+  const text = (r) => JSON.stringify(r);
+  assert.match(text(w.queryParseAndValidate("forks@last", lists)), /selector @last is not allowed/);
+  assert.match(text(w.queryParseAndValidate("name@first", lists)), /is not a list field/);
+  assert.match(text(w.queryParseAndValidate("forks@(bogus=1)", lists)), /unknown field .{1,2}bogus.{1,2} on .{1,2}forks/);
+  assert.match(
+    text(w.queryParseAndValidate("forks@first", JSON.stringify([{ Name: "forks", Type: "list", Selectors: ["every"] }]))),
+    /unknown selector/,
+  );
+});

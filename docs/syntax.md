@@ -154,6 +154,8 @@ orders@none(status=cancelled)    # no element matches
 | `@all(...)` | true | false |
 | `@none(...)` | true | true |
 
+A host can declare a field as a list and describe its elements. The condition inside a selector is then checked against the element's fields, a selector on a field that is not a list is an error, and `@last` and `@any(...)` are refused unless the host allows them. See [List fields]({{ '/go/' | relative_url }}#list-fields).
+
 ## Missing and unreadable values
 
 - A missing or nil field makes every comparison false, including through a function: `len(name)>3` does not match a record without a name.

@@ -3,6 +3,7 @@ package validate
 import (
 	"errors"
 	"fmt"
+	"sort"
 	"strings"
 
 	"github.com/heyllave/query/ast"
@@ -169,7 +170,11 @@ type Validator struct {
 	allowedFields map[string]bool
 	allowedOps    map[Op]bool
 	allowedFuncs  map[string]bool
-	errors        ErrorList
+	// hasLists is set when the schema declares a list field. A schema that
+	// declares one has declared them all, so a selector on any other field
+	// is then an error.
+	hasLists bool
+	errors   ErrorList
 	// missingTest is set for one Validate call when the query holds IS or
 	// NULL as a stray word, so every bare word of `name IS NULL` gets the
 	// same advice.
@@ -186,6 +191,9 @@ func New(fields []FieldConfig, opts ...Option) *Validator {
 		v.fields[f.Name] = f
 		if f.Nested {
 			v.nested[f.Name] = f
+		}
+		if f.Type == TypeList {
+			v.hasLists = true
 		}
 	}
 	for _, opt := range opts {
@@ -536,24 +544,97 @@ func (v *Validator) validateFuncCallFields(fc *ast.FuncCallExpr) []resolvedField
 	return fields
 }
 
-// validateSelector checks that the selector's base field is declared and
-// recurses into the inner expression. The base acts as a list reference, so
-// we only require the field to exist — OpPresence is not required.
+// validateSelector checks a selector against the field it is applied to.
+//
+// A field declared as a list is held to its config: the selector must be one
+// it allows, and the condition inside is checked against the fields of an
+// element, not of the record. A schema with no list field at all predates
+// list declarations, and there the base only has to exist and the condition
+// is checked against the record's fields.
 func (v *Validator) validateSelector(s *ast.SelectorExpr) {
-	switch b := s.Base.(type) {
-	case *ast.PresenceExpr:
-		fieldName := b.Field.String()
-		if _, ok := v.resolveField(fieldName); !ok {
-			v.addError(ErrFieldNotFound, b.Position, fieldName, "", "unknown field %q", fieldName)
+	b, ok := s.Base.(*ast.PresenceExpr)
+	if !ok {
+		if q, isQualifier := s.Base.(*ast.QualifierExpr); isQualifier {
+			v.validateQualifier(q)
+		} else {
+			v.validate(s.Base)
 		}
-	case *ast.QualifierExpr:
-		v.validateQualifier(b)
-	default:
-		v.validate(s.Base)
+		if s.Inner != nil {
+			v.validate(s.Inner)
+		}
+		return
+	}
+	fieldName := b.Field.String()
+	form := ast.SelectorForm(s.Selector)
+	cfg, ok := v.resolveField(fieldName)
+	switch {
+	case !ok:
+		v.addError(ErrFieldNotFound, b.Position, fieldName, "", "unknown field %q", fieldName)
+	case cfg.Type == TypeList:
+		if !cfg.AllowsSelector(s.Selector) {
+			v.addHinted(func() string { return selectorHint(fieldName, s.Selector, cfg) },
+				ErrOperatorNotAllowed, s.Position, fieldName, form,
+				"selector %s is not allowed for field %q", form, fieldName)
+		}
+		if s.Inner != nil && len(cfg.Elements) > 0 {
+			v.validateElements(cfg, s.Inner)
+			return
+		}
+	case v.hasLists:
+		v.addHinted(func() string { return v.listFieldsHint() },
+			ErrOperatorNotAllowed, s.Position, fieldName, form, "%q is not a list field", fieldName)
+		// The condition inside names fields of an element that does not
+		// exist, so checking it would only add errors about the same mistake.
+		return
 	}
 	if s.Inner != nil {
 		v.validate(s.Inner)
 	}
+}
+
+// validateElements checks the condition inside a selector against the fields
+// of one element. Only those are in scope there: `forks@(name=x)` reads the
+// name of a fork, not of the record that has the forks.
+func (v *Validator) validateElements(list FieldConfig, inner ast.Expression) {
+	scope := New(list.Elements)
+	scope.allowedOps = v.allowedOps
+	scope.allowedFuncs = v.allowedFuncs
+	scope.missingTest = v.missingTest
+	scope.validate(inner)
+	for _, e := range scope.errors {
+		// Say which list the name was looked up in, once: an error from a
+		// list inside this one already names its own.
+		if e.Kind == ErrFieldNotFound && !strings.Contains(e.Message, ` on "`) {
+			e.Message += fmt.Sprintf(" on %q", list.Name)
+		}
+	}
+	v.errors = append(v.errors, scope.errors...)
+}
+
+// selectorHint says what to write in place of a selector the list refuses.
+func selectorHint(field, name string, cfg FieldConfig) string {
+	switch {
+	case name == ast.SelectorLast && cfg.AllowsSelector(ast.SelectorFirst):
+		return fmt.Sprintf("to test that the list has an element write %s@first", field)
+	case name == ast.SelectorAny && cfg.AllowsSelector(ast.SelectorExists):
+		return fmt.Sprintf("write it without the word: %s@(...)", field)
+	}
+	return fmt.Sprintf("%s allows: %s", field, strings.Join(cfg.SelectorForms(), ", "))
+}
+
+// listFieldsHint names the fields a selector can be applied to.
+func (v *Validator) listFieldsHint() string {
+	var lists []string
+	for name, cfg := range v.fields {
+		if cfg.Type == TypeList {
+			lists = append(lists, name)
+		}
+	}
+	if len(lists) == 0 {
+		return ""
+	}
+	sort.Strings(lists)
+	return "a selector applies to a list field: " + strings.Join(lists, ", ")
 }
 
 func (v *Validator) validatePresence(p *ast.PresenceExpr) {

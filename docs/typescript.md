@@ -42,7 +42,30 @@ const fields = [
 ];
 ```
 
-`Type` is one of `text`, `integer`, `decimal`, `boolean`, `date`, `datetime` or `duration`. A field gets the usual operators for its type unless you list them in `AllowedOps`.
+`Type` is one of `text`, `integer`, `decimal`, `boolean`, `date`, `datetime`, `duration` or `list`. A field gets the usual operators for its type unless you list them in `AllowedOps`.
+
+A `list` field declares the fields of one element in `Elements`, and the validator then checks a selector and the condition inside it:
+
+```ts
+const fields = [
+  { Name: "name", Type: "text" },
+  {
+    Name: "orders",
+    Type: "list",
+    Elements: [
+      { Name: "status", Type: "text" },
+      { Name: "price", Type: "decimal" },
+    ],
+  },
+];
+
+q.parseAndValidate("orders@(status=shipped)", fields); // ok
+q.parseAndValidate("orders@(bogus=1)", fields);        // unknown field "bogus" on "orders"
+q.parseAndValidate("name@first", fields);              // "name" is not a list field
+q.parseAndValidate("orders@last", fields);             // selector @last is not allowed
+```
+
+A list accepts `first`, `@(...)`, `all` and `none`. To change that, name the selectors in `Selectors`, with `""` for `@(...)`: `Selectors: ["first", "last", "", "any"]`. [List fields]({{ '/go/' | relative_url }}#list-fields) on the Go page has the rules.
 
 ## Parse, validate, match, evaluate
 

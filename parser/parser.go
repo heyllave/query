@@ -273,14 +273,14 @@ func (p *parser) parseChainExpr() ast.Expression {
 func (p *parser) parseSelector(base ast.Expression, pos token.Position) ast.Expression {
 	next := p.peek()
 	switch {
-	case next.Type == token.Ident && (next.Value == "first" || next.Value == "last"):
+	case next.Type == token.Ident && (next.Value == ast.SelectorFirst || next.Value == ast.SelectorLast):
 		p.advance()
 		return &ast.SelectorExpr{
 			Base:     base,
 			Selector: next.Value,
 			Position: pos,
 		}
-	case next.Type == token.Ident && (next.Value == "any" || next.Value == "all" || next.Value == "none") && p.peekAt(1).Type == token.LParen:
+	case next.Type == token.Ident && (next.Value == ast.SelectorAny || next.Value == ast.SelectorAll || next.Value == ast.SelectorNone) && p.peekAt(1).Type == token.LParen:
 		name := p.advance().Value
 		p.advance() // consume '('
 		if !p.enter(pos) {
