@@ -1,6 +1,6 @@
 {
   "name": "@trazo/query",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "Trazo query language for the browser/Node — parse, validate, match, and evaluate (WASM)",
   "type": "module",
   "main": "dist/index.js",

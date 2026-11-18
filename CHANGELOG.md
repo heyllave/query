@@ -6,6 +6,8 @@ semantic versioning.
 
 ## Unreleased
 
+## v0.3.0 - 2026-11-18
+
 ### Changed
 
 - Under `ExplicitAnd`, a `NOT` with nothing after it to negate is an error:
