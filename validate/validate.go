@@ -480,7 +480,7 @@ func coerceLiteral(ft FieldValueType, val *ast.Value) {
 				*val = ast.Value{Type: ast.ValueDate, Raw: val.Raw, Date: t, Quoted: val.Quoted, DayOnly: parser.IsDayLiteral(val.Str)}
 			}
 		}
-	case TypeInteger, TypeDecimal, TypeBoolean, TypeDuration:
+	case TypeInteger, TypeDecimal, TypeBoolean, TypeDuration, TypeList:
 		// No coercion: a text literal on these fields is a genuine mismatch.
 	}
 }

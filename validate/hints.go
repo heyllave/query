@@ -229,6 +229,8 @@ func (v *Validator) typeHint(cfg FieldConfig, val *ast.Value) string {
 		return "a duration is a number and one unit: 30m, 4h, 7d, 2w"
 	case TypeText:
 		return "put the text in quotes"
+	case TypeList:
+		return fmt.Sprintf("a list is asked about with a selector: %s@first", cfg.Name)
 	}
 	return ""
 }

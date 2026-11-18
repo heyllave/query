@@ -1,6 +1,7 @@
 package validate
 
 import (
+	"errors"
 	"strings"
 	"testing"
 
@@ -81,8 +82,8 @@ func TestValidate_ListFieldRefusals(t *testing.T) {
 		err := validateList(t, tt.q)
 
 		// Assert
-		list, ok := err.(ErrorList)
-		if !ok || len(list) != 1 {
+		var list ErrorList
+		if !errors.As(err, &list) || len(list) != 1 {
 			t.Errorf("%q: got %v, want one error", tt.q, err)
 			continue
 		}
