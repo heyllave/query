@@ -487,6 +487,53 @@ func (c context) fixed(start, end int, repl string) string {
 	return ""
 }
 
+const hintQuoteText = "to search for the text, put it in quotes: "
+
+// termBounds is the run of characters around the error that a writer typed as
+// one word: it ends at a space or a parenthesis on either side.
+func (c context) termBounds() (start, end int) {
+	stop := func(r rune) bool { return unicode.IsSpace(r) || r == '(' || r == ')' }
+	start = strings.LastIndexFunc(c.input[:c.off], stop) + 1
+	end = len(c.input)
+	if i := strings.IndexFunc(c.rest, stop); i >= 0 {
+		end = c.off + i
+	}
+	return start, end
+}
+
+func (c context) term() string {
+	start, end := c.termBounds()
+	return c.input[start:end]
+}
+
+// quotedTerm is the word around the error in quotes, when the word stands
+// where a bare search term would (812, v1.2, checkout*, foo@bar.com) and
+// quoting it makes the query valid. A word that holds an operator or a quote
+// was meant as something else, and gets "".
+func (c context) quotedTerm() string {
+	start, end := c.termBounds()
+	word := c.input[start:end]
+	if word == "" || strings.ContainsAny(word, "=<>!:\"\\[],") {
+		return ""
+	}
+	quoted := `"` + word + `"`
+	if c.fixed(start, end, quoted) == "" {
+		return ""
+	}
+	return quoted
+}
+
+// isPattern reports whether word is text with a star at one end or both, the
+// shape of a wildcard value (check*, *check, *check*), and not arithmetic
+// (total*2, a lone *).
+func isPattern(word string) bool {
+	text := strings.Trim(word, "*")
+	if text == "" || text == word || strings.ContainsAny(text, "*+/%") {
+		return false
+	}
+	return strings.HasPrefix(word, "*") || strings.HasSuffix(word, "*")
+}
+
 // connective is the advice for & and |: the run of that character, and the
 // space around it, becomes the word.
 func (c context) connective(word, example string) string {
@@ -534,6 +581,11 @@ func (c context) unexpectedChar(value bool) string {
 		}
 		if value {
 			return "an operator needs a value on each side: [base]*1.1"
+		}
+		if c.ch == '*' && isPattern(c.term()) {
+			if quoted := c.quotedTerm(); quoted != "" {
+				return "a * pattern goes after a field and an operator: name=" + c.term() + "; " + hintQuoteText + quoted
+			}
 		}
 		return c.arithmeticLeft()
 	}
@@ -690,6 +742,9 @@ func endsWithDigit(s string) bool {
 func (c context) expectedField() string {
 	if strings.HasSuffix(c.before, ".") {
 		if c.ch >= '0' && c.ch <= '9' {
+			if quoted := c.quotedTerm(); quoted != "" {
+				return "a part of a name cannot start with a digit; " + hintQuoteText + quoted
+			}
 			return "list elements are reached with a selector, not an index: tags@first or tags@(name=x)"
 		}
 		return "a dotted name needs a part after the dot: labels.team"
@@ -720,6 +775,11 @@ func (c context) expectedField() string {
 	}
 	if flipped := c.flipLiteralFirst(); flipped != "" {
 		return "the field goes on the left: " + flipped
+	}
+	if c.ch >= '0' && c.ch <= '9' && !strings.ContainsAny(c.term(), "*/%+") {
+		if quoted := c.quotedTerm(); quoted != "" {
+			return "a number or a date alone is not a condition; " + hintQuoteText + quoted
+		}
 	}
 	if (c.ch >= '0' && c.ch <= '9') || c.ch == '"' {
 		return "a comparison starts with a field, then the operator, then the value: total>3"
@@ -881,6 +941,9 @@ func (c context) expectedSelector() string {
 	}
 	if near := nearest.Match(word, selectors); near != "" {
 		return fmt.Sprintf("did you mean @%s?", near)
+	}
+	if quoted := c.quotedTerm(); quoted != "" && strings.Contains(c.rest, ".") {
+		return "@ asks something of a list: tags@first; " + hintQuoteText + quoted
 	}
 	return "a selector is one of first, last, any(...), all(...) or none(...)"
 }

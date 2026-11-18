@@ -479,3 +479,68 @@ func TestParseWith_SQLWordIsReportedOnce(t *testing.T) {
 		})
 	}
 }
+
+// A NOT with nothing to negate is a dangling connective under ExplicitAnd,
+// and the term "not" under the default grammar.
+func TestParseWith_DanglingNotIsRefusedUnderExplicitAnd(t *testing.T) {
+	strict := parser.Config{ExplicitAnd: true}
+	for _, q := range []string{"a=1 AND NOT", "NOT", "(NOT)", "NOT OR b=2", "a=1 AND NOT AND b=2", "a=1 OR NOT"} {
+		// Act
+		_, err := parser.ParseWith(q, strict)
+
+		// Assert
+		errs := parser.Errors(err)
+		if len(errs) != 1 || errs[0].Code != parser.CodeExpectedField {
+			t.Errorf("%q: got %v, want one expectedField error", q, err)
+		}
+		if _, err := parser.ParseWith(q, parser.Config{}); err != nil {
+			t.Errorf("%q: the default grammar refused it: %v", q, err)
+		}
+	}
+}
+
+// NOT stays a name wherever something names it as one.
+func TestParseWith_NotAsAFieldNameSurvivesExplicitAnd(t *testing.T) {
+	strict := parser.Config{ExplicitAnd: true}
+	for _, q := range []string{"not=1", "NOT=1", "not.x=1", "not@first", "not IN (a, b)", "labels.not=x", `"not"`, "a=1 AND NOT b=2", "NOT NOT a=1"} {
+		// Act
+		got, err := parser.ParseWith(q, strict)
+
+		// Assert
+		if err != nil {
+			t.Errorf("%q: %v", q, err)
+			continue
+		}
+		want, err := parser.ParseWith(q, parser.Config{})
+		if err != nil || ast.String(got) != ast.String(want) {
+			t.Errorf("%q: strict parsed to %s, default to %s (%v)", q, ast.String(got), ast.String(want), err)
+		}
+	}
+}
+
+// A word that cannot stand alone as a term is shown in quotes.
+func TestParseWith_BareWordHintOffersQuotes(t *testing.T) {
+	tests := []struct{ q, hint string }{
+		{"812", `a number or a date alone is not a condition; to search for the text, put it in quotes: "812"`},
+		{"a=1 AND 2026-11-16", `a number or a date alone is not a condition; to search for the text, put it in quotes: "2026-11-16"`},
+		{"v1.2", `a part of a name cannot start with a digit; to search for the text, put it in quotes: "v1.2"`},
+		{"foo@bar.com", `@ asks something of a list: tags@first; to search for the text, put it in quotes: "foo@bar.com"`},
+		{"checkout*", `a * pattern goes after a field and an operator: name=checkout*; to search for the text, put it in quotes: "checkout*"`},
+		{"(*checkout) AND b=1", `a * pattern goes after a field and an operator: name=*checkout; to search for the text, put it in quotes: "*checkout"`},
+		// Not a bare word: the existing advice stands.
+		{"tags.0=x", "list elements are reached with a selector, not an index: tags@first or tags@(name=x)"},
+		{"tags@frist", "did you mean @first?"},
+		{"3<total", "the field goes on the left: total>3"},
+		{"total*2>3", "arithmetic goes on the right of the operator or inside a function: float([total]*2)>3"},
+	}
+	for _, tt := range tests {
+		// Act
+		_, err := parser.ParseWith(tt.q, parser.Config{}.Strict())
+
+		// Assert
+		errs := parser.Errors(err)
+		if len(errs) == 0 || errs[0].Hint != tt.hint {
+			t.Errorf("%q: got %v, want hint %q", tt.q, err, tt.hint)
+		}
+	}
+}
