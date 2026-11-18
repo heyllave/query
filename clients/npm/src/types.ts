@@ -138,7 +138,8 @@ export type FieldValueType =
   | "boolean"
   | "date"
   | "datetime"
-  | "duration";
+  | "duration"
+  | "list";
 
 /** Operator identifiers for field config. */
 export type OpId =
@@ -160,7 +161,11 @@ export type FieldTypeName =
   | "boolean"
   | "date"
   | "datetime"
-  | "duration";
+  | "duration"
+  | "list";
+
+/** A selector by name; the empty string is the anonymous form `@(...)`. */
+export type SelectorName = "first" | "last" | "" | "any" | "all" | "none";
 
 /** Field configuration for validation. */
 export interface FieldConfig {
@@ -171,6 +176,10 @@ export interface FieldConfig {
   AllowedOps?: string[];
   Searchable?: boolean;
   Nested?: boolean;
+  /** For a list: the fields of one element, which a selector's condition may name. */
+  Elements?: FieldConfig[];
+  /** For a list: the selectors allowed. Omit for first, `@(...)`, all and none. */
+  Selectors?: SelectorName[];
 }
 
 /**

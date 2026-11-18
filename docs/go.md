@@ -32,6 +32,48 @@ fields := []validate.FieldConfig{
 
 `validate.DefaultOps(t)` returns the usual operators for a type. A field marked `Nested` accepts any key under it (`labels.team`, `labels.example.com/owner`).
 
+### List fields
+
+A field of `validate.TypeList` is asked about with a selector. `Elements` declares the fields of one element, which is what the condition inside a selector may name.
+
+```go
+fields := []validate.FieldConfig{
+    {Name: "name", Type: validate.TypeText, AllowedOps: validate.TextOps},
+    {Name: "orders", Type: validate.TypeList, AllowedOps: validate.ListOps, Elements: []validate.FieldConfig{
+        {Name: "status", Type: validate.TypeText, AllowedOps: validate.TextOps},
+        {Name: "price", Type: validate.TypeDecimal, AllowedOps: validate.NumericOps},
+        {Name: "items", Type: validate.TypeList, AllowedOps: validate.ListOps, Elements: []validate.FieldConfig{
+            {Name: "sku", Type: validate.TypeText, AllowedOps: validate.TextOps},
+        }},
+    }},
+}
+```
+
+With the list declared, the validator checks what it could not check before:
+
+| Query | Result |
+|---|---|
+| `orders@(status=shipped AND price>10)` | valid |
+| `orders@(items@(sku=A1))` | valid: an element field may be a list |
+| `orders@(bogus=1)` | `unknown field "bogus" on "orders"` |
+| `orders@(name=x)` | `unknown field "name" on "orders"`: only an element's fields are in scope |
+| `orders@(price=high)` | a type error, against the element's type |
+| `name@first` | `"name" is not a list field` |
+| `orders@last` | `selector @last is not allowed for field "orders"` |
+
+A list accepts `@first`, `@(...)`, `@all(...)` and `@none(...)` unless it says otherwise, which is one spelling for each question: `@last` asks what `@first` asks, and `@any(...)` is `@(...)`. To allow them, list the selectors by name:
+
+```go
+{Name: "tags", Type: validate.TypeList, Selectors: []string{ast.SelectorFirst, ast.SelectorLast, ast.SelectorAny}}
+```
+
+`FieldConfig.SelectorForms()` returns them as written (`@first`, `@(...)`, `@all(...)`), for a host that describes its schema to a client.
+
+Two rules to know:
+
+- **Declaring one list declares them all.** Once a schema has a list field, a selector on any other field is an error. A schema with no list field keeps the older rule: the base only has to exist, and the condition is checked against the record's fields.
+- **A list without `Elements`** is a list of plain values or of something you chose not to describe. Its condition is checked against the record's fields.
+
 ## Parse and validate
 
 ```go

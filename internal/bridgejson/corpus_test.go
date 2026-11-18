@@ -6,6 +6,8 @@ import (
 	"os"
 	"strings"
 	"testing"
+
+	"github.com/heyllave/query/validate"
 )
 
 // corpusCase is one entry of conformance/corpus.json, the file every client
@@ -216,6 +218,14 @@ func TestParseFields_Shapes(t *testing.T) {
 		{"no name", `[{"type":"text"}]`, "has no name"},
 		{"repeated name", `[{"name":"a"},{"name":"a"}]`, "declared twice"},
 		{"unknown operator", `[{"name":"a","allowedOps":["=="]}]`, "unknown operator"},
+		{"a list with elements", `[{"name":"forks","type":"list","elements":[{"name":"name","type":"text"},{"name":"env","type":"list","elements":[{"name":"key"}]}]}]`, ""},
+		{"a list with its own selectors", `[{"name":"tags","type":"list","selectors":["first","last",""]}]`, ""},
+		{"unknown selector", `[{"name":"tags","type":"list","selectors":["every"]}]`, `lists unknown selector "every"`},
+		{"elements on a field that is not a list", `[{"name":"a","type":"text","elements":[{"name":"b"}]}]`, "is not a list"},
+		{"selectors on a field that is not a list", `[{"name":"a","selectors":["first"]}]`, "is not a list"},
+		{"a nameless element", `[{"name":"forks","type":"list","elements":[{"type":"text"}]}]`, `field 0 of list "forks" has no name`},
+		{"a repeated element", `[{"name":"forks","type":"list","elements":[{"name":"a"},{"name":"a"}]}]`, `of list "forks" is declared twice`},
+		{"an unknown operator on an element", `[{"name":"forks","type":"list","elements":[{"name":"a","allowedOps":["=="]}]}]`, "unknown operator"},
 		{"not a list", `{"name":"a"}`, "invalid fields config"},
 		{"not JSON", `[`, "invalid fields config"},
 	}
@@ -355,5 +365,26 @@ func TestParseWith_StrictOptions(t *testing.T) {
 				t.Errorf("first code = %q, want %q (envelope %v)", got, tc.want, tc.env)
 			}
 		})
+	}
+}
+
+// An element gets the operators that suit its type, as a top-level field does.
+func TestParseFields_ElementDefaults(t *testing.T) {
+	// Act
+	fields, err := ParseFields(`[{"name":"forks","type":"list","elements":[{"name":"replicas","type":"integer"}]}]`)
+
+	// Assert
+	if err != nil {
+		t.Fatal(err)
+	}
+	list := fields[0]
+	if !list.AllowsOp(validate.OpPresence) || list.AllowsOp(validate.OpEq) {
+		t.Errorf("list operators: %v", list.AllowedOps)
+	}
+	if elem := list.Elements[0]; !elem.AllowsOp(validate.OpGt) {
+		t.Errorf("element operators: %v", elem.AllowedOps)
+	}
+	if !list.AllowsSelector("first") || list.AllowsSelector("last") {
+		t.Errorf("default selectors are not first, @(...), all, none")
 	}
 }

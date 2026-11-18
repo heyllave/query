@@ -486,14 +486,28 @@ func ParseFields(fieldsJSON string) ([]validate.FieldConfig, error) {
 	if err := json.Unmarshal([]byte(fieldsJSON), &fields); err != nil {
 		return nil, fmt.Errorf("invalid fields config: %w", err)
 	}
+	if err := checkFields(fields, ""); err != nil {
+		return nil, err
+	}
+	return fields, nil
+}
+
+// checkFields fills in defaults and refuses a config that could only
+// misbehave silently. in names the list whose elements these are, "" at the
+// top, so an error inside a list says where it is.
+func checkFields(fields []validate.FieldConfig, in string) error {
+	where := ""
+	if in != "" {
+		where = fmt.Sprintf(" of list %q", in)
+	}
 	seen := make(map[string]bool, len(fields))
 	for i := range fields {
 		f := &fields[i]
 		if f.Name == "" {
-			return nil, fmt.Errorf("invalid fields config: field %d has no name", i)
+			return fmt.Errorf("invalid fields config: field %d%s has no name", i, where)
 		}
 		if seen[f.Name] {
-			return nil, fmt.Errorf("invalid fields config: field %q is declared twice", f.Name)
+			return fmt.Errorf("invalid fields config: field %q%s is declared twice", f.Name, where)
 		}
 		seen[f.Name] = true
 		if f.AllowedOps == nil {
@@ -501,11 +515,34 @@ func ParseFields(fieldsJSON string) ([]validate.FieldConfig, error) {
 		}
 		for _, op := range f.AllowedOps {
 			if !knownOp(op) {
-				return nil, fmt.Errorf("invalid fields config: field %q lists unknown operator %q", f.Name, op)
+				return fmt.Errorf("invalid fields config: field %q%s lists unknown operator %q", f.Name, where, op)
 			}
 		}
+		if f.Type != validate.TypeList {
+			if len(f.Elements) > 0 || f.Selectors != nil {
+				return fmt.Errorf("invalid fields config: field %q%s has elements or selectors but is not a list", f.Name, where)
+			}
+			continue
+		}
+		for _, sel := range f.Selectors {
+			if !knownSelector(sel) {
+				return fmt.Errorf("invalid fields config: field %q%s lists unknown selector %q", f.Name, where, sel)
+			}
+		}
+		if err := checkFields(f.Elements, f.Name); err != nil {
+			return err
+		}
 	}
-	return fields, nil
+	return nil
+}
+
+func knownSelector(name string) bool {
+	for _, known := range ast.Selectors() {
+		if known == name {
+			return true
+		}
+	}
+	return false
 }
 
 func knownOp(op validate.Op) bool {

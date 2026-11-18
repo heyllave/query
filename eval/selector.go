@@ -23,7 +23,7 @@ func compileSelector(e *ast.SelectorExpr, funcs FuncRegistry) matcher {
 	}
 
 	// @first / @last: the slice exists and has at least one element.
-	if e.Selector == "first" || e.Selector == "last" {
+	if e.Selector == ast.SelectorFirst || e.Selector == ast.SelectorLast {
 		return func(get func(string) (any, bool)) bool {
 			raw, ok := get(field)
 			if !ok {
@@ -52,7 +52,7 @@ func compileSelector(e *ast.SelectorExpr, funcs FuncRegistry) matcher {
 	return func(get func(string) (any, bool)) bool {
 		raw, ok := get(field)
 		if !ok {
-			return mode == "none" // missing field ≡ empty list for `none`
+			return mode == ast.SelectorNone // missing field ≡ empty list for `none`
 		}
 		elems, ok := toSlice(raw)
 		if !ok {

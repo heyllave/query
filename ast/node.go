@@ -77,6 +77,34 @@ func (e *PresenceExpr) Pos() token.Position { return e.Position }
 func (e *PresenceExpr) node()               { _ = e }
 func (e *PresenceExpr) expr()               { _ = e }
 
+// The selectors, as [SelectorExpr.Selector] holds them. The anonymous form
+// `@(...)` has no name, so it is the empty string.
+const (
+	SelectorFirst  = "first" // list@first: the list has an element
+	SelectorLast   = "last"  // list@last: the same test as @first
+	SelectorExists = ""      // list@(...): at least one element matches
+	SelectorAny    = "any"   // list@any(...): another spelling of @(...)
+	SelectorAll    = "all"   // list@all(...): every element matches
+	SelectorNone   = "none"  // list@none(...): no element matches
+)
+
+// Selectors lists every selector the grammar accepts.
+func Selectors() []string {
+	return []string{SelectorFirst, SelectorLast, SelectorExists, SelectorAny, SelectorAll, SelectorNone}
+}
+
+// SelectorForm is how a selector is written after a list field: "@first",
+// "@(...)", "@all(...)". It is for messages and for describing a schema to a
+// client, so the written form lives in one place.
+func SelectorForm(name string) string {
+	switch name {
+	case SelectorFirst, SelectorLast:
+		return "@" + name
+	default:
+		return "@" + name + "(...)"
+	}
+}
+
 // SelectorExpr represents a selector expression applied to a list-valued field:
 //
 //	expr @first              — list exists and has ≥ 1 element

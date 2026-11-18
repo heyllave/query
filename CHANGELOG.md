@@ -6,6 +6,30 @@ semantic versioning.
 
 ## Unreleased
 
+### Added
+
+- List fields in a schema. A field of the new `validate.TypeList` declares
+  the fields of one element in `FieldConfig.Elements`, and the validator
+  checks a selector against it: the condition inside `orders@(...)` may name
+  only an element's fields, with their types and operators, and an element
+  field may itself be a list. `FieldConfig.Selectors` names the selectors a
+  list allows; the default, `validate.DefaultSelectors`, is `@first`,
+  `@(...)`, `@all(...)` and `@none(...)`, so `@last` and `@any(...)` are
+  refused on a declared list unless it lists them. The TypeScript client and
+  the C library take the same config as `"type": "list"`, `"elements"` and
+  `"selectors"`.
+- `ast.SelectorFirst`, `SelectorLast`, `SelectorExists`, `SelectorAny`,
+  `SelectorAll` and `SelectorNone` name the selectors, `ast.Selectors()`
+  lists them, and `ast.SelectorForm` gives the written form (`@all(...)`).
+  `FieldConfig.AllowsSelector` and `FieldConfig.SelectorForms` answer for
+  one field, for a host that describes its schema to a client.
+
+### Changed
+
+- Once a schema declares a list field, a selector on a field that is not a
+  list is a validation error (`"name" is not a list field`). A schema with
+  no list field validates as before.
+
 ## v0.3.0 - 2026-11-18
 
 ### Changed
