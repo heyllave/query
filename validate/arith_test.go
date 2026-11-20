@@ -31,6 +31,10 @@ func validateArith(t *testing.T, q string) error {
 
 func TestValidate_ArithmeticOverLiteralsThatFitsTheField(t *testing.T) {
 	for _, q := range []string{
+		// A date written short is a date on a date field, and text on a
+		// text field: the declared type decides what the lexer could not.
+		"createdAt=2026-11-5", "day>2026-1-5", "createdAt:2026-11-1..2026-11-30", "day IN (2026-1-1, 2026-12-31)",
+		`day="2026-11-5"`, "name=2026-11", "name=2026-11-5",
 		// numbers
 		"n=10-3", "n>2*3+1", "price<10/4", "n=10%3", "n>(1+2)*3", "n:1+1..10-1", "n IN (1+1, 2*2)",
 		// a date and a duration give a date
@@ -42,6 +46,8 @@ func TestValidate_ArithmeticOverLiteralsThatFitsTheField(t *testing.T) {
 		// What depends on a function or a field is left to the evaluator.
 		"createdAt>now()-7d", "n>len(name)+1", "ttl>now()-[createdAt]", "n=[price]*2", "createdAt>daysAgo(7)+1d",
 		"ttl>[n]*1h", "n>abs(-3)+now()",
+		// Close to a short date, but not one: a number field takes them.
+		"n=2026", "n=999-5", "n=12345-6", "n=2026-123", "n=2026-11*2", "n=2026+11", "n=3-2026",
 	} {
 		if err := validateArith(t, q); err != nil {
 			t.Errorf("%s: unexpected error: %v", q, err)
@@ -53,11 +59,13 @@ func TestValidate_ArithmeticOverLiteralsThatDoesNotFit(t *testing.T) {
 	cases := []struct {
 		query, message, hint string
 	}{
-		// A date written short is three numbers subtracted.
-		{"createdAt=2026-11-5", `value is arithmetic (2026-11-5), which gives a number and does not fit field "createdAt" (type datetime)`,
-			"a date is written in full, YYYY-MM-DD: 2026-01-05 rather than 2026-1-5"},
-		{"day>2026-1", `gives a number and does not fit field "day" (type date)`, "written in full"},
-		{"createdAt:2026-01-01..2026-2-1", `range end value is arithmetic (2026-2-1), which gives a number`, "written in full"},
+		// A year and a month alone are not a date: there is no day.
+		{"day>2026-1", `value is arithmetic (2026-1), which gives a number and does not fit field "day" (type date)`,
+			"a date needs a year, a month and a day: 2026-1-1"},
+		{"createdAt=2026-11", `gives a number and does not fit field "createdAt"`, "2026-11-1"},
+		// A date written short that cannot exist.
+		{"day=2026-2-30", "value 2026-2-30 is not a date that exists", "the day exists in that month"},
+		{"createdAt:2026-1-1..2026-13-1", "range end value 2026-13-1 is not a date that exists", "the month is 1 to 12"},
 		{"createdAt>10*3", `gives a number and does not fit field "createdAt"`, "for a relative date use now()-7d"},
 		{"createdAt>7d-1h", `gives a duration and does not fit field "createdAt"`, "for a relative date"},
 		// Numbers where a duration belongs, and the other way round.
@@ -76,6 +84,15 @@ func TestValidate_ArithmeticOverLiteralsThatDoesNotFit(t *testing.T) {
 		{"n>(10-7d)*2", "that has no result", "numbers combine"},
 		// Text and boolean fields refuse any arithmetic, as before.
 		{"name=10-3", `cannot produce a text for field "name"; quote it to compare as text`, ""},
+		// A date written short gives a number, but a number field still
+		// refuses it: the writer meant a date, and 2026-11 would otherwise
+		// compare with 2015.
+		{"n=2026-11", `value 2026-11 has the shape of a date that is not written in full, which field "n" (type integer) does not take`,
+			"if you meant the number, write 2015"},
+		{"price>2026-1-5", `value 2026-1-5 has the shape of a date`, "write 2020"},
+		{"n:2026-11..2030", `value 2026-11 has the shape of a date`, "write 2015"},
+		{"n:2020..2026-11-5", `range end value 2026-11-5 has the shape of a date`, "write 2010"},
+		{"n IN (5, 2026-1-1)", `value 2026-1-1 has the shape of a date`, "write 2024"},
 	}
 	for _, tc := range cases {
 		err := validateArith(t, tc.query)

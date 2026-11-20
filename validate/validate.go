@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/heyllave/query/ast"
 	"github.com/heyllave/query/internal/hintwords"
@@ -409,6 +410,9 @@ func mirrorOp(op Op) Op {
 // coerceLiteral). Function- and field-valued operands are resolved at match
 // time and skipped; arithmetic is checked for fields it can never produce.
 func (v *Validator) checkValue(cfg FieldConfig, val *ast.Value, pos token.Position, fieldName, what string) {
+	if !v.coerceShortDate(cfg, val, pos, fieldName, what) {
+		return
+	}
 	coerceLiteral(cfg.Type, val)
 	if isDynamicValue(*val) {
 		if val.Type != ast.ValueArith {
@@ -533,7 +537,70 @@ func (v *Validator) checkArithmetic(cfg FieldConfig, val *ast.Value, pos token.P
 		v.addHinted(func() string { return arithmeticResultHint(cfg, val) }, ErrTypeMismatch, pos, fieldName, "",
 			"%s is arithmetic (%s), which gives a %s and does not fit field %q (type %s)",
 			what, val.Raw, k, fieldName, cfg.Type)
+	case (cfg.Type == TypeInteger || cfg.Type == TypeDecimal) && isShortDate(val.Raw):
+		// The result is a number and the field takes numbers, but the
+		// writer almost surely meant a date: n=2026-11 would otherwise
+		// compare with 2015 and silently match the wrong records.
+		v.addHinted(func() string { return shortDateOnNumberHint(val.Raw) }, ErrTypeMismatch, pos, fieldName, "",
+			"%s %s has the shape of a date that is not written in full, which field %q (type %s) does not take",
+			what, val.Raw, fieldName, cfg.Type)
 	}
+}
+
+// shortDateLayout reads a date whose month and day may have one digit.
+const shortDateLayout = "2006-1-2"
+
+// coerceShortDate gives a date written short (2026-11-5) the meaning the
+// field's declared type asks for. The lexer reads it as a subtraction,
+// because it cannot see the field; the validator can. A date field takes it
+// as the day it names, and a text field as its characters. It reports false
+// when it has already added an error and the value needs no more checks.
+func (v *Validator) coerceShortDate(cfg FieldConfig, val *ast.Value, pos token.Position, fieldName, what string) bool {
+	if val.Type != ast.ValueArith || !isShortDate(val.Raw) {
+		return true
+	}
+	switch cfg.Type { //nolint:exhaustive // number fields refuse it in checkArithmetic; the rest refuse arithmetic
+	case TypeText:
+		*val = ast.Value{Type: ast.ValueString, Raw: val.Raw, Str: val.Raw}
+	case TypeDate, TypeDatetime:
+		if strings.Count(val.Raw, "-") != 2 {
+			return true // no day: refused by checkArithmetic with a hint
+		}
+		t, err := time.Parse(shortDateLayout, val.Raw)
+		if err != nil {
+			v.addHinted(func() string { return "the month is 1 to 12 and the day exists in that month" },
+				ErrTypeMismatch, pos, fieldName, "", "%s %s is not a date that exists", what, val.Raw)
+			return false
+		}
+		*val = ast.Value{Type: ast.ValueDate, Raw: val.Raw, Date: t, DayOnly: true}
+	}
+	return true
+}
+
+// isShortDate reports whether raw is a date written without all its digits:
+// four digits, then one or two hyphen-separated groups of one or two digits
+// (2026-11, 2026-1-5, 2026-11-5). A complete YYYY-MM-DD never reaches here,
+// because the lexer reads it as a date.
+func isShortDate(raw string) bool {
+	parts := strings.Split(raw, "-")
+	if len(parts) < 2 || len(parts) > 3 || len(parts[0]) != 4 || !isDigits(parts[0]) {
+		return false
+	}
+	for _, p := range parts[1:] {
+		if len(p) < 1 || len(p) > 2 || !isDigits(p) {
+			return false
+		}
+	}
+	return true
+}
+
+func isDigits(s string) bool {
+	for i := 0; i < len(s); i++ {
+		if s[i] < '0' || s[i] > '9' {
+			return false
+		}
+	}
+	return s != ""
 }
 
 // opGloballyAllowed reports whether op passes the WithAllowedOps restriction
@@ -590,6 +657,10 @@ func coerceLiteral(ft FieldValueType, val *ast.Value) {
 		if val.Type == ast.ValueString && !val.Wildcard {
 			if t, err := parser.ParseDateLiteral(val.Str); err == nil {
 				*val = ast.Value{Type: ast.ValueDate, Raw: val.Raw, Date: t, Quoted: val.Quoted, DayOnly: parser.IsDayLiteral(val.Str)}
+			} else if strings.Count(val.Str, "-") == 2 && isShortDate(val.Str) {
+				if t, err := time.Parse(shortDateLayout, val.Str); err == nil {
+					*val = ast.Value{Type: ast.ValueDate, Raw: val.Raw, Date: t, Quoted: val.Quoted, DayOnly: true}
+				}
 			}
 		}
 	case TypeInteger, TypeDecimal, TypeBoolean, TypeDuration, TypeList:

@@ -15,11 +15,18 @@ semantic versioning.
   shorter is a subtraction, like every other run of digits and hyphens. To
   compare with those characters as text, quote them: `name="2026-11-5"`.
 - The validator works out what arithmetic over literals gives and refuses
-  it when it cannot fit the field: `createdAt=2026-11-5` (a number where a
-  date belongs), `ttl>10-3`, `n>7d-1h`. Arithmetic whose operands have no
+  it when it cannot fit the field: `createdAt>10*3` (a number where a date
+  belongs), `ttl>10-3`, `n>7d-1h`. Arithmetic whose operands have no
   meaning together, such as `10-7d`, is refused as well. Both used to
   validate and then match nothing. Arithmetic that reads a field or calls a
   function is left to the evaluator, as before.
+- A date written short takes its meaning from the field's declared type.
+  On a date field `createdAt=2026-11-5` is the day 2026-11-05, in a
+  comparison, a range or an `IN` list, and quoted as well. On a text field
+  `period=2026-11` is the text `2026-11`, as it was before this release.
+  On a number field it is refused: `n=2026-11` would otherwise compare with
+  2015, and the hint names that number in case it was meant. Date
+  arithmetic still takes the date in full (`2026-11-05-1d`).
 
 ### Changed
 

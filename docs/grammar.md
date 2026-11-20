@@ -128,6 +128,21 @@ takes all ten characters: `2026-11-16` is a date, while `2026-11-5` and
 `2026-1` are subtractions like `10-3`. A date that is written in full but
 cannot exist, such as `2026-13-45`, is an error.
 
+The field's declared type then decides what a date written short means.
+The lexer cannot see the field, so it reads `2026-11-5` as a subtraction;
+the validator can, and gives it the meaning the field asks for:
+
+| Field type | `2026-11-5` | `2026-11` |
+|---|---|---|
+| date, datetime | the day 2026-11-05 | refused: a date needs a day |
+| text | the text `2026-11-5` | the text `2026-11` |
+| integer, decimal | refused: write the number itself, `2010` | refused: `2015` |
+| duration, boolean | refused | refused |
+
+Only a value that is exactly a date written short is converted. Date
+arithmetic takes the date in full: `2026-11-05-1d`, not `2026-11-5-1d`. A
+date written short that cannot exist, such as `2026-2-30`, is refused.
+
 A value that has the shape of a number, a date, a duration or arithmetic and
 is meant as text goes in quotes: `name="10-3"`. A field declared as text
 refuses arithmetic rather than guess, and takes a lone number, date or
