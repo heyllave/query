@@ -70,8 +70,8 @@ func TestCorpus_ThroughBridgeEnvelopes(t *testing.T) {
 	if err := json.Unmarshal(data, &corpus); err != nil {
 		t.Fatal(err)
 	}
-	if len(corpus.Cases) < 155 {
-		t.Fatalf("corpus has %d cases, expected at least 155 (stale?)", len(corpus.Cases))
+	if len(corpus.Cases) < 173 {
+		t.Fatalf("corpus has %d cases, expected at least 173 (stale?)", len(corpus.Cases))
 	}
 
 	for _, tc := range corpus.Cases {

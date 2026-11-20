@@ -3,7 +3,9 @@ package validate
 import (
 	"fmt"
 	"sort"
+	"strconv"
 	"strings"
+	"time"
 
 	"github.com/heyllave/query/ast"
 	"github.com/heyllave/query/internal/hintwords"
@@ -233,6 +235,70 @@ func (v *Validator) typeHint(cfg FieldConfig, val *ast.Value) string {
 		return fmt.Sprintf("a list is asked about with a selector: %s@first", cfg.Name)
 	}
 	return ""
+}
+
+const arithmeticOperandsHint = "numbers combine with numbers; a date takes + or - a duration; a duration takes + or - a duration, or * or / a number"
+
+// undefinedHint is the advice for arithmetic that has no result: a zero
+// divisor when there is one, else which operands go together.
+func undefinedHint(val *ast.Value) string {
+	if hasZeroDivisor(val) {
+		return "nothing can be divided by zero"
+	}
+	return arithmeticOperandsHint
+}
+
+// shortDateHint is the advice for a date written short where nothing says
+// what it is: the date in full, the text in quotes, or the subtraction
+// spaced out.
+func shortDateHint(raw string) string {
+	full := "2026-01-05"
+	if t, err := time.Parse(shortDateLayout, raw); err == nil {
+		full = t.Format(time.DateOnly)
+	} else if t, err := time.Parse("2006-1", raw); err == nil {
+		full = t.Format(time.DateOnly)
+	}
+	return fmt.Sprintf("for the date write it in full, %s; for the text put it in quotes, %q; for the subtraction put spaces around the minus, %s",
+		full, raw, strings.ReplaceAll(raw, "-", " - "))
+}
+
+// arithmeticResultHint is the advice when arithmetic gives the wrong kind of
+// value for a field. The common case is not arithmetic at all in the
+// writer's mind: a date or a duration written in a shape the grammar reads
+// as a subtraction. k is what the arithmetic gives.
+func arithmeticResultHint(cfg FieldConfig, val *ast.Value, k kind) string {
+	switch cfg.Type { //nolint:exhaustive // only the types arithmetic can be compared with
+	case TypeDate, TypeDatetime:
+		if val.ShortDate {
+			// A year and a month: only a day is missing.
+			return "a date needs a year, a month and a day: " + val.Raw + "-1"
+		}
+		if k == kindDuration {
+			return "that is a length of time; for a date take a duration from a date: 2026-11-05-7d or now()-7d"
+		}
+		if strings.Trim(val.Raw, "0123456789-") == "" {
+			return "a date is a year, a month from 1 to 12 and a day: 2026-11-5 or 2026-11-05"
+		}
+		return "a date is YYYY-MM-DD; for a relative date use now()-7d or daysAgo(7)"
+	case TypeDuration:
+		return "a duration is a number and one unit: 30m, 4h, 7d, 2w"
+	case TypeInteger, TypeDecimal:
+		return "a number looks like 42, -3 or 1.5"
+	}
+	return ""
+}
+
+// shortDateOnNumberHint is the advice when a number field gets a value that
+// reads as an unfinished date (isShortDate). It names the number the
+// subtraction gives, which is how to write it if a number was meant.
+func shortDateOnNumberHint(raw string) string {
+	parts := strings.Split(raw, "-")
+	n, _ := strconv.Atoi(parts[0])
+	for _, p := range parts[1:] {
+		d, _ := strconv.Atoi(p)
+		n -= d
+	}
+	return fmt.Sprintf("a number looks like 42 or 1.5; if you meant the number, write %d", n)
 }
 
 func numberHint(raw string) string {

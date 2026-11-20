@@ -258,6 +258,11 @@ func TestCursorAt_BracketedFieldNames(t *testing.T) {
 		// A quote further on belongs to a later string, so the name ends
 		// at the cursor.
 		{query: `["labels.my| AND x="y"`, slot: SlotKey, field: "labels", prefix: "my", word: `["labels.my`, bracket: true},
+		// With its quote closed and a connective after it, the quote is the
+		// name's own.
+		{query: `["labels.my|" AND name="y"`, slot: SlotKey, field: "labels", prefix: "my", word: `["labels.my"`, bracket: true},
+		{query: `["labels.my| key" OR a=1`, slot: SlotKey, field: "labels", prefix: "my", word: `["labels.my key"`, bracket: true},
+		{query: `(["labels.my|")`, slot: SlotKey, field: "labels", prefix: "my", word: `["labels.my"`, bracket: true},
 		{query: `["labels.my| AND x="y`, slot: SlotKey, field: "labels", prefix: "my", word: `["labels.my`, bracket: true},
 	}
 	for _, tc := range cases {
@@ -311,7 +316,11 @@ func TestCursorAt_AnOperandOfArithmetic(t *testing.T) {
 		"total>10+|":           false, // one word so far, "10+": a sign with nothing after it is not arithmetic yet
 		"total>10 - 3|":        true,
 		"total>10 - 3|0":       true,
-		"total>10 - |":         false, // a sign with nothing after it does not lex as arithmetic yet
+		"total>10 - |":         true,
+		"total>10 -|":          true,
+		"total>10 *|":          true,
+		"created>now() - |":    true,
+		`name="a" + |`:         true,
 		"total>10*2+|":         true,
 		"total>(1+|":           true,
 		"created>now()-|":      true,
@@ -331,6 +340,70 @@ func TestCursorAt_AnOperandOfArithmetic(t *testing.T) {
 		}
 		if c.Slot != SlotValue || c.Arithmetic != want {
 			t.Errorf("%s: slot %s arithmetic %v, want a value with arithmetic %v", marked, c.Slot, c.Arithmetic, want)
+		}
+	}
+}
+
+// A date still being typed is one word, though short of its ten characters
+// it lexes as digits and minus signs.
+func TestCursorAt_ADateBeingTypedIsOneWord(t *testing.T) {
+	cases := []cursorCase{
+		{query: "day=2026-01-0|", slot: SlotValue, field: "day", op: token.Eq, prefix: "2026-01-0", word: "2026-01-0"},
+		{query: "day=2026-0|", slot: SlotValue, field: "day", op: token.Eq, prefix: "2026-0", word: "2026-0"},
+		{query: "day=2026-01-|", slot: SlotValue, field: "day", op: token.Eq, prefix: "2026-01-", word: "2026-01-"},
+		{query: "day=2026-|", slot: SlotValue, field: "day", op: token.Eq, prefix: "2026-", word: "2026-"},
+		{query: "day=2026-01-01|", slot: SlotValue, field: "day", op: token.Eq, prefix: "2026-01-01", word: "2026-01-01"},
+		{query: "day>=2026-1-5|", slot: SlotValue, field: "day", op: token.Gte, prefix: "2026-1-5", word: "2026-1-5"},
+		{query: "day:2026-01-01..2026-02-|", slot: SlotValue, field: "day", op: token.Colon, prefix: "2026-02-", word: "2026-02-"},
+		{query: "day IN (2026-01-01, 2026-0|", slot: SlotValue, field: "day", op: token.In, prefix: "2026-0", word: "2026-0"},
+		{query: "a=1 AND day=2026-01-0|", slot: SlotValue, field: "day", op: token.Eq, prefix: "2026-01-0", word: "2026-01-0"},
+		// The rest of the date after the cursor goes with it.
+		{query: "day=2026-0|1-15 AND a=1", slot: SlotValue, field: "day", op: token.Eq, prefix: "2026-0", word: "2026-01-15"},
+		{query: "day=2026-01-0|)", slot: SlotValue, field: "day", op: token.Eq, prefix: "2026-01-0", word: "2026-01-0"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.query, func(t *testing.T) {
+			checkCursor(t, tc, Config{})
+			checkCursor(t, tc, Config{}.Strict())
+		})
+	}
+	// Other arithmetic is still read operand by operand.
+	query, offset := split(t, "n>10-3|")
+	if c := CursorAt(query, offset, Config{}); c.Prefix != "3" || !c.Arithmetic {
+		t.Errorf("n>10-3: prefix %q arithmetic %v, want the operand 3", c.Prefix, c.Arithmetic)
+	}
+	query, offset = split(t, "n>1+2026-0|")
+	if c := CursorAt(query, offset, Config{}); c.Prefix != "0" {
+		t.Errorf("n>1+2026-0: prefix %q, want the operand 0", c.Prefix)
+	}
+}
+
+// The word under the cursor ends where its token does, so what follows it
+// is left as it was.
+func TestCursorAt_AValueWordStopsAtWhatFollowsIt(t *testing.T) {
+	for marked, want := range map[string]string{
+		"count>4|*2 AND ready=true":  "4",
+		"count>4|0*2":                "40",
+		"day>2026-01-01|-7d":         "2026-01-01",
+		"day>2026-01-0|1-7d":         "2026-01-01",
+		"total:100|..500":            "100",
+		"total:10|0..500":            "100",
+		"total:100..50|0 AND a=1":    "500",
+		"n>10+5|*2":                  "5",
+		"n>now()-7|d+1":              "7d",
+		"name=pr-1|0-3 AND a=1":      "pr-10-3",
+		"name=a|/b":                  "a/b",
+		"name=ch|eck*":               "check*",
+		"ip=10.0|.0.1/24":            "10.0.0.1/24",
+		"name IN (a|b, cd)":          "ab",
+		"labels.exa|mple.com/team=x": "example.com/team",
+		"labels.a|.b.c AND d=1":      "a.b.c",
+		"a=1 AND labels.te|am.x/y=z": "team.x/y",
+	} {
+		query, offset := split(t, marked)
+		c := CursorAt(query, offset, Config{})
+		if got := query[c.Word.Offset : c.Word.Offset+c.Word.Length]; got != want {
+			t.Errorf("%s: word = %q, want %q", marked, got, want)
 		}
 	}
 }

@@ -17,7 +17,7 @@ import threading
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 CORPUS = os.path.join(HERE, "..", "..", "conformance", "corpus.json")
-MIN_CASES = 155
+MIN_CASES = 173
 
 CALLS = ["QueryParse", "QueryValidate", "QueryStringify",
          "QueryParseAndValidate", "QueryMatch", "QueryEval",
@@ -145,8 +145,14 @@ def check_completion_input(lib):
     assert lib.call("QueryOffer", completion={"slot": "value"}, candidates="x").get("error") == "candidates must be an array of strings"
     assert lib.call("QueryOffer", completion={"slot": "value"}).get("error") == "candidates must be an array of strings"
     assert lib.call("QueryOffer", completion={"slot": "key"}, candidates=["a"]).get("error", "").startswith("invalid completion")
+    # A candidate the field's type would refuse is left out.
     assert lib.call("QueryOffer", completion={"slot": "value", "type": "integer"}, candidates=["3", "x y"])["result"] == [
-        {"label": "3", "text": "3", "kind": "value"}, {"label": "x y", "text": '"x y"', "kind": "value"}]
+        {"label": "3", "text": "3", "kind": "value"}]
+    assert lib.call("QueryOffer", completion={"slot": "value", "type": "text"}, candidates=["3", "x y"])["result"] == [
+        {"label": "3", "text": '"3"', "kind": "value"}, {"label": "x y", "text": '"x y"', "kind": "value"}]
+    # null is absent for both optional members.
+    env = lib.call("QueryComplete", query="name=", fields=fields, cursor=None, utf16=None)
+    assert env["result"]["slot"] == "value", env
 
 
 def check_hostile_input(lib):

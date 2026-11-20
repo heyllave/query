@@ -278,7 +278,8 @@ func QueryComplete(req *C.char) *C.char {
 		}
 		query := r.str("query")
 		inUTF16 := false
-		if v, ok := r["utf16"]; ok {
+		// null is absent here, as it is for the cursor.
+		if v, ok := r["utf16"]; ok && string(v) != "null" {
 			if string(v) != "true" && string(v) != "false" {
 				return bridgejson.Fail("utf16 must be a boolean")
 			}

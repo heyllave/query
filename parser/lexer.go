@@ -338,6 +338,14 @@ func (l *lexer) lexNumericLiteral() {
 		}
 		break
 	}
+	// The hyphens were taken on the promise of a date. A run that did not
+	// turn out to be one (2026-1, 2026-11-5) gives them back: it is the
+	// number 2026 and a subtraction, the same reading 10-3 gets, rather
+	// than a piece of text that only four leading digits could produce.
+	if year := digitsStart + 4; digitsStart == start && l.pos > year && l.input[year] == '-' &&
+		isDatePrefix(l.input[digitsStart:year]) && !isDateLiteral(l.input[start:l.pos]) {
+		l.pos = year
+	}
 	value := l.input[start:l.pos]
 	pos := token.Position{Offset: start, Length: l.pos - start}
 	tok := l.classifyValue(value, value, false, pos)

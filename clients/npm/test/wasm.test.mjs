@@ -532,7 +532,7 @@ test("queryOffer writes the host's candidates the way the grammar needs them", (
 
   const number = w.queryComplete("replicas>", completionFields, { cursor: 9 }).result;
   r = w.queryOffer(JSON.stringify(number), JSON.stringify(["3", "many"]));
-  assert.deepEqual(r.result.map((it) => it.text), ["3", "many"]);
+  assert.deepEqual(r.result.map((it) => it.text), ["3"]);
 
   const key = w.queryComplete("labels.te", completionFields, { cursor: 9 }).result;
   assert.equal(key.slot, "key");
@@ -553,13 +553,20 @@ test("queryOffer keeps a number a number after a function, and drops text after 
   const afterCall = w.queryComplete("len(name)>", completionFields).result;
   assert.equal(afterCall.function, "len");
   assert.equal(afterCall.field, undefined);
+  // len gives a number, so a word is left out; lower gives text, so a
+  // number is quoted.
   let r = w.queryOffer(JSON.stringify(afterCall), JSON.stringify(["5", "two words"]));
-  assert.deepEqual(r.result.map((it) => it.text), ["5", '"two words"']);
+  assert.deepEqual(r.result.map((it) => it.text), ["5"]);
+  const afterLower = w.queryComplete("lower(name)=", completionFields).result;
+  r = w.queryOffer(JSON.stringify(afterLower), JSON.stringify(["812", "web"]));
+  assert.deepEqual(r.result.map((it) => it.text), ['"812"', "web"]);
 
   const operand = w.queryComplete("replicas>10 - 3", completionFields).result;
   assert.equal(operand.arithmetic, true);
+  assert.equal(operand.sign, "-");
+  // replicas is a number, so only a number can follow the minus.
   r = w.queryOffer(JSON.stringify(operand), JSON.stringify(["web", "5", "7d"]));
-  assert.deepEqual(r.result.map((it) => it.text), ["5", "7d"]);
+  assert.deepEqual(r.result.map((it) => it.text), ["5"]);
 });
 
 test("accepting an item does not repeat the punctuation that follows it", () => {
@@ -575,6 +582,33 @@ test("accepting an item does not repeat the punctuation that follows it", () => 
   const key = w.queryOffer(JSON.stringify(c), JSON.stringify(["my key"])).result[0];
   assert.equal(apply(q, c, key), '["labels.my key"]');
   assert.equal(w.queryParse(apply(q, c, key) + "=x", strictGrammar).error, undefined);
+});
+
+test("a value is replaced without what follows it, and a date being typed is one word", () => {
+  const apply = (q, c, it) => q.slice(0, c.replace.offset) + it.text + q.slice(c.replace.offset + c.replace.length);
+  const offer = (q, cursor, cand) => {
+    const c = w.queryComplete(q, completionFields, { cursor }).result;
+    return apply(q, c, w.queryOffer(JSON.stringify(c), JSON.stringify([cand])).result[0]);
+  };
+  assert.equal(offer("replicas>4*2 AND name=x", 10, "2"), "replicas>2*2 AND name=x");
+  assert.equal(offer("replicas:100..500", 12, "250"), "replicas:250..500");
+  const dates = JSON.stringify([{ name: "day", type: "date" }]);
+  const q = "day=2026-01-0";
+  const c = w.queryComplete(q, dates).result;
+  assert.equal(c.prefix, "2026-01-0");
+  assert.deepEqual(c.replace, { offset: 4, length: 9 });
+  const picked = w.queryOffer(JSON.stringify(c), JSON.stringify(["2026-01-01"])).result[0];
+  assert.equal(apply(q, c, picked), "day=2026-01-01");
+});
+
+test("a quote opened on a field that is not text is dropped by the value", () => {
+  const fields = JSON.stringify([{ name: "ready", type: "boolean" }]);
+  const q = 'ready="';
+  const c = w.queryComplete(q, fields).result;
+  assert.deepEqual(c.items.map((it) => it.text), ["true", "false"]);
+  const out = q.slice(0, c.replace.offset) + c.items[0].text;
+  assert.equal(out, "ready=true");
+  assert.equal(w.queryParseAndValidate(out, fields, strictGrammar).error, undefined);
 });
 
 test("queryOffer refuses what it cannot read", () => {
