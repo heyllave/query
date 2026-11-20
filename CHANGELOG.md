@@ -8,6 +8,11 @@ semantic versioning.
 
 ### Fixed
 
+- A date with a time can be an operand of arithmetic.
+  `createdAt>2026-11-16T10:00:00Z-1h` was text, and refused on a date field
+  with a hint that offered the form already typed; it is that instant minus
+  an hour now, as `2026-11-16+1d` already was a day later. A zone offset is
+  part of the datetime, not a sum: `10:00:00-05:00` is an instant.
 - A date that is not written in full is no longer text. Four digits and a
   hyphen used to be kept together on the promise of a date, so `2026-11-5`
   and `2026-1` were text while `10-3` was a subtraction, and `2026-1-1` was

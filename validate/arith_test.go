@@ -48,6 +48,8 @@ func TestValidate_ArithmeticOverLiteralsThatFitsTheField(t *testing.T) {
 		"n=10-3", "n>2*3+1", "price<10/4", "n=10%3", "n>(1+2)*3", "n:1+1..10-1", "n IN (1+1, 2*2)",
 		// a date and a duration give a date
 		"createdAt>2026-01-01+7d", "createdAt<2026-01-31-1w", "day>=2026-01-01+1d", "createdAt>2026-01-01+7d-1h",
+		// a date with a time is one operand
+		"createdAt>2026-11-16T10:00:00Z-1h", "createdAt<2026-11-16T10:00:00+02:00+1d", "ttl>2026-11-17T00:00:00Z-2026-11-16T00:00:00Z",
 		// two dates give a duration
 		"ttl>2026-01-31 - (2026-01-01)",
 		// durations

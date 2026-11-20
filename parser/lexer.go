@@ -310,6 +310,18 @@ func (l *lexer) lexNumericLiteral() {
 		l.pos++
 	}
 	digitsStart := l.pos
+	// A date with a time is one primary, so 2026-11-16T10:00:00Z-1h is that
+	// instant minus an hour. Its zone offset (+02:00) is part of it, not a
+	// sum.
+	if digitsStart == start {
+		if end := l.datetimeEnd(start); end > 0 {
+			l.pos = end
+			value := l.input[start:l.pos]
+			pos := token.Position{Offset: start, Length: l.pos - start}
+			l.tokens = append(l.tokens, l.classifyValue(value, value, false, pos))
+			return
+		}
+	}
 	// Consume digits, hyphens at the two date positions (YYYY-MM-DD), dots
 	// (for floats), and duration suffixes (d/h/m/w). The classifier below
 	// picks one interpretation.
@@ -699,6 +711,15 @@ func (l *lexer) isArithValueAhead() bool {
 				return false
 			}
 			i = end
+			continue
+		case isDigit(c) && l.datetimeEnd(i) > 0:
+			// A date with a time is one primary: its T, colons and zone are
+			// not words or operators. Arithmetic needs a sign after it.
+			end := l.datetimeEnd(i)
+			if end < len(l.input) && (l.input[end] == '+' || l.input[end] == '-') && end+1 < len(l.input) && l.beginsPrimary(end+1) {
+				found = true
+			}
+			i = end - 1
 			continue
 		case isDigit(c):
 			// A digit run with more than one dot (10.0.0.1, 1.2.3) is an
@@ -1341,6 +1362,38 @@ func isDatetimeLiteral(s string) bool {
 		}
 	}
 	return true
+}
+
+// datetimeEnd returns the index just past a date with a time that starts at
+// i, written YYYY-MM-DDTHH:MM:SS with an optional fraction and an optional
+// zone (Z or an offset such as +02:00), or -1 when none starts there. It
+// lets a datetime be one operand of arithmetic, where the scan for a value
+// would otherwise stop at the T. Only the T form counts: a space would end
+// the value.
+func (l *lexer) datetimeEnd(i int) int {
+	s := l.input[i:]
+	if len(s) < 19 || !isDateLiteral(s[:10]) || (s[10] != 'T' && s[10] != 't') {
+		return -1
+	}
+	if !twoDigits(s, 11) || s[13] != ':' || !twoDigits(s, 14) || s[16] != ':' || !twoDigits(s, 17) {
+		return -1
+	}
+	n := 19
+	if n+1 < len(s) && s[n] == '.' && isDigit(s[n+1]) {
+		for n++; n < len(s) && isDigit(s[n]); n++ {
+		}
+	}
+	switch {
+	case n < len(s) && (s[n] == 'Z' || s[n] == 'z'):
+		n++
+	case n+5 < len(s) && (s[n] == '+' || s[n] == '-') && twoDigits(s, n+1) && s[n+3] == ':' && twoDigits(s, n+4):
+		n += 6
+	}
+	return i + n
+}
+
+func twoDigits(s string, i int) bool {
+	return i+1 < len(s) && isDigit(s[i]) && isDigit(s[i+1])
 }
 
 // dateLayouts are the literal forms ParseDateLiteral accepts, from the most

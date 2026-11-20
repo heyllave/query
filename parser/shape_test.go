@@ -54,6 +54,10 @@ func TestValueShape_AsTheGrammarPageStatesIt(t *testing.T) {
 		{4, "10*-3", ast.ValueArith},
 		{4, "now()-7d", ast.ValueArith},
 		{4, "2026-11-16-1", ast.ValueArith},
+		// A date with a time is one operand, its zone offset included.
+		{4, "2026-11-16T10:00:00Z-1h", ast.ValueArith},
+		{4, "2026-11-16T10:00:00+02:00-1h", ast.ValueArith},
+		{4, "2026-11-16T10:00:00.5Z+1d", ast.ValueArith},
 		// Four digits and a hyphen are a date only when the date is whole.
 		{4, "2026-11-5", ast.ValueArith},
 		{4, "2026-1", ast.ValueArith},
@@ -210,5 +214,48 @@ func TestBareNumberRunIsReportedWhole(t *testing.T) {
 		if got := q[errs[0].Position.Offset : errs[0].Position.Offset+errs[0].Position.Length]; !strings.Contains(want, got) {
 			t.Errorf("%s: the error spans %q", q, got)
 		}
+	}
+}
+
+// A date with a time is one operand of arithmetic, wherever a value stands,
+// and its zone offset is not a sum: 10:00:00-05:00 is an instant, and only a
+// sign after the zone starts arithmetic. It prints back the same.
+func TestValueShape_ADatetimeIsOneOperand(t *testing.T) {
+	for q, want := range map[string]ast.ValueType{
+		"f>2026-11-16T10:00:00Z-1h":                   ast.ValueArith,
+		"f>2026-11-16T10:00:00-05:00":                 ast.ValueDate,
+		"f>2026-11-16T10:00:00-05:00+30m":             ast.ValueArith,
+		"f>2026-11-16T10:00:00-1h":                    ast.ValueArith,
+		"f IN (1, 2026-11-16T10:00:00Z-1h)":           ast.ValueArith,
+		"f:2026-11-16T00:00:00Z-1d..2026-11-17":       ast.ValueArith,
+		"f>2026-11-17T00:00:00Z-2026-11-16T00:00:00Z": ast.ValueArith,
+		"f>2026-11-16T10:00:00Zfoo":                   ast.ValueString,
+	} {
+		for _, cfg := range []Config{{}, Config{}.Strict()} {
+			expr, err := ParseWith(q, cfg)
+			if err != nil {
+				t.Errorf("%s does not parse: %v", q, err)
+				continue
+			}
+			// The value checked is the last one compared: the end of an IN
+			// list, or the start of a range.
+			var got ast.ValueType = -2
+			ast.Walk(expr, func(n ast.Expression) bool {
+				if c, ok := n.(*ast.QualifierExpr); ok {
+					got = c.Value.Type
+				}
+				return true
+			})
+			if got != want {
+				t.Errorf("%s: value is %v, want %v", q, got, want)
+			}
+			out := ast.String(expr)
+			if again, err := Parse(out, 0); err != nil || ast.String(again) != out {
+				t.Errorf("%s prints as %s, which does not read back the same (%v)", q, out, err)
+			}
+		}
+	}
+	if _, err := Parse("f>2026-11-16T25:00:00Z-1h", 0); err == nil {
+		t.Error("a time that cannot exist parses")
 	}
 }
