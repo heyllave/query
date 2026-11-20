@@ -114,7 +114,7 @@ func (l *lexer) lexArithPrimary() bool {
 // follows it, otherwise a string primary.
 func (l *lexer) lexArithWord() {
 	start := l.pos
-	l.pos = l.identEnd(l.pos)
+	l.pos = chars.IdentEnd(l.input, l.pos)
 	tok := token.Token{Type: token.String, Value: l.input[start:l.pos], Pos: token.Position{Offset: start, Length: l.pos - start}}
 	if l.pos < len(l.input) && l.input[l.pos] == '(' {
 		tok.Type = token.Ident

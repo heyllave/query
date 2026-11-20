@@ -1,6 +1,7 @@
 package parser
 
 import (
+	"fmt"
 	"strings"
 
 	"github.com/heyllave/query/parser/internal/chars"
@@ -149,7 +150,7 @@ var keywords = map[string]token.Type{
 // booleans in any position, as classifyValue reads them after an operator.
 func (l *lexer) lexIdentOrKeyword() {
 	start := l.pos
-	l.pos = l.identEnd(l.pos)
+	l.pos = chars.IdentEnd(l.input, l.pos)
 	word := l.input[start:l.pos]
 	typ, keyword := keywords[strings.ToUpper(word)]
 	switch {
@@ -207,18 +208,21 @@ func (l *lexer) afterValue() bool {
 	return prev.Type.IsValueEnd() || (prev.Type == token.String && prev.Quoted)
 }
 
-// arithTokens maps an arithmetic operator to its token.
-var arithTokens = map[byte]token.Type{
-	'+': token.Plus,
-	'-': token.Minus,
-	'*': token.Mul,
-	'/': token.Div,
-	'%': token.Mod,
-}
-
+// arithTokenFor is the token of an arithmetic operator. Callers check
+// chars.IsArithOp first, so any other character is a bug in the lexer, and
+// it panics rather than quietly reading it as one of the five.
 func arithTokenFor(ch byte) token.Type {
-	if t, ok := arithTokens[ch]; ok {
-		return t
+	switch ch {
+	case '+':
+		return token.Plus
+	case '-':
+		return token.Minus
+	case '*':
+		return token.Mul
+	case '/':
+		return token.Div
+	case '%':
+		return token.Mod
 	}
-	return token.Mod
+	panic(fmt.Sprintf("parser: %q is not an arithmetic operator", ch))
 }

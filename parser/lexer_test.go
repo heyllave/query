@@ -228,3 +228,17 @@ func assertTokenValues(t *testing.T, got []token.Token, want []string) {
 		}
 	}
 }
+
+func TestArithTokenFor_PanicsOnAnythingElse(t *testing.T) {
+	for ch, want := range map[byte]token.Type{'+': token.Plus, '-': token.Minus, '*': token.Mul, '/': token.Div, '%': token.Mod} {
+		if got := arithTokenFor(ch); got != want {
+			t.Errorf("arithTokenFor(%q) = %v, want %v", ch, got, want)
+		}
+	}
+	defer func() {
+		if recover() == nil {
+			t.Error("arithTokenFor('x') did not panic")
+		}
+	}()
+	arithTokenFor('x')
+}

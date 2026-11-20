@@ -67,17 +67,7 @@ func (l *lexer) readFieldRefName() (name string, quoted, closed bool) {
 		return name, true, closed
 	}
 	start := l.pos
-	for l.pos < len(l.input) {
-		if l.input[l.pos] == '.' {
-			l.pos++
-			continue
-		}
-		end := l.identEnd(l.pos)
-		if end == l.pos {
-			break
-		}
-		l.pos = end
-	}
+	l.pos = chars.PathEnd(l.input, l.pos)
 	return l.input[start:l.pos], false, true
 }
 

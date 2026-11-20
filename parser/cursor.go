@@ -133,8 +133,7 @@ func CursorAt(input string, offset int, cfg Config) Cursor {
 		return none
 	}
 
-	l := &lexer{input: prefix, strictValues: cfg.StrictValues}
-	l.run()
+	l := lexAll(prefix, cfg)
 	tokens := l.tokens[:len(l.tokens)-1] // drop EOF
 
 	c := Cursor{Word: token.Position{Offset: offset}}
@@ -282,8 +281,7 @@ func isWord(t token.Token) bool {
 // openString decodes the string whose opening quote is at start and that
 // runs to the end of s.
 func openString(s string, start int) string {
-	l := &lexer{input: s, pos: start}
-	text, _ := l.readQuotedString()
+	text, _, _ := chars.ReadQuoted(s, start)
 	return text
 }
 
@@ -291,13 +289,12 @@ func openString(s string, start int) string {
 // the end of s: the decoded text of the quoted form, the trimmed text of the
 // bare one.
 func openFieldRef(s string, start int) string {
-	l := &lexer{input: s, pos: start + 1}
-	l.skipWhitespace()
-	if l.pos < len(s) && s[l.pos] == '"' {
-		text, _ := l.readQuotedString()
+	i := chars.SkipSpace(s, start+1)
+	if i < len(s) && s[i] == '"' {
+		text, _, _ := chars.ReadQuoted(s, i)
 		return text
 	}
-	return strings.TrimSpace(s[l.pos:])
+	return strings.TrimSpace(s[i:])
 }
 
 // wordEnd returns where the word under the cursor ends in the whole input,
@@ -305,40 +302,18 @@ func openFieldRef(s string, start int) string {
 // cursor. A position at the start of a word (nothing typed toward it) is
 // left alone: the text after it is the next thing, not this one.
 func wordEnd(input string, offset int, c Cursor, cfg Config) int {
-	l := &lexer{input: input, strictValues: cfg.StrictValues}
 	switch {
 	case c.Quoted:
-		// The closing quote is this string's only when the whole input has
-		// its quotes in pairs; otherwise the next one found opens something
-		// later.
-		l.run()
-		for _, e := range l.errors {
-			if e.Code == CodeUnclosedString || e.Code == CodeUnclosedFieldRef {
-				return offset
-			}
-		}
-		l = &lexer{input: input, pos: c.Word.Offset}
-		if _, ok := l.readQuotedString(); ok {
-			return l.pos
-		}
-		return offset
+		return quotedWordEnd(input, offset, c.Word.Offset, cfg)
 	case c.Bracketed:
 		return bracketEnd(input, offset, c.Word.Offset)
 	case c.Word.Length == 0:
 		return offset
 	case c.Slot == SlotKey:
 		// The whole key, dots included: labels.exa|mple.com/team.
-		i := offset
-		for i < len(input) && (input[i] == '.' || l.identEnd(i) > i) {
-			if input[i] == '.' {
-				i++
-				continue
-			}
-			i = l.identEnd(i)
-		}
-		return i
+		return chars.PathEnd(input, offset)
 	case c.Slot != SlotValue:
-		return l.identEnd(offset)
+		return chars.IdentEnd(input, offset)
 	}
 	// The word ends where its token does in the whole input, so an operator
 	// or the dots of a range after it are left alone: count>4|*2 replaces
@@ -347,19 +322,32 @@ func wordEnd(input string, offset int, c Cursor, cfg Config) int {
 	// A word that is the name of a call is replaced with its arguments, so
 	// no parenthesis is left behind: name=lo|wer(x).
 	if i < len(input) && input[i] == '(' {
-		if closed := l.skipCall(i); closed > 0 {
+		if closed := chars.SkipCall(input, i); closed > 0 {
 			return closed
 		}
 	}
 	return i
 }
 
+// quotedWordEnd returns where the quoted word opening at open ends. The
+// closing quote is this string's only when the whole input has its quotes
+// in pairs; otherwise the next one found opens something later.
+func quotedWordEnd(input string, offset, open int, cfg Config) int {
+	for _, e := range lexAll(input, cfg).errors {
+		if e.Code == CodeUnclosedString || e.Code == CodeUnclosedFieldRef {
+			return offset
+		}
+	}
+	if _, end, closed := chars.ReadQuoted(input, open); closed {
+		return end
+	}
+	return offset
+}
+
 // dateEnd returns where a date being typed from start ends in the whole
 // input, for a cursor at offset inside it.
 func dateEnd(input string, start, offset int, cfg Config) int {
-	l := &lexer{input: input, strictValues: cfg.StrictValues}
-	l.run()
-	for _, tok := range l.tokens {
+	for _, tok := range lexAll(input, cfg).tokens {
 		if tok.Pos.Offset == start && tok.Type == token.Date && end(tok.Pos) >= offset {
 			return end(tok.Pos)
 		}
@@ -377,15 +365,13 @@ func dateEnd(input string, start, offset int, cfg Config) int {
 // changed how it lexes), the word ends at the first character that cannot
 // be part of a value.
 func valueTokenEnd(input string, start, offset int, cfg Config) int {
-	l := &lexer{input: input, strictValues: cfg.StrictValues}
-	l.run()
-	for _, tok := range l.tokens {
+	for _, tok := range lexAll(input, cfg).tokens {
 		if tok.Pos.Offset == start && isWord(tok) && end(tok.Pos) >= offset {
 			return end(tok.Pos)
 		}
 	}
 	i := offset
-	for i < len(input) && l.spaceWidth(i) == 0 && strings.IndexByte(`(),"[]`, input[i]) < 0 {
+	for i < len(input) && chars.SpaceWidth(input, i) == 0 && strings.IndexByte(`(),"[]`, input[i]) < 0 {
 		i++
 	}
 	return i
@@ -396,27 +382,18 @@ func valueTokenEnd(input string, start, offset int, cfg Config) int {
 // past the ']' when it is there. A name left open ends at the cursor, since
 // what follows is then the rest of the query and not part of the name.
 func bracketEnd(input string, offset, open int) int {
-	l := &lexer{input: input, pos: open + 1}
-	l.skipWhitespace()
+	i := chars.SkipSpace(input, open+1)
 	end := offset
-	if l.pos < len(input) && input[l.pos] == '"' {
-		if _, closed := l.readQuotedString(); !closed || l.pos < offset {
+	if i < len(input) && input[i] == '"' {
+		_, quoteEnd, closed := chars.ReadQuoted(input, i)
+		if !closed || quoteEnd < offset {
 			return offset
 		}
-		end = l.pos
+		end = quoteEnd
 	} else {
-		for end < len(input) && (input[end] == '.' || l.identEnd(end) > end) {
-			if input[end] == '.' {
-				end++
-				continue
-			}
-			end = l.identEnd(end)
-		}
+		end = chars.PathEnd(input, end)
 	}
-	rest := end
-	for rest < len(input) && l.spaceWidth(rest) > 0 {
-		rest += l.spaceWidth(rest)
-	}
+	rest := chars.SkipSpace(input, end)
 	switch {
 	case rest < len(input) && input[rest] == ']':
 		return rest + 1
@@ -432,8 +409,7 @@ func bracketEnd(input string, offset, open int) int {
 		// the value of a later condition.
 		return offset
 	}
-	after := &lexer{input: input[end:]}
-	after.run()
+	after := lexAll(input[end:], Config{})
 	for _, e := range after.errors {
 		if e.Code == CodeUnclosedString || e.Code == CodeUnclosedFieldRef {
 			return offset

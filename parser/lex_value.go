@@ -5,6 +5,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/heyllave/query/parser/internal/chars"
 	"github.com/heyllave/query/parser/internal/literal"
 	"github.com/heyllave/query/parser/internal/shape"
 	"github.com/heyllave/query/token"
@@ -87,7 +88,7 @@ func (l *lexer) lexUnquotedStringValue() {
 func (l *lexer) endsBareValue() bool {
 	ch := l.input[l.pos]
 	switch {
-	case l.spaceWidth(l.pos) > 0 || ch == ')' || ch == '[' || ch == ']':
+	case chars.SpaceWidth(l.input, l.pos) > 0 || ch == ')' || ch == '[' || ch == ']':
 		return true
 	case ch == ',' && (l.inList || l.argValue):
 		return true

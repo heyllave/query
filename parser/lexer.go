@@ -8,18 +8,9 @@ import (
 	"github.com/heyllave/query/token"
 )
 
-// The lexer is split by where it is in a query:
-//
-//	lexer.go       the state, the entry points and the main loop
-//	lex_field.go   field position: names, keywords, operators, parens, lists
-//	lex_value.go   after an operator: quoted, bracketed and bare values
-//	lex_number.go  number, date and duration runs
-//	lex_arith.go   arithmetic values and function-call arguments
-//	lex_quoted.go  quoted strings and bracketed field references
-//
-// The rules that do not depend on lexer state are in internal/chars (one
-// character), internal/literal (one whole literal) and internal/shape
-// (whether a value is arithmetic or text).
+// The lexer is split by where it is in a query, one lex_*.go file each, and
+// calls internal/chars, internal/literal and internal/shape for every rule
+// that needs no lexer state. CLAUDE.md lists the files.
 
 // lexer tokenizes a query string into a sequence of tokens.
 type lexer struct {
@@ -53,9 +44,7 @@ func lexWith(input string, cfg Config) ([]token.Token, error) {
 		return nil, err
 	}
 
-	l := &lexer{input: input, strictValues: cfg.StrictValues}
-	l.run()
-
+	l := lexAll(input, cfg)
 	if len(l.errors) > 0 {
 		errs := l.errors
 		if cfg.ExplicitAnd {
@@ -146,6 +135,14 @@ func invalidByte(s string) int {
 	return -1
 }
 
+// lexAll lexes the whole of input in field position, under cfg's
+// StrictValues, and returns the lexer with its tokens and errors.
+func lexAll(input string, cfg Config) *lexer {
+	l := &lexer{input: input, strictValues: cfg.StrictValues}
+	l.run()
+	return l
+}
+
 // run lexes the whole input. Each token starts either in value position,
 // right after an operator, or in field position.
 func (l *lexer) run() {
@@ -196,20 +193,4 @@ func (l *lexer) peek(offset int) byte {
 
 func (l *lexer) skipWhitespace() {
 	l.pos = chars.SkipSpace(l.input, l.pos)
-}
-
-// spaceWidth returns the byte width of the whitespace character at i, or 0.
-func (l *lexer) spaceWidth(i int) int {
-	return chars.SpaceWidth(l.input, i)
-}
-
-// identEnd returns the index just past the identifier starting at i.
-func (l *lexer) identEnd(i int) int {
-	return chars.IdentEnd(l.input, i)
-}
-
-// skipCall returns the index just past the ')' closing the call body that
-// opens at l.input[open], or -1 when it never closes.
-func (l *lexer) skipCall(open int) int {
-	return chars.SkipCall(l.input, open)
 }

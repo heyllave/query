@@ -277,8 +277,7 @@ func mergeRepeats(input string, list ErrorList) ErrorList {
 // Hints use it to check a rewrite before suggesting it, without going back
 // through annotate.
 func parses(q string, cfg Config) bool {
-	l := &lexer{input: q, strictValues: cfg.StrictValues}
-	l.run()
+	l := lexAll(q, cfg)
 	if len(l.errors) > 0 {
 		return false
 	}

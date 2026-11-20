@@ -118,6 +118,24 @@ func IdentEnd(s string, i int) int {
 	return i
 }
 
+// PathEnd returns the index just past the dotted path of identifier
+// segments starting at s[i]: labels.example.com/team. Dots and segments may
+// come in any order, as a field name being typed can end in a dot.
+func PathEnd(s string, i int) int {
+	for i < len(s) {
+		if s[i] == '.' {
+			i++
+			continue
+		}
+		end := IdentEnd(s, i)
+		if end == i {
+			break
+		}
+		i = end
+	}
+	return i
+}
+
 // IsCallAt reports whether an identifier starts at s[i] and is followed
 // directly by '(', which makes it a function call.
 func IsCallAt(s string, i int) bool {
