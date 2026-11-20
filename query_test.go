@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/heyllave/query"
+	"github.com/heyllave/query/parser"
 	"github.com/heyllave/query/validate"
 )
 
@@ -180,5 +181,42 @@ func TestEvalWith_PreservesExplicitLengthLimit(t *testing.T) {
 	got, err := query.EvalWith("[total]+2", testFields, record, query.WithMaxLength(0))
 	if err != nil || got != float64(7) {
 		t.Fatalf("EvalWith = %v, %v; want 7", got, err)
+	}
+}
+
+func TestComplete_UsesTheOptionsTheQueryIsParsedWith(t *testing.T) {
+	fields := []validate.FieldConfig{
+		{Name: "name", Type: validate.TypeText, AllowedOps: validate.TextOps},
+		{Name: "ready", Type: validate.TypeBoolean, AllowedOps: validate.BoolOps},
+	}
+	text := "name=x re"
+
+	// The default grammar joins two conditions with a space, so a word
+	// after one may be the next field.
+	c := query.Complete(text, len(text), fields)
+	if len(c.Items) != 1 || c.Items[0].Text != "ready" {
+		t.Errorf("default grammar: items = %+v, want ready", c.Items)
+	}
+	// Under the strict grammar it can only be a connective.
+	if got := query.Complete(text, len(text), fields, query.WithStrict()); len(got.Items) != 0 {
+		t.Errorf("WithStrict: items = %+v, want none", got.Items)
+	}
+	if got := query.Complete(text, len(text), fields, query.WithExplicitAnd()); len(got.Items) != 0 {
+		t.Errorf("WithExplicitAnd: items = %+v, want none", got.Items)
+	}
+	// The default length limit applies, and can be lifted.
+	long := "name=" + strings.Repeat("x", query.DefaultMaxLength)
+	if got := query.Complete(long, len(long), fields); got.Slot != parser.SlotNone {
+		t.Errorf("over the default limit: slot = %s, want none", got.Slot)
+	}
+	if got := query.Complete(long, len(long), fields, query.WithMaxLength(0)); got.Slot != parser.SlotValue {
+		t.Errorf("with the limit lifted: slot = %s, want value", got.Slot)
+	}
+	// Whatever is suggested for a value is accepted when it is used.
+	c = query.Complete("ready=", 6, fields, query.WithStrict())
+	for _, it := range c.Items {
+		if _, err := query.ParseAndValidate("ready="+it.Text, fields, query.WithStrict()); err != nil {
+			t.Errorf("suggested %q is refused: %v", it.Text, err)
+		}
 	}
 }
