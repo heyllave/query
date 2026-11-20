@@ -411,16 +411,128 @@ func mirrorOp(op Op) Op {
 func (v *Validator) checkValue(cfg FieldConfig, val *ast.Value, pos token.Position, fieldName, what string) {
 	coerceLiteral(cfg.Type, val)
 	if isDynamicValue(*val) {
-		if val.Type == ast.ValueArith && (cfg.Type == TypeText || cfg.Type == TypeBoolean) {
+		if val.Type != ast.ValueArith {
+			return
+		}
+		if cfg.Type == TypeText || cfg.Type == TypeBoolean {
 			v.addError(ErrTypeMismatch, pos, fieldName, "",
 				"%s is arithmetic (%s), which cannot produce a %s for field %q; quote it to compare as text",
 				what, val.Raw, cfg.Type, fieldName)
+			return
 		}
+		v.checkArithmetic(cfg, val, pos, fieldName, what)
 		return
 	}
 	if !typeCompatible(cfg.Type, *val) {
 		v.addHinted(func() string { return v.typeHint(cfg, val) }, ErrTypeMismatch, pos, fieldName, "",
 			"%s %q (%s) does not fit field %q (type %s)", what, val.Raw, val.Type, fieldName, cfg.Type)
+	}
+}
+
+// kind is what a value is, as far as it can be told without a record: the
+// result of arithmetic over literals has one, a function or a field does not.
+type kind int
+
+const (
+	kindUnknown   kind = iota // depends on a function or a field
+	kindNumber                // an integer or a float
+	kindDate                  // a date or an instant
+	kindDuration              // a length of time
+	kindUndefined             // operands the operator has no meaning for
+)
+
+func (k kind) String() string {
+	switch k {
+	case kindNumber:
+		return "number"
+	case kindDate:
+		return "date"
+	case kindDuration:
+		return "duration"
+	default:
+		return "value"
+	}
+}
+
+// kindOf works out what a value gives when every operand is a literal,
+// following the evaluator's rules: a date plus or minus a duration is a
+// date, two dates subtract to a duration, a duration scales by a number.
+// An operand that is a function, a field or text makes the result unknown,
+// which is left to the evaluator.
+func kindOf(val *ast.Value) kind {
+	if val == nil {
+		return kindUnknown
+	}
+	switch val.Type { //nolint:exhaustive // every other type is unknown until matched
+	case ast.ValueInteger, ast.ValueFloat:
+		return kindNumber
+	case ast.ValueDate:
+		return kindDate
+	case ast.ValueDuration:
+		return kindDuration
+	case ast.ValueArith:
+		if val.Arith == nil {
+			return kindUnknown
+		}
+		return arithKind(kindOf(val.Arith.Left), kindOf(val.Arith.Right), val.Arith.Op)
+	default:
+		return kindUnknown
+	}
+}
+
+func arithKind(left, right kind, op ast.ArithOp) kind {
+	if left == kindUndefined || right == kindUndefined {
+		return kindUndefined
+	}
+	if left == kindUnknown || right == kindUnknown {
+		return kindUnknown
+	}
+	additive := op == ast.ArithAdd || op == ast.ArithSub
+	switch {
+	case left == kindNumber && right == kindNumber:
+		return kindNumber
+	case left == kindDate && right == kindDuration && additive:
+		return kindDate
+	case left == kindDate && right == kindDate && op == ast.ArithSub:
+		return kindDuration
+	case left == kindDuration && right == kindDuration && additive:
+		return kindDuration
+	case left == kindDuration && right == kindNumber && (op == ast.ArithMul || op == ast.ArithDiv):
+		return kindDuration
+	case left == kindNumber && right == kindDuration && op == ast.ArithMul:
+		return kindDuration
+	}
+	return kindUndefined
+}
+
+// fits reports whether a value of kind k can be compared with a field of
+// type t.
+func (k kind) fits(t FieldValueType) bool {
+	switch t { //nolint:exhaustive // text, boolean and list are refused before this
+	case TypeInteger, TypeDecimal:
+		return k == kindNumber
+	case TypeDate, TypeDatetime:
+		return k == kindDate
+	case TypeDuration:
+		return k == kindDuration
+	}
+	return true
+}
+
+// checkArithmetic refuses arithmetic over literals whose result is already
+// known not to fit the field: createdAt=2026-11-5 subtracts three numbers,
+// and ttl>10-3 compares a duration with 7. Left alone these never match,
+// which reads as "there are none" rather than as a mistake.
+func (v *Validator) checkArithmetic(cfg FieldConfig, val *ast.Value, pos token.Position, fieldName, what string) {
+	switch k := kindOf(val); {
+	case k == kindUnknown:
+	case k == kindUndefined:
+		v.addHinted(func() string { return arithmeticOperandsHint }, ErrTypeMismatch, pos, fieldName, "",
+			"%s is arithmetic (%s) that has no result", what, val.Raw)
+	case !k.fits(cfg.Type):
+		v.addHinted(func() string { return arithmeticResultHint(cfg, val) }, ErrTypeMismatch, pos, fieldName, "",
+			"%s is arithmetic (%s), which gives a %s and does not fit field %q (type %s)",
+			what, val.Raw, k, fieldName, cfg.Type)
 	}
 }
 

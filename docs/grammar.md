@@ -108,23 +108,30 @@ word (`NOT` alone is the term `not`). `ExplicitAnd` refuses that form.
 
 ### The type of an unquoted value
 
-A value's type comes from how it is written, not from the field. The first
-of these that fits the whole value is used:
+A value's type comes from how it is written, not from the field. The steps
+below are tried in order, and the first that applies decides:
 
-| Order | Shape | Type | Example |
+| Step | If the value | It is | Examples |
 |---|---|---|---|
-| 1 | `true` or `false`, in lower case | boolean | `true` |
-| 2 | a date, with or without a time | date | `2026-11-16`, `2026-11-16T10:00:00Z` |
-| 3 | digits and a unit | duration | `7d` |
-| 4 | a number | integer or float | `-5`, `1.5` |
-| 5 | numbers, dates or durations joined by `+ - * / %` | arithmetic | `10-3`, `10/2`, `3d-1` |
-| 6 | text with a `*` at one end or both | pattern | `check*` |
-| 7 | anything else | text | `10-x`, `1.2.3`, `7days`, `a/b`, `TRUE` |
+| 1 | is a complete date, `YYYY-MM-DD`, alone or followed by `T` and a time | a date | `2026-11-16`, `2026-11-16T10:00:00Z` |
+| 2 | holds a word: letters that are not a function call and not one of the units `d` `h` `m` `w` directly after a digit | text, or a pattern if a `*` starts or ends it | `10-x`, `pr-10-3`, `5+3x`, `1e5`, `7days`, `a/b`, `TRUE`, `check*` |
+| 3 | holds a number with more than one dot | text | `1.2.3`, `10.0.0.1/24` |
+| 4 | has `+ - * / %` with a number, a date, a duration, a call or a group on both sides | arithmetic | `10-3`, `10/2`, `7d-1h`, `2026-11-5`, `now()-7d` |
+| 5 | is `true` or `false`, in lower case | a boolean | `true` |
+| 6 | is digits and one unit | a duration | `7d`, `30m` |
+| 7 | is a number, with or without a sign | an integer or a float | `42`, `-5`, `1.5`, `007` |
+| 8 | has a `*` at one end or both | a pattern | `10*` |
+| 9 | is anything else | text | `5-`, `10%`, `1h30m`, `1.5h` |
 
-So `10-3` is a subtraction and `10-x` is text. A value that has the shape of
-a number, a date, a duration or arithmetic and is meant as text goes in
-quotes: `name="10-3"`. A field declared as text refuses arithmetic rather
-than guess, and takes a lone number, date or duration as its text.
+Step 1 is the only place a hyphen between digits is not a subtraction, and it
+takes all ten characters: `2026-11-16` is a date, while `2026-11-5` and
+`2026-1` are subtractions like `10-3`. A date that is written in full but
+cannot exist, such as `2026-13-45`, is an error.
+
+A value that has the shape of a number, a date, a duration or arithmetic and
+is meant as text goes in quotes: `name="10-3"`. A field declared as text
+refuses arithmetic rather than guess, and takes a lone number, date or
+duration as its text.
 
 These characters are text inside an unquoted value: `!` `:` `@` `+` `-` `/`
 `%`, and `,` outside an `IN` list or a call. These are not: `=` `<` `>` end

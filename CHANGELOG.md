@@ -6,7 +6,25 @@ semantic versioning.
 
 ## Unreleased
 
+### Fixed
+
+- A date that is not written in full is no longer text. Four digits and a
+  hyphen used to be kept together on the promise of a date, so `2026-11-5`
+  and `2026-1` were text while `10-3` was a subtraction, and `2026-1-1` was
+  text minus one. Only a complete `YYYY-MM-DD` is a date now; anything
+  shorter is a subtraction, like every other run of digits and hyphens. To
+  compare with those characters as text, quote them: `name="2026-11-5"`.
+- The validator works out what arithmetic over literals gives and refuses
+  it when it cannot fit the field: `createdAt=2026-11-5` (a number where a
+  date belongs), `ttl>10-3`, `n>7d-1h`. Arithmetic whose operands have no
+  meaning together, such as `10-7d`, is refused as well. Both used to
+  validate and then match nothing. Arithmetic that reads a field or calls a
+  function is left to the evaluator, as before.
+
 ### Changed
+
+- The Grammar page states how an unquoted value gets its type as ordered
+  steps, each with examples, and a test holds the parser to every one.
 
 - The documentation is in three parts: Language, Clients and Guides. Page
   addresses are unchanged.

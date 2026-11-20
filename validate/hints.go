@@ -235,6 +235,27 @@ func (v *Validator) typeHint(cfg FieldConfig, val *ast.Value) string {
 	return ""
 }
 
+const arithmeticOperandsHint = "numbers combine with numbers; a date takes + or - a duration; a duration takes + or - a duration, or * or / a number"
+
+// arithmeticResultHint is the advice when arithmetic gives the wrong kind of
+// value for a field. The common case is not arithmetic at all in the
+// writer's mind: a date or a duration written in a shape the grammar reads
+// as a subtraction.
+func arithmeticResultHint(cfg FieldConfig, val *ast.Value) string {
+	switch cfg.Type { //nolint:exhaustive // only the types arithmetic can be compared with
+	case TypeDate, TypeDatetime:
+		if strings.Trim(val.Raw, "0123456789-") == "" {
+			return "a date is written in full, YYYY-MM-DD: 2026-01-05 rather than 2026-1-5"
+		}
+		return "a date is YYYY-MM-DD; for a relative date use now()-7d or daysAgo(7)"
+	case TypeDuration:
+		return "a duration is a number and one unit: 30m, 4h, 7d, 2w"
+	case TypeInteger, TypeDecimal:
+		return "a number looks like 42, -3 or 1.5"
+	}
+	return ""
+}
+
 func numberHint(raw string) string {
 	switch {
 	case strings.Contains(raw, ","):
