@@ -17,7 +17,7 @@ import threading
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 CORPUS = os.path.join(HERE, "..", "..", "conformance", "corpus.json")
-MIN_CASES = 135
+MIN_CASES = 153
 
 CALLS = ["QueryParse", "QueryValidate", "QueryStringify",
          "QueryParseAndValidate", "QueryMatch", "QueryEval"]

@@ -13,7 +13,7 @@ const wasmPath = join(here, "..", "query.wasm");
 const wasmExecPath = join(here, "..", "src", "wasm_exec.js");
 const corpusPath = join(here, "..", "..", "..", "conformance", "corpus.json");
 
-const EXPECTED_CASES = 135;
+const EXPECTED_CASES = 153;
 
 async function loadWasm() {
   await import(wasmExecPath);

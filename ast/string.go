@@ -155,6 +155,10 @@ func writeFuncCall(buf *strings.Builder, fc *FuncCallExpr) {
 			writeFieldName(buf, *arg.Field)
 		case arg.Value != nil:
 			switch {
+			case arg.Value.Type == ValueArith && arg.Value.ShortDate:
+				// As it was written: in a paren group it would read back
+				// as a plain subtraction.
+				buf.WriteString(arg.Value.Raw)
 			case arg.Value.Type == ValueArith:
 				// Arithmetic is an argument only as a paren group.
 				buf.WriteByte('(')

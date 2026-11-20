@@ -84,6 +84,16 @@ duration   = digit { digit } ( "m" | "h" | "d" | "w" ) ;
 
 text       = value_char { value_char } ;       (* an unquoted value that is none of the above *)
 pattern    = "*" text | text "*" | "*" text "*" | "*" ;
+
+time       = digit digit ":" digit digit ":" digit digit [ "." digit { digit } ] ;
+offset     = ( "+" | "-" ) digit digit ":" digit digit ;
+letter     = "a" … "z" | "A" … "Z" ;
+digit      = "0" … "9" ;
+non_ascii  = ? any character outside ASCII that is not white space ? ;
+char       = ? any character except '"' and '\' ? ;
+value_char = ? any character except white space, ")", "[", "]" and '"',
+               and except "," inside an IN list or a call ? | escape ;
+escape     = '\*' | '\\' | '\(' | '\)' ;
 ```
 
 An unquoted value ends at a space, `)`, `[`, `]`, `..`, and at a `,` inside
@@ -123,30 +133,44 @@ below are tried in order, and the first that applies decides:
 | 8 | has a `*` at one end or both | a pattern | `10*` |
 | 9 | is anything else | text | `5-`, `10%`, `1h30m`, `1.5h` |
 
-Step 1 is the only place a hyphen between digits is not a subtraction, and it
-takes all ten characters: `2026-11-16` is a date, while `2026-11-5` and
-`2026-1` are subtractions like `10-3`. A date that is written in full but
-cannot exist, such as `2026-13-45`, is an error.
+Of the values made of nothing but digits and hyphens, a complete date is the
+only one that is not a subtraction, and it takes all ten characters:
+`2026-11-16` is a date, while `2026-11-5` and `2026-1` are subtractions like
+`10-3`. (A hyphen is also plain text inside a word or a version, by steps 2
+and 3: `pr-10-3`, `1.2.3-4`.) A date that is written in full but cannot
+exist, such as `2026-13-45`, is an error.
+
+A star makes a pattern only out of text. After arithmetic it is an error,
+not a pattern: `name=2026-11*` and `n=10-3*` do not parse.
 
 A date field is the one place a date written short is taken as a date. The
 lexer cannot see the field, so it reads `2026-11-5` as a subtraction; the
 validator can, and on a date field takes it as the day it names. Every other
 field keeps the subtraction and judges it as one:
 
-| Field type | `2026-11-5` | `2026-11` | `10-3` |
-|---|---|---|---|
-| date, datetime | the day 2026-11-05 | refused: a date needs a day | refused: it gives a number |
-| text | refused: quote it | refused: quote it | refused: quote it |
-| integer, decimal | refused: write the number itself, `2010` | refused: `2015` | the number 7 |
-| duration, boolean | refused | refused | refused |
+| Field type | `2026-11-5` | `2026-11` | `10-3` | `"2026-11-5"` in quotes |
+|---|---|---|---|---|
+| date, datetime | the day 2026-11-05 | refused: a date needs a day | refused: it gives a number | the day 2026-11-05 |
+| text | refused: quote it | refused: quote it | refused: quote it | the text `2026-11-5` |
+| integer, decimal | refused: write the number itself, `2010` | refused: `2015` | the number 7 | refused: text |
+| duration, boolean | refused | refused | refused | refused: text |
+| a function's argument, or a value compared with a function | refused | refused | the number 7 | the text `2026-11-5` |
+
+The last row is where no declared type says what the run is:
+`contains(name, 2026-11)` and `upper(name)=2026-11-5` are refused, with the
+three ways to say what was meant: the date in full, the text in quotes, or
+the subtraction with spaces around the minus.
 
 A text field treats `2026-11-5` and `10-3` alike: both are arithmetic, and
 both are written in quotes when the characters are meant. A number field
 refuses the date-shaped run because nobody writes 2015 as `2026-11`.
 
 A date written short is exactly one unbroken run: four digits, then one or
-two groups of a hyphen and one or two digits. Anything else is an ordinary
-subtraction on every field:
+two groups of a hyphen and one or two digits, the first from 1 to 12 and the
+second from 1 to 31. Anything else is an ordinary subtraction on every
+field:
+
+- a number that could not be a month or a day: `1500-50` is 1450;
 
 - a space or a parenthesis: `2026 - 11`, `(2026)-11` and `(2026-11)` are
   the number 2015;
@@ -157,6 +181,16 @@ subtraction on every field:
 
 A date written short that cannot exist, such as `2026-2-30`, is refused.
 Once validated, the value is that date: it prints as `2026-11-05`.
+
+With no schema there is no field to ask, so the run is the subtraction the
+grammar reads: `query.Eval("2026-11")` is 2015.
+
+Arithmetic over literals is checked against the field as well. Its result
+must be of the field's kind (`ttl>10-3` compares a duration with 7), its
+operands must go together (`10-7d`, and `7d-1.5h`, where `1.5h` is text), a
+divisor written as zero is refused (`n=10/0`), and a field of whole numbers
+refuses a fraction (`n=10/4`). Arithmetic that reads a field or calls a
+function is left to the evaluator.
 
 A value that has the shape of a number, a date, a duration or arithmetic and
 is meant as text goes in quotes: `name="10-3"`. A field declared as text

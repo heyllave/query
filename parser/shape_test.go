@@ -1,6 +1,7 @@
 package parser
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/heyllave/query/ast"
@@ -135,5 +136,79 @@ func TestValueShape_AFailedDateIsASubtractionEverywhere(t *testing.T) {
 	}
 	if v := expr.(*ast.ValueExpr).Value; v.Type != ast.ValueArith {
 		t.Fatalf("2026-11-5 as a value is %v, want arithmetic", v.Type)
+	}
+}
+
+// A star makes a pattern out of text only. After arithmetic it is an error,
+// as the Grammar page says under the table.
+func TestValueShape_AStarAfterArithmeticIsAnError(t *testing.T) {
+	for _, v := range []string{"2026-11*", "10-3*", "2026-11-5*"} {
+		for _, cfg := range []Config{{}, Config{}.Strict()} {
+			if _, err := ParseWith("f="+v, cfg); err == nil {
+				t.Errorf("f=%s parses", v)
+			}
+		}
+	}
+}
+
+// A date-shaped run is marked only when its parts could be a month and a
+// day, and only as one unbroken run that is the whole value.
+func TestValueShape_ShortDateMark(t *testing.T) {
+	for v, want := range map[string]bool{
+		"2026-11": true, "2026-1": true, "2026-12": true, "2026-11-5": true, "2026-1-31": true, "2026-2-30": true,
+		"2026-13": false, "2026-0": false, "2026-00": false, "2026-1-32": false, "2026-1-0": false, "1500-50": false,
+		"999-5": false, "12345-6": false, "2026-111": false, "2026-11-5-3": false, "2026-11-5-1d": false,
+		"2026 - 11": false, "(2026)-11": false, "(2026-11)": false, "2026+11": false, "2026-11*2": false,
+		"-2026-11": false, "2026--11": false, "10-3": false,
+	} {
+		expr, err := ParseWith("f="+v, Config{})
+		if err != nil {
+			t.Errorf("f=%s does not parse: %v", v, err)
+			continue
+		}
+		q, ok := expr.(*ast.QualifierExpr)
+		if !ok {
+			t.Errorf("f=%s parsed to %T", v, expr)
+			continue
+		}
+		if q.Value.ShortDate != want {
+			t.Errorf("%s: marked %v, want %v", v, q.Value.ShortDate, want)
+		}
+	}
+	// The mark holds in a range end, an IN list and a function argument, and
+	// survives printing.
+	for _, q := range []string{"f:1..2026-11", "f IN (1, 2026-11)", "f>abs(2026-11-5)", "contains(f, 2026-11)"} {
+		expr, err := Parse(q, 0)
+		if err != nil {
+			t.Fatalf("%s: %v", q, err)
+		}
+		out := ast.String(expr)
+		again, err := Parse(out, 0)
+		if err != nil || ast.String(again) != out {
+			t.Errorf("%s prints as %s, which does not read back the same (%v)", q, out, err)
+		}
+		if !strings.Contains(out, "2026-11") {
+			t.Errorf("%s prints as %s, which no longer holds the run as written", q, out)
+		}
+	}
+}
+
+// A bare run of digits and hyphens where a field belongs is reported whole.
+func TestBareNumberRunIsReportedWhole(t *testing.T) {
+	for q, want := range map[string]string{
+		"2026-11":           `expected a field name, got "2026-11"`,
+		"a=1 AND 2026-11-5": `expected a field name, got "2026-11-5"`,
+		"812":               `expected a field name, got "812"`,
+		"(10-3)":            `expected a field name, got "10-3"`,
+	} {
+		_, err := ParseWith(q, Config{}.Strict())
+		errs := Errors(err)
+		if len(errs) == 0 || errs[0].Message != want {
+			t.Errorf("%s: got %v, want the message %s", q, err, want)
+			continue
+		}
+		if got := q[errs[0].Position.Offset : errs[0].Position.Offset+errs[0].Position.Length]; !strings.Contains(want, got) {
+			t.Errorf("%s: the error spans %q", q, got)
+		}
 	}
 }
