@@ -25,6 +25,9 @@ type Completion struct {
 	Function string   `json:"function,omitempty"`
 	Lists    []string `json:"lists,omitempty"`
 	Quoted   bool     `json:"quoted,omitempty"`
+	// Arithmetic marks a value that is an operand of arithmetic, where only
+	// a number, a date or a duration can stand.
+	Arithmetic bool `json:"arithmetic,omitempty"`
 }
 
 // Span is a stretch of the query: where it starts and how long it is, in
@@ -72,15 +75,16 @@ func Complete(query, fieldsJSON string, cursor int, utf16 bool, o Options) Envel
 
 func completionToJSON(c complete.Completion, query string, utf16 bool) Completion {
 	out := Completion{
-		Slot:     c.Slot.String(),
-		Replace:  spanOf(c.Replace, query, utf16),
-		Prefix:   c.Prefix,
-		Items:    itemsToJSON(c.Items),
-		Field:    c.Field,
-		Operator: c.Operator,
-		Function: c.Function,
-		Lists:    c.Lists,
-		Quoted:   c.Quoted,
+		Slot:       c.Slot.String(),
+		Replace:    spanOf(c.Replace, query, utf16),
+		Prefix:     c.Prefix,
+		Items:      itemsToJSON(c.Items),
+		Field:      c.Field,
+		Operator:   c.Operator,
+		Function:   c.Function,
+		Lists:      c.Lists,
+		Quoted:     c.Quoted,
+		Arithmetic: c.Arithmetic,
 	}
 	if c.Known {
 		out.Type = c.Type.String()
@@ -116,7 +120,7 @@ func Offer(completionJSON, candidatesJSON string) Envelope {
 	if !found {
 		return Fail(fmt.Sprintf("invalid completion: unknown slot %q", in.Slot))
 	}
-	c := complete.Completion{Slot: slot, Field: in.Field, Quoted: in.Quoted}
+	c := complete.Completion{Slot: slot, Field: in.Field, Quoted: in.Quoted, Function: in.Function, Arithmetic: in.Arithmetic}
 	if in.Type != "" {
 		if err := json.Unmarshal([]byte(fmt.Sprintf("%q", in.Type)), &c.Type); err != nil {
 			return Fail("invalid completion: " + err.Error())

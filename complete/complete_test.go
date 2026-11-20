@@ -1,13 +1,16 @@
 package complete
 
 import (
+	"encoding/json"
 	"math/rand"
+	"os"
 	"reflect"
 	"strings"
 	"testing"
 	"unicode/utf8"
 
 	"github.com/heyllave/query/ast"
+	"github.com/heyllave/query/eval"
 	"github.com/heyllave/query/parser"
 	"github.com/heyllave/query/token"
 	"github.com/heyllave/query/validate"
@@ -209,7 +212,7 @@ func TestAt_DescribesTheSlot(t *testing.T) {
 		{query: `name="a b|" AND ready=true`, field: "name", known: true, typ: validate.TypeText, operator: "=", prefix: "a b", replace: `"a b"`, quoted: true},
 		{query: "labels.team=pl|", field: "labels.team", known: true, typ: validate.TypeText, operator: "=", prefix: "pl", replace: "pl"},
 		{query: "bogus=x|", field: "bogus", operator: "=", prefix: "x", replace: "x"},
-		{query: "lower(name)=x|", operator: "=", prefix: "x", replace: "x"},
+		{query: "lower(name)=x|", operator: "=", prefix: "x", replace: "x", function: "lower"},
 		{query: "forks@(ports@(number=4|", field: "number", known: true, typ: validate.TypeInteger, operator: "=", prefix: "4", replace: "4", lists: []string{"forks", "ports"}},
 		{query: "labels.|", field: "labels", known: true, typ: validate.TypeText, replace: "labels."},
 		{query: "name=x AND labels.app.kubernetes.io/na|me=y", field: "labels", known: true, typ: validate.TypeText, prefix: "app.kubernetes.io/na", replace: "labels.app.kubernetes.io/name"},
@@ -693,7 +696,7 @@ func FuzzValueText(f *testing.F) {
 		if !utf8.ValidString(s) {
 			return
 		}
-		for _, text := range []string{ValueText(s), valueText(s, validate.TypeText, true, true)} {
+		for _, text := range []string{ValueText(s), valueText(s, false, true)} {
 			expr, err := parser.ParseWith("f="+text, strict)
 			if err != nil {
 				t.Fatalf("ValueText(%q) = %s, which does not parse: %v", s, text, err)
@@ -746,4 +749,264 @@ func FuzzFieldText(f *testing.F) {
 			t.Fatalf("FieldText(%q) = %s, which reads back as %s", s, text, ast.String(expr))
 		}
 	})
+}
+
+// A value compared with a function's result is not known to be text, so a
+// number offered there stays a number: len(name)>"5" would compare as text
+// and answer differently.
+func TestCompletion_OfferAfterAFunctionKeepsLiterals(t *testing.T) {
+	c, query := at(t, "len(name)>|", strict)
+	if c.Slot != parser.SlotValue || c.Function != "len" || c.Field != "" {
+		t.Fatalf("completion = %+v", c)
+	}
+	items := c.Offer("5", "10", "1.5", "7d", "two words", "abc")
+	if got, want := texts(items), []string{"5", "10", "1.5", "7d", `"two words"`, "abc"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("texts = %q, want %q", got, want)
+	}
+
+	// The accepted query answers as the one a person would type.
+	fields := schema()
+	record := map[string]any{"name": "abcdefg"}
+	for i, typed := range []string{"len(name)>5", "len(name)>10"} {
+		accepted := apply(query, c, items[i])
+		if accepted != typed {
+			t.Fatalf("accepted = %q, want %q", accepted, typed)
+		}
+		got, err := eval.Compile(accepted, fields)
+		if err != nil {
+			t.Fatal(err)
+		}
+		want, err := eval.Compile(typed, fields)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got.Match(record) != want.Match(record) {
+			t.Errorf("%s matches %v, the typed form %v", accepted, got.Match(record), want.Match(record))
+		}
+	}
+	if prog, _ := eval.Compile("len(name)>10", fields); prog.Match(record) {
+		t.Error("len(name)>10 matches a seven-letter name")
+	}
+
+	// In an IN list after a function, and inside an open quote, the same
+	// rules hold.
+	c, _ = at(t, "len(name) IN (1, |", strict)
+	if got := texts(c.Offer("5")); !reflect.DeepEqual(got, []string{"5"}) {
+		t.Errorf("in a list after a function: %q", got)
+	}
+	c, _ = at(t, `lower(name)="a|`, strict)
+	if got := texts(c.Offer("5")); !reflect.DeepEqual(got, []string{`"5"`}) {
+		t.Errorf("inside a quote after a function: %q", got)
+	}
+	// A field nothing is known about is still taken as text.
+	c, _ = at(t, "bogus>|", strict)
+	if got := texts(c.Offer("5")); !reflect.DeepEqual(got, []string{`"5"`}) {
+		t.Errorf("after an unknown field: %q", got)
+	}
+}
+
+// Accepting an item never writes twice what the query already has after the
+// cursor, and never leaves half of what it replaced.
+func TestAt_AcceptingAnItemInTheMiddleOfAQuery(t *testing.T) {
+	keys := []string{"my key", "team"}
+	for _, tc := range []struct {
+		query string // with the cursor
+		pick  string // the label to accept, from the items or from keys
+		want  string
+	}{
+		// A nested field's dot, when the dot is already there.
+		{"labels|.foo=1", "labels", "labels.foo=1"},
+		{"lab|.foo=1", "labels", "labels.foo=1"},
+		{"lab|=1", "labels", "labels=1"},
+		{"lab| AND name=x", "labels", "labels AND name=x"},
+		{"name=x AND lab|", "labels", "name=x AND labels."},
+		{"name=x AND lab|els.team=y", "labels", "name=x AND labels.team=y"},
+		// A selector's parenthesis, when the parenthesis is already there.
+		{"forks@al|(baselineKind=x)", "@all(...)", "forks@all(baselineKind=x)"},
+		{"forks@|(baselineKind=x)", "@none(...)", "forks@none(baselineKind=x)"},
+		{"forks @|(baselineKind=x)", "@all(...)", "forks @all(baselineKind=x)"},
+		{"forks@al|", "@all(...)", "forks@all("},
+		// An IN list's parenthesis.
+		{"name |(a, b)", "IN (...)", "name IN(a, b)"},
+		// A bracketed name with its quote closed and its bracket missing.
+		{`["labels.my|"`, "my key", `["labels.my key"]`},
+		{`["labels.my|"=x`, "my key", `["labels.my key"]=x`},
+		{`["labels.my|"]=x`, "my key", `["labels.my key"]=x`},
+		{`["labels.te|`, "team", "labels.team"},
+		// A value that is the name of a call goes with its arguments.
+		{"managedBy=us|er(x)", "user", "managedBy=user"},
+		{"managedBy=us|er(x) AND ready=true", "user", "managedBy=user AND ready=true"},
+		{"managedBy=us|er", "user", "managedBy=user"},
+	} {
+		c, query := at(t, tc.query, strict)
+		items := c.Items
+		if c.Slot == parser.SlotKey {
+			items = c.Offer(keys...)
+		}
+		var picked *Item
+		for i := range items {
+			if items[i].Label == tc.pick {
+				picked = &items[i]
+			}
+		}
+		if picked == nil {
+			t.Errorf("%s: %q is not offered: %q", tc.query, tc.pick, labels(items))
+			continue
+		}
+		if got := apply(query, c, *picked); got != tc.want {
+			t.Errorf("%s: accepting %q gives %q, want %q", tc.query, tc.pick, got, tc.want)
+		}
+	}
+	// Each of the results that is a whole query parses.
+	for _, q := range []string{"labels.foo=1", "forks@all(baselineKind=x)", `["labels.my key"]=x`, "managedBy=user AND ready=true", "name IN(a, b)"} {
+		if _, err := parser.ParseWith(q, strict); err != nil {
+			t.Errorf("%s does not parse: %v", q, err)
+		}
+	}
+}
+
+func TestAt_AfterAFieldAndNot(t *testing.T) {
+	for _, tc := range []struct {
+		query   string
+		strict  []string
+		lenient []string
+	}{
+		{"name NOT |", []string{"IN ("}, []string{"IN ("}},
+		{"name NOT I|", []string{"IN ("}, []string{"IN (", "replicas", `["owner email"]`}},
+		{"name NOT in|", []string{"IN ("}, []string{"IN ("}},
+		{"name NOT re|", nil, []string{"replicas", "ready", "createdAt"}},
+		// A field that cannot be negated has no NOT IN.
+		{`["owner email"] NOT |`, nil, nil},
+		{"bogus NOT |", []string{"IN ("}, []string{"IN ("}},
+	} {
+		c, query := at(t, tc.query, strict)
+		if got := texts(c.Items); !reflect.DeepEqual(got, tc.strict) && (len(got) > 0 || len(tc.strict) > 0) {
+			t.Errorf("%s under the strict grammar: %q, want %q", tc.query, got, tc.strict)
+		}
+		if len(c.Items) > 0 && c.Items[0].Text == "IN (" {
+			if got := apply(query, c, c.Items[0]); !strings.HasSuffix(got, "NOT IN (") {
+				t.Errorf("%s: accepting IN gives %q", tc.query, got)
+			}
+		}
+		c, _ = at(t, tc.query, parser.Config{})
+		if got := texts(c.Items); !reflect.DeepEqual(got, tc.lenient) && (len(got) > 0 || len(tc.lenient) > 0) {
+			t.Errorf("%s under the default grammar: %q, want %q", tc.query, got, tc.lenient)
+		}
+	}
+}
+
+// Under the strict grammar only a connective follows a complete condition,
+// so nothing is offered where the default grammar would start the next one.
+func TestAt_StrictOffersNothingWhereOnlyAConnectiveCanCome(t *testing.T) {
+	for _, q := range []string{"name=x NOT |", "name=x (|", "name=x ready=|", "forks@first (|"} {
+		if c, _ := at(t, q, strict); c.Slot != parser.SlotNone || len(c.Items) != 0 {
+			t.Errorf("%s under the strict grammar: slot %s items %q", q, c.Slot, texts(c.Items))
+		}
+		if c, _ := at(t, q, parser.Config{}); c.Slot == parser.SlotNone {
+			t.Errorf("%s under the default grammar: nothing offered", q)
+		}
+	}
+}
+
+// TestAt_AcceptingAnItemNeverAddsAParseError takes every query of the shared
+// corpus, puts the cursor at every position in turn, and accepts every item
+// offered there. The result may still be unfinished, but up to the end of
+// the accepted text it must not have more parse errors than the query had:
+// a suggestion is never what breaks it. Host candidates go through Offer at the slots that take them.
+func TestAt_AcceptingAnItemNeverAddsAParseError(t *testing.T) {
+	data, err := os.ReadFile("../conformance/corpus.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var corpus struct {
+		Cases []struct {
+			Query string `json:"query"`
+		} `json:"cases"`
+	}
+	if err := json.Unmarshal(data, &corpus); err != nil {
+		t.Fatal(err)
+	}
+	fields := append(schema(),
+		validate.FieldConfig{Name: "state", Type: validate.TypeText, AllowedOps: validate.TextOps, Values: []string{"draft", "in review"}},
+		validate.FieldConfig{Name: "total", Type: validate.TypeDecimal, AllowedOps: validate.NumericOps},
+		validate.FieldConfig{Name: "created_at", Type: validate.TypeDatetime, AllowedOps: validate.DateOps},
+	)
+	candidates := []string{"web", "two words", "812", "a*b", "7d"}
+	// errorsBefore counts the parse errors that start before limit. An error
+	// at or after the accepted text says only that more is needed or that
+	// what followed no longer fits, which is not the suggestion breaking
+	// what was written.
+	errorsBefore := func(q string, limit int, cfg parser.Config) int {
+		_, err := parser.ParseWith(q, cfg)
+		n := 0
+		for _, e := range parser.Errors(err) {
+			if e.Position.Offset < limit {
+				n++
+			}
+		}
+		return n
+	}
+
+	accepted := 0
+	for _, tc := range corpus.Cases {
+		q := tc.Query
+		if q == "" || !utf8.ValidString(q) {
+			continue
+		}
+		for _, cfg := range []parser.Config{{}, strict} {
+			for cursor := 0; cursor <= len(q); cursor++ {
+				if !utf8.ValidString(q[:cursor]) {
+					continue
+				}
+				c := At(q, cursor, fields, cfg)
+				// Text typed in front of other text runs into it, whoever
+				// types it, so only a position where the replaced span is
+				// followed by a break is held to this: the end, a space or
+				// a closing parenthesis.
+				if rest := q[c.Replace.Offset+c.Replace.Length:]; rest != "" && rest[0] != ' ' && rest[0] != ')' {
+					continue
+				}
+				items := append([]Item{}, c.Items...)
+				items = append(items, c.Offer(candidates...)...)
+				for _, it := range items {
+					accepted++
+					out := apply(q, c, it)
+					end := c.Replace.Offset + len(it.Text)
+					before := errorsBefore(q, c.Replace.Offset+c.Replace.Length, cfg)
+					if after := errorsBefore(out, end, cfg); after > before {
+						t.Errorf("%q at %d (%s, strict=%v): accepting %q gives %q, with %d parse errors up to the accepted text where there were %d",
+							q, cursor, c.Slot, cfg.ExplicitAnd, it.Text, out, after, before)
+					}
+				}
+			}
+		}
+	}
+	if accepted < 5000 {
+		t.Fatalf("only %d items were accepted; the corpus did not load as expected", accepted)
+	}
+}
+
+// After an arithmetic sign only a number, a date or a duration can stand:
+// text would end the arithmetic and leave the sign behind.
+func TestCompletion_OfferForAnOperandOfArithmetic(t *testing.T) {
+	c, query := at(t, "replicas>10 - 3|", strict)
+	if c.Slot != parser.SlotValue || !c.Arithmetic {
+		t.Fatalf("completion = %+v", c)
+	}
+	items := c.Offer("web", "5", "two words", "7d", "2026-01-01", "1.5", "true")
+	if got, want := texts(items), []string{"5", "7d", "2026-01-01", "1.5", "true"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("texts = %q, want %q", got, want)
+	}
+	if got := apply(query, c, items[0]); got != "replicas>10 - 5" {
+		t.Errorf("applied = %q", got)
+	}
+	// The schema's own values are held to the same rule.
+	c, _ = at(t, "replicas>10 - 4|", strict)
+	if got, want := texts(c.Items), []string{"42"}; !reflect.DeepEqual(got, want) {
+		t.Errorf("schema values = %q, want %q", got, want)
+	}
+	// A plain value slot is not marked.
+	if c, _ := at(t, "replicas>|", strict); c.Arithmetic {
+		t.Error("replicas>: marked as an operand of arithmetic")
+	}
 }

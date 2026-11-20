@@ -35,6 +35,11 @@ semantic versioning.
   the cursor counted as `selectionStart` counts it. The C library has
   `QueryComplete` and `QueryOffer`, counting bytes, or UTF-16 code units
   with `"utf16": true`.
+- Completion says when a value is compared with a function's result
+  (`Completion.Function`) or is an operand of arithmetic
+  (`Completion.Arithmetic`), and `Offer` writes candidates to suit: a number
+  stays a number after `len(name)>`, and text is left out after
+  `now()-`.
 - Completion cases in the shared corpus, run by every client.
 - A "Completing a query as it is typed" guide.
 - A "query and jq" guide: the two tools on the same records, with the cases

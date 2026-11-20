@@ -495,6 +495,12 @@ export interface Completion {
   lists?: string[];
   /** The cursor is inside an open quoted string; every item's text is a whole quoted string. */
   quoted?: boolean;
+  /**
+   * The value is an operand of arithmetic, as after the minus in
+   * `createdAt>now()-`. Only a number, a date or a duration can stand there,
+   * so `offer` leaves out any other candidate.
+   */
+  arithmetic?: boolean;
 }
 
 /** Options for {@link QueryAPI.complete}: the grammar the query will be parsed under. */

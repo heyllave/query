@@ -93,7 +93,7 @@ declare global {
   function queryComplete(
     q: string,
     fieldsJSON: string,
-    options?: number | (ParseOptions & { cursor?: number })
+    options?: number | (ParseOptions & { cursor?: number | null })
   ): CompleteResult;
   function queryOffer(completionJSON: string, candidatesJSON: string): OfferResult;
 

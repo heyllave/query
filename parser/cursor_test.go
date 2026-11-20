@@ -107,7 +107,6 @@ func TestCursorAt_Slots(t *testing.T) {
 		{query: `"my field" |`, slot: SlotOperator, field: "my field"},
 		{query: "(name |", slot: SlotOperator, field: "name", closable: true},
 		{query: "name I|", slot: SlotOperator, field: "name", prefix: "I", word: "I"},
-		{query: "a b c |", slot: SlotOperator, field: "c"},
 		{query: "not=1 AND in |", slot: SlotOperator, field: "in"},
 		{query: "true |", slot: SlotOperator, field: "true"},
 
@@ -154,8 +153,11 @@ func TestCursorAt_Slots(t *testing.T) {
 		{query: "total:1..5|", slot: SlotValue, field: "total", op: token.Colon, prefix: "5", word: "5"},
 		{query: "a=1 AND b=|", slot: SlotValue, field: "b", op: token.Eq},
 		{query: "(a=1 OR b=|", slot: SlotValue, field: "b", op: token.Eq},
-		{query: "lower(name)=|", slot: SlotValue, op: token.Eq},
-		{query: "lower(name)=jo|", slot: SlotValue, op: token.Eq, prefix: "jo", word: "jo"},
+		{query: "lower(name)=|", slot: SlotValue, op: token.Eq, fn: "lower"},
+		{query: "lower(name)=jo|", slot: SlotValue, op: token.Eq, prefix: "jo", word: "jo", fn: "lower"},
+		{query: "len(lower(name))>|", slot: SlotValue, op: token.Gt, fn: "len"},
+		{query: "a=1 AND len(name):1..|", slot: SlotValue, op: token.Colon, fn: "len"},
+		{query: "name=x AND total>|", slot: SlotValue, field: "total", op: token.Gt},
 
 		// Quoted values.
 		{query: `name="|`, slot: SlotValue, field: "name", op: token.Eq, word: `"`, quoted: true},
@@ -174,7 +176,8 @@ func TestCursorAt_Slots(t *testing.T) {
 		{query: "name NOT IN (|", slot: SlotValue, field: "name", op: token.In},
 		{query: "name IN (a, b) |", slot: SlotConnective},
 		{query: "(name IN (a) |", slot: SlotConnective, closable: true},
-		{query: "lower(name) IN (|", slot: SlotValue, op: token.In},
+		{query: "lower(name) IN (|", slot: SlotValue, op: token.In, fn: "lower"},
+		{query: "lower(name) IN (a, |", slot: SlotValue, op: token.In, fn: "lower"},
 
 		// After a complete condition.
 		{query: "a=1 |", slot: SlotConnective},
@@ -219,6 +222,10 @@ func TestCursorAt_WordReachesTheEndOfTheWordUnderTheCursor(t *testing.T) {
 		{query: "labels.te|am=x", slot: SlotKey, field: "labels", prefix: "te", word: "team"},
 		{query: "forks@al|l(x=1)", slot: SlotSelector, field: "forks", prefix: "al", word: "all"},
 		{query: "a=1 AN|D b=2", slot: SlotConnective, prefix: "AN", word: "AND"},
+		// A word that names a call goes with its arguments.
+		{query: "name=lo|wer(x)", slot: SlotValue, field: "name", op: token.Eq, prefix: "lo", word: "lower(x)"},
+		{query: "name=lo|wer(trim(x)) AND b=1", slot: SlotValue, field: "name", op: token.Eq, prefix: "lo", word: "lower(trim(x))"},
+		{query: "name=lo|wer(x", slot: SlotValue, field: "name", op: token.Eq, prefix: "lo", word: "lower"},
 		// Nothing typed toward the slot: the text after the cursor is the
 		// next thing and is left alone.
 		{query: "|name=x", slot: SlotField},
@@ -240,6 +247,18 @@ func TestCursorAt_BracketedFieldNames(t *testing.T) {
 		{query: `["labels.my k|`, slot: SlotKey, field: "labels", prefix: "my k", word: `["labels.my k`, bracket: true},
 		{query: `["labels.my k|ey"]=x`, slot: SlotKey, field: "labels", prefix: "my k", word: `["labels.my key"]`, bracket: true},
 		{query: "a=1 AND [lab|", slot: SlotField, prefix: "lab", word: "[lab", bracket: true},
+		// The name's own closing quote and bracket go with it, whichever of
+		// them is there.
+		{query: `["labels.my|"`, slot: SlotKey, field: "labels", prefix: "my", word: `["labels.my"`, bracket: true},
+		{query: `["labels.my|"=x`, slot: SlotKey, field: "labels", prefix: "my", word: `["labels.my"`, bracket: true},
+		{query: `["labels.my|" ]=x`, slot: SlotKey, field: "labels", prefix: "my", word: `["labels.my" ]`, bracket: true},
+		{query: "[labels.te|am]=x", slot: SlotKey, field: "labels", prefix: "te", word: "[labels.team]", bracket: true},
+		{query: "[labels.te|am=x", slot: SlotKey, field: "labels", prefix: "te", word: "[labels.team", bracket: true},
+		{query: "[lab|els", slot: SlotField, prefix: "lab", word: "[labels", bracket: true},
+		// A quote further on belongs to a later string, so the name ends
+		// at the cursor.
+		{query: `["labels.my| AND x="y"`, slot: SlotKey, field: "labels", prefix: "my", word: `["labels.my`, bracket: true},
+		{query: `["labels.my| AND x="y`, slot: SlotKey, field: "labels", prefix: "my", word: `["labels.my`, bracket: true},
 	}
 	for _, tc := range cases {
 		t.Run(tc.query, func(t *testing.T) { checkCursor(t, tc, Config{}) })
@@ -251,6 +270,99 @@ func TestCursorAt_BracketedFieldNames(t *testing.T) {
 			t.Fatalf("field span = %q, want %q", got, "labels.app.team")
 		}
 	})
+}
+
+// What follows a complete condition depends on the grammar: with an
+// implicit AND the next condition may start, without one only a connective
+// can come.
+func TestCursorAt_TheGrammarDecidesWhatFollowsACondition(t *testing.T) {
+	strict := Config{}.Strict()
+	for _, tc := range []struct {
+		query   string
+		lenient Slot
+		strict  Slot
+	}{
+		{"a b c |", SlotOperator, SlotNone},
+		{"name=x NOT |", SlotField, SlotNone},
+		{"name=x (|", SlotField, SlotNone},
+		{"name=x b|", SlotConnective, SlotConnective},
+		{"name=x b |", SlotOperator, SlotNone},
+		{"name=x b=|", SlotValue, SlotNone},
+		{"(a=1) b|", SlotConnective, SlotConnective},
+		{"forks@first (|", SlotField, SlotNone},
+		{"lower(name) x=|", SlotValue, SlotNone},
+		// With a connective both grammars agree.
+		{"name=x AND NOT |", SlotField, SlotField},
+		{"name=x AND (|", SlotField, SlotField},
+		{"name=x OR b=|", SlotValue, SlotValue},
+	} {
+		query, offset := split(t, tc.query)
+		if got := CursorAt(query, offset, Config{}).Slot; got != tc.lenient {
+			t.Errorf("%s under the default grammar: slot = %s, want %s", tc.query, got, tc.lenient)
+		}
+		if got := CursorAt(query, offset, strict).Slot; got != tc.strict {
+			t.Errorf("%s under the strict grammar: slot = %s, want %s", tc.query, got, tc.strict)
+		}
+	}
+}
+
+func TestCursorAt_AnOperandOfArithmetic(t *testing.T) {
+	for marked, want := range map[string]bool{
+		"total>10+|":           false, // one word so far, "10+": a sign with nothing after it is not arithmetic yet
+		"total>10 - 3|":        true,
+		"total>10 - 3|0":       true,
+		"total>10 - |":         false, // a sign with nothing after it does not lex as arithmetic yet
+		"total>10*2+|":         true,
+		"total>(1+|":           true,
+		"created>now()-|":      true,
+		"total>10+5|":          true,
+		"total>|":              false,
+		"total>10 AND cpu>|":   false,
+		"total>10+5 AND cpu>|": false,
+		"total:1+1..|":         false,
+		"total:1..2+3|":        true,
+		"total IN (1+1, |":     false,
+		"total IN (1, 2+3|":    true,
+	} {
+		query, offset := split(t, marked)
+		c := CursorAt(query, offset, Config{})
+		if c.Slot == SlotNone && !want {
+			continue
+		}
+		if c.Slot != SlotValue || c.Arithmetic != want {
+			t.Errorf("%s: slot %s arithmetic %v, want a value with arithmetic %v", marked, c.Slot, c.Arithmetic, want)
+		}
+	}
+}
+
+func TestCursorAt_AfterAFieldAndNot(t *testing.T) {
+	for _, tc := range []struct {
+		query  string
+		prefix string
+	}{
+		{"name NOT |", ""},
+		{"name NOT I|", "I"},
+		{"a=1 AND labels.team not |", ""},
+		{"(name NOT in|", "in"},
+	} {
+		query, offset := split(t, tc.query)
+		for _, cfg := range []Config{{}, Config{}.Strict()} {
+			c := CursorAt(query, offset, cfg)
+			if c.Slot != SlotOperator || !c.Negated || c.Prefix != tc.prefix || len(c.Field) == 0 {
+				t.Errorf("%s: slot %s negated %v prefix %q field %q", tc.query, c.Slot, c.Negated, c.Prefix, c.Field)
+			}
+		}
+	}
+	// Once IN is written the list follows as usual, and a plain operator
+	// slot is not negated.
+	query, offset := split(t, "name NOT IN (|")
+	if c := CursorAt(query, offset, Config{}); c.Slot != SlotValue || c.Negated {
+		t.Errorf("name NOT IN (: slot %s negated %v", c.Slot, c.Negated)
+	}
+	query, offset = split(t, "name |")
+	if c := CursorAt(query, offset, Config{}); c.Negated {
+		t.Error("name: a plain operator slot is marked negated")
+	}
 }
 
 func TestCursorAt_NothingToSay(t *testing.T) {
@@ -351,7 +463,7 @@ func checkCursorInvariants(t *testing.T, input string, offset int, c Cursor) {
 		t.Fatalf("CursorAt(%q, %d): word %+v splits a character", input, offset, w)
 	}
 	if c.Slot == SlotNone {
-		if w.Length != 0 || c.Prefix != "" || c.Field != nil || c.Lists != nil || c.Quoted || c.Bracketed {
+		if w.Length != 0 || c.Prefix != "" || c.Field != nil || c.Lists != nil || c.Quoted || c.Bracketed || c.Negated || c.Arithmetic || c.Function != "" {
 			t.Fatalf("CursorAt(%q, %d): a position with no slot carries %+v", input, offset, c)
 		}
 		return

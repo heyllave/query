@@ -115,36 +115,28 @@ func optionsArg(args []js.Value, i int, known []string) (bridgejson.Options, bri
 	return o, nil
 }
 
-// jsComplete is queryComplete(query, fieldsJSON, cursor? | options?). The
-// cursor counts UTF-16 code units, as a JavaScript string is indexed, and
-// so does the span in the answer. It is given as a number, or as the cursor
-// member of an options object; without it the cursor is the end of the
+// jsComplete is queryComplete(query, fieldsJSON, maxLength? | options?). The
+// last argument is what every other call takes, a number for maxLength or an
+// options object, and the object also carries cursor. The cursor counts
+// UTF-16 code units, as a JavaScript string is indexed, and so does the span
+// in the answer. Absent or null, as in the C library, it is the end of the
 // query.
 func jsComplete(args []js.Value) bridgejson.Envelope {
-	query := args[0]
-	cursor := bridgejson.UTF16Len(query.String())
-	o := bridgejson.Options{MaxLength: bridgejson.DefaultMaxLength}
-	if len(args) > 2 {
-		arg := args[2]
-		at := arg
-		if arg.Type() != js.TypeNumber {
-			var fail bridgejson.Envelope
-			if o, fail = optionsArg(args, 2, completeOptions); fail != nil {
-				return fail
-			}
-			at = js.Undefined()
-			if arg.Type() == js.TypeObject {
-				at = arg.Get("cursor")
-			}
-		}
-		if !absent(at) {
+	query := args[0].String()
+	cursor := bridgejson.UTF16Len(query)
+	o, fail := optionsArg(args, 2, completeOptions)
+	if fail != nil {
+		return fail
+	}
+	if len(args) > 2 && args[2].Type() == js.TypeObject {
+		if at := args[2].Get("cursor"); !absent(at) && at.Type() != js.TypeNull {
 			if at.Type() != js.TypeNumber || at.Float() != float64(at.Int()) {
 				return bridgejson.Fail("cursor must be an integer")
 			}
 			cursor = at.Int()
 		}
 	}
-	return bridgejson.Complete(query.String(), args[1].String(), cursor, true, o)
+	return bridgejson.Complete(query, args[1].String(), cursor, true, o)
 }
 
 // jsOffer is queryOffer(completionJSON, candidatesJSON).

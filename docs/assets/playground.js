@@ -209,7 +209,7 @@
       return;
     }
     // The cursor indexes the string, as selectionStart gives it.
-    var answer = window.queryComplete(input.value, fields, input.selectionStart);
+    var answer = window.queryComplete(input.value, fields, { cursor: input.selectionStart });
     if (answer.error || answer.result.slot === "none") {
       hideSuggestions();
       return;

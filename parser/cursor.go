@@ -65,8 +65,10 @@ type Cursor struct {
 	// at the end of, and an empty span at the cursor when it is in none.
 	// When Quoted or Bracketed it starts at the opening quote or bracket.
 	Word token.Position
-	// Prefix is the part of the word before the cursor, decoded: without an
-	// opening quote or bracket and with escapes resolved.
+	// Prefix is the part of the word before the cursor. Inside a quoted
+	// string or a bracketed name it is decoded: without the opening quote or
+	// bracket and with escapes resolved. An unquoted word is as it was
+	// typed, backslashes included.
 	Prefix string
 	// Quoted reports that the cursor is inside a "..." string still open
 	// before it.
@@ -84,8 +86,19 @@ type Cursor struct {
 	// Operator is, for SlotValue, the operator the value follows: a
 	// comparison, [token.Colon] for a range, [token.In] inside an IN list.
 	Operator token.Type
-	// Function is, for SlotArgument, the function being called.
+	// Function is, for SlotArgument, the function being called. For
+	// SlotValue it is the function on the left of the comparison, when
+	// there is one (`len(name)>` has Field nil and Function "len"): the
+	// value is compared with what the function gives, not with a field.
 	Function string
+	// Arithmetic reports, for SlotValue, that the value is an operand of
+	// arithmetic: it follows `+ - * / %` in `total>10 - <here>`. Only a
+	// number, a date or a duration can stand there; text would end the
+	// arithmetic and leave the sign behind.
+	Arithmetic bool
+	// Negated reports, for SlotOperator, that NOT follows the field, so
+	// only `IN (` can come: `name NOT <here>`.
+	Negated bool
 	// Lists names the selectors the position is inside, outermost first:
 	// for `forks@(items@(<here>` it is forks, then items. Field names at the
 	// position are those of one element of the innermost.
@@ -100,8 +113,10 @@ type Cursor struct {
 // extends [Cursor.Word] to the end of the word the cursor is in.
 //
 // It never fails. A position it cannot place (the text before it does not
-// read as a query, the offset is outside the input or splits a character,
-// the input is longer than cfg.MaxLength) has SlotNone.
+// read as a query, the offset is outside the input or splits a character)
+// has SlotNone. So has every position of an input longer than
+// cfg.MaxLength: a query over the limit will be refused whole, so nothing
+// is suggested for it. A host with long queries raises the limit for both.
 func CursorAt(input string, offset int, cfg Config) Cursor {
 	none := Cursor{Word: token.Position{Offset: offset}}
 	if offset < 0 || offset > len(input) {
@@ -154,7 +169,7 @@ func CursorAt(input string, offset int, cfg Config) Cursor {
 		return none
 	}
 
-	m := machine{tokens: tokens}
+	m := machine{tokens: tokens, explicitAnd: cfg.ExplicitAnd}
 	m.run()
 	m.place(&c)
 	if c.Slot == SlotNone {
@@ -210,11 +225,12 @@ func openFieldRef(s string, start int) string {
 // cursor. A position at the start of a word (nothing typed toward it) is
 // left alone: the text after it is the next thing, not this one.
 func wordEnd(input string, offset int, c Cursor, cfg Config) int {
-	if c.Quoted || c.Bracketed {
-		// The closing delimiter is this word's only when the whole input
-		// has its quotes and brackets in pairs; otherwise the next one
-		// found belongs to something later.
-		l := &lexer{input: input, strictValues: cfg.StrictValues}
+	l := &lexer{input: input, strictValues: cfg.StrictValues}
+	switch {
+	case c.Quoted:
+		// The closing quote is this string's only when the whole input has
+		// its quotes in pairs; otherwise the next one found opens something
+		// later.
 		l.run()
 		for _, e := range l.errors {
 			if e.Code == CodeUnclosedString || e.Code == CodeUnclosedFieldRef {
@@ -222,45 +238,87 @@ func wordEnd(input string, offset int, c Cursor, cfg Config) int {
 			}
 		}
 		l = &lexer{input: input, pos: c.Word.Offset}
-		if c.Quoted {
-			if _, ok := l.readQuotedString(); ok {
-				return l.pos
-			}
-			return offset
-		}
-		if i := strings.IndexByte(input[offset:], ']'); i >= 0 {
-			return offset + i + 1
+		if _, ok := l.readQuotedString(); ok {
+			return l.pos
 		}
 		return offset
-	}
-	if c.Word.Length == 0 {
+	case c.Bracketed:
+		return bracketEnd(input, offset, c.Word.Offset)
+	case c.Word.Length == 0:
 		return offset
-	}
-	l := &lexer{input: input}
-	if c.Slot != SlotValue {
+	case c.Slot != SlotValue:
 		return l.identEnd(offset)
 	}
 	i := offset
-	for i < len(input) && l.spaceWidth(i) == 0 && strings.IndexByte(`),"[]`, input[i]) < 0 {
+	for i < len(input) && l.spaceWidth(i) == 0 && strings.IndexByte(`(),"[]`, input[i]) < 0 {
 		i++
 	}
+	// A word that is the name of a call is replaced with its arguments, so
+	// no parenthesis is left behind: name=lo|wer(x).
+	if i < len(input) && input[i] == '(' {
+		if closed := l.skipCall(i); closed > 0 {
+			return closed
+		}
+	}
 	return i
+}
+
+// bracketEnd returns where the bracketed name opening at open ends, for a
+// cursor at offset inside it: past the closing quote of a quoted name and
+// past the ']' when it is there. A name left open ends at the cursor, since
+// what follows is then the rest of the query and not part of the name.
+func bracketEnd(input string, offset, open int) int {
+	l := &lexer{input: input, pos: open + 1}
+	l.skipWhitespace()
+	end := offset
+	if l.pos < len(input) && input[l.pos] == '"' {
+		if _, closed := l.readQuotedString(); !closed || l.pos < offset {
+			return offset
+		}
+		end = l.pos
+	} else {
+		for end < len(input) && (input[end] == '.' || l.identEnd(end) > end) {
+			if input[end] == '.' {
+				end++
+				continue
+			}
+			end = l.identEnd(end)
+		}
+	}
+	rest := end
+	for rest < len(input) && l.spaceWidth(rest) > 0 {
+		rest += l.spaceWidth(rest)
+	}
+	switch {
+	case rest < len(input) && input[rest] == ']':
+		return rest + 1
+	case end == offset:
+		return offset
+	case rest == len(input), strings.IndexByte("=!<>:)", input[rest]) >= 0:
+		// The name ended and its bracket is missing: `["labels.my"=x`. The
+		// closing quote is still the name's own.
+		return end
+	}
+	// Anything else after the quote means the quote found belongs to a
+	// later string, and the name runs on: `["labels.my AND x="y"`.
+	return offset
 }
 
 type cursorState int
 
 const (
-	stTerm    cursorState = iota // a condition starts here
-	stField                      // after a field name
-	stDot                        // after a dot in a field name
-	stAt                         // after the '@' of a selector
-	stIn                         // after IN, before its '('
-	stOperand                    // a value belongs here
-	stValue                      // after a value
-	stDone                       // after a complete condition
-	stArg                        // a fresh function argument
-	stArgRest                    // inside a function argument
-	stLost                       // the tokens do not read as a query
+	stTerm     cursorState = iota // a condition starts here
+	stField                       // after a field name
+	stDot                         // after a dot in a field name
+	stAt                          // after the '@' of a selector
+	stIn                          // after IN, before its '('
+	stOperand                     // a value belongs here
+	stValue                       // after a value
+	stDone                        // after a complete condition
+	stArg                         // a fresh function argument
+	stArgRest                     // inside a function argument
+	stFieldNot                    // after a field name and NOT
+	stLost                        // the tokens do not read as a query
 )
 
 type frameKind int
@@ -280,6 +338,12 @@ type place struct {
 	fieldStart int
 	op         token.Type
 	fn         string
+	// arith marks that the operand being written follows an arithmetic
+	// sign.
+	arith bool
+	// left is the function on the left of a comparison, when the left side
+	// is a call and not a field.
+	left string
 	// ranged marks that the '..' of a range has been written, so the value
 	// after it ends the condition.
 	ranged bool
@@ -299,11 +363,14 @@ type frame struct {
 // the parser would accept, and where the tokens stop making sense it is
 // lost and says so, rather than guessing.
 type machine struct {
-	tokens []token.Token
-	i      int
-	st     cursorState
-	at     place
-	frames []frame
+	// explicitAnd is the grammar's switch: without an implicit AND, only a
+	// connective can follow a complete condition.
+	explicitAnd bool
+	tokens      []token.Token
+	i           int
+	st          cursorState
+	at          place
+	frames      []frame
 }
 
 func (m *machine) run() {
@@ -343,6 +410,7 @@ func (m *machine) pop() {
 	}
 	f := m.frames[n-1]
 	m.frames = m.frames[:n-1]
+	called := m.at.fn
 	m.at = f.saved
 	if kind, ok := m.top(); ok && (kind == frameCall || kind == frameValueCall) {
 		m.st = stArgRest
@@ -353,7 +421,7 @@ func (m *machine) pop() {
 		m.st = stValue
 	case frameCall:
 		// A call is a condition by itself or the left side of one.
-		m.at = place{call: true}
+		m.at = place{call: true, left: called}
 		m.st = stDone
 	default:
 		m.st = stDone
@@ -409,9 +477,15 @@ func (m *machine) step(tok token.Token) {
 		case tok.Type == token.Not && m.next().Type == token.In:
 			m.i++
 			m.st = stIn
+		case tok.Type == token.Not && m.i == len(m.tokens)-1:
+			// NOT with nothing after it yet: `name NOT`, where IN may come.
+			m.st = stFieldNot
 		default:
 			m.afterCondition(tok)
 		}
+	case stFieldNot:
+		// Unreachable: the state is only entered on the last token.
+		m.st = stLost
 	case stDot:
 		if tok.Type != token.Ident && !tok.Type.IsKeyword() {
 			m.st = stLost
@@ -447,11 +521,14 @@ func (m *machine) step(tok token.Token) {
 		kind, framed := m.top()
 		switch {
 		case tok.Type.IsArithmetic():
+			m.at.arith = true
 			m.st = stOperand
 		case tok.Type == token.Range:
 			m.at.ranged = true
+			m.at.arith = false
 			m.st = stOperand
 		case tok.Type == token.Comma && framed && kind == frameList:
+			m.at.arith = false
 			m.st = stOperand
 		case tok.Type == token.RParen:
 			m.pop()
@@ -466,10 +543,10 @@ func (m *machine) step(tok token.Token) {
 		switch {
 		case tok.Type.IsOperator() && m.at.call:
 			// fn(...) as the left side of a comparison.
-			m.at = place{op: tok.Type}
+			m.at = place{op: tok.Type, left: m.at.left}
 			m.st = stOperand
 		case tok.Type == token.In && m.at.call:
-			m.at = place{}
+			m.at = place{left: m.at.left}
 			m.st = stIn
 		default:
 			m.afterCondition(tok)
@@ -504,7 +581,7 @@ func (m *machine) afterCondition(tok token.Token) {
 		m.st = stTerm
 	case tok.Type == token.RParen:
 		m.pop()
-	case startsTerm(tok.Type):
+	case startsTerm(tok.Type) && !m.explicitAnd:
 		m.stepTerm(tok)
 	default:
 		m.st = stLost
@@ -627,10 +704,16 @@ func (m *machine) place(c *Cursor) {
 	case stAt:
 		c.Slot = SlotSelector
 		c.Field = m.at.field
+	case stFieldNot:
+		c.Slot = SlotOperator
+		c.Field = m.at.field
+		c.Negated = true
 	case stOperand:
 		c.Slot = SlotValue
 		c.Field = m.at.field
 		c.Operator = m.at.op
+		c.Function = m.at.left
+		c.Arithmetic = m.at.arith
 	case stValue, stDone:
 		if inValue || (m.st == stValue && m.halfRange()) {
 			// Inside an IN list or a parenthesised value only ',' or ')'

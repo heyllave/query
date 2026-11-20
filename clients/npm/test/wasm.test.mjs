@@ -427,28 +427,28 @@ const strictGrammar = { explicitAnd: true, strictValues: true };
 const texts = (r) => r.result.items.map((it) => it.text);
 
 test("queryComplete walks a query from fields to values", () => {
-  let r = w.queryComplete("", completionFields, 0);
+  let r = w.queryComplete("", completionFields, { cursor: 0 });
   assert.equal(r.error, undefined);
   assert.equal(r.result.slot, "field");
   assert.deepEqual(texts(r), ["name", "status", "replicas", "labels.", "forks", "NOT"]);
 
-  r = w.queryComplete("status ", completionFields, 7);
+  r = w.queryComplete("status ", completionFields, { cursor: 7 });
   assert.equal(r.result.slot, "operator");
   assert.equal(r.result.field, "status");
   assert.deepEqual(texts(r), ["=", "!=", "IN (", "NOT IN ("]);
 
-  r = w.queryComplete("status=", completionFields, 7);
+  r = w.queryComplete("status=", completionFields, { cursor: 7 });
   assert.equal(r.result.slot, "value");
   assert.equal(r.result.type, "text");
   assert.equal(r.result.operator, "=");
   assert.deepEqual(texts(r), ["ready", '"not ready"', '"812"']);
   assert.deepEqual(r.result.items[1], { label: "not ready", text: '"not ready"', kind: "value" });
 
-  r = w.queryComplete("status=ready ", completionFields, 13);
+  r = w.queryComplete("status=ready ", completionFields, { cursor: 13 });
   assert.equal(r.result.slot, "connective");
   assert.deepEqual(texts(r), ["AND", "OR"]);
 
-  r = w.queryComplete("forks@(kind=", completionFields, 12);
+  r = w.queryComplete("forks@(kind=", completionFields, { cursor: 12 });
   assert.deepEqual(r.result.lists, ["forks"]);
   assert.deepEqual(texts(r), ["Rollout"]);
 });
@@ -467,17 +467,23 @@ test("queryComplete defaults the cursor to the end of the query", () => {
   }
 });
 
-test("queryComplete takes the cursor as a number or as an option", () => {
-  const byNumber = w.queryComplete("sta=x", completionFields, 3);
-  const byOption = w.queryComplete("sta=x", completionFields, { cursor: 3 });
-  assert.deepEqual(byNumber, byOption);
-  assert.deepEqual(byNumber.result.replace, { offset: 0, length: 3 });
-  assert.deepEqual(texts(byNumber), ["status"]);
+test("queryComplete takes its last argument as every other call does", () => {
+  // A number is maxLength, as in queryParse; the cursor travels in the object.
+  assert.equal(w.queryComplete("status=re", completionFields, 4).result.slot, "none");
+  assert.equal(w.queryComplete("status=re", completionFields, 64).result.slot, "value");
+  const r = w.queryComplete("sta=x", completionFields, { cursor: 3 });
+  assert.deepEqual(r.result.replace, { offset: 0, length: 3 });
+  assert.deepEqual(texts(r), ["status"]);
+  // A null cursor is an absent one, as in the C library.
+  assert.deepEqual(
+    w.queryComplete("status=re", completionFields, { cursor: null }),
+    w.queryComplete("status=re", completionFields)
+  );
 });
 
 test("queryComplete counts in UTF-16 code units", () => {
   const q = 'name="café 🚀" AND st';
-  const r = w.queryComplete(q, completionFields, q.length);
+  const r = w.queryComplete(q, completionFields, { cursor: q.length });
   assert.equal(r.error, undefined);
   assert.deepEqual(r.result.replace, { offset: q.length - 2, length: 2 });
   assert.equal(q.slice(r.result.replace.offset, r.result.replace.offset + r.result.replace.length), "st");
@@ -485,7 +491,7 @@ test("queryComplete counts in UTF-16 code units", () => {
 
   // Between the two halves of the rocket is not a position.
   const inside = q.indexOf("🚀") + 1;
-  assert.match(w.queryComplete(q, completionFields, inside).error, /cannot split a character/);
+  assert.match(w.queryComplete(q, completionFields, { cursor: inside }).error, /cannot split a character/);
 });
 
 test("queryComplete follows the grammar the options name", () => {
@@ -496,39 +502,39 @@ test("queryComplete follows the grammar the options name", () => {
 });
 
 test("queryComplete has nothing to say after text that does not read as a query", () => {
-  const r = w.queryComplete("name==", completionFields, 6);
+  const r = w.queryComplete("name==", completionFields, { cursor: 6 });
   assert.equal(r.error, undefined);
   assert.deepEqual(r.result, { slot: "none", replace: { offset: 6, length: 0 }, prefix: "", items: [] });
 });
 
 test("queryComplete refuses a call that is wrong", () => {
-  assert.match(w.queryComplete("name=x", completionFields, -1).error, /is not a position in the query/);
-  assert.match(w.queryComplete("name=x", completionFields, 7).error, /from 0 to 6/);
-  assert.equal(w.queryComplete("name=x", completionFields, 1.5).error, "cursor must be an integer");
+  assert.match(w.queryComplete("name=x", completionFields, { cursor: -1 }).error, /is not a position in the query/);
+  assert.match(w.queryComplete("name=x", completionFields, { cursor: 7 }).error, /from 0 to 6/);
+  assert.equal(w.queryComplete("name=x", completionFields, { cursor: 1.5 }).error, "cursor must be an integer");
+  assert.equal(w.queryComplete("name=x", completionFields, { cursor: [] }).error, "cursor must be an integer");
   assert.equal(w.queryComplete("name=x", completionFields, { cursor: "3" }).error, "cursor must be an integer");
-  assert.equal(w.queryComplete("name=x", completionFields, { cursor: null }).error, "cursor must be an integer");
   assert.match(w.queryComplete("name=x", completionFields, { cursr: 3 }).error, /unknown option "cursr"/);
   assert.equal(w.queryComplete("name=x", completionFields, { explicitAnd: 1 }).error, "explicitAnd must be a boolean");
   assert.match(w.queryComplete("name=x", completionFields, "3").error, /options must be/);
-  assert.match(w.queryComplete("name=x", "{", 3).error, /invalid fields config/);
-  assert.match(w.queryComplete("name=x", '[{"type":"text"}]', 3).error, /has no name/);
+  assert.match(w.queryComplete("name=x", "{", { cursor: 3 }).error, /invalid fields config/);
+  assert.match(w.queryComplete("name=x", '[{"type":"text"}]', { cursor: 3 }).error, /has no name/);
   assert.equal(w.queryComplete("name=x").error, "queryComplete: missing arguments");
-  assert.equal(w.queryComplete("name=x", completionFields, 3, 4).error, "queryComplete: too many arguments");
-  assert.equal(w.queryComplete("name=x", [], 3).error, "queryComplete: arguments must be strings");
+  assert.equal(w.queryComplete("name=x", completionFields, 3, { cursor: 4 }).error, "queryComplete: too many arguments");
+  assert.equal(w.queryComplete("name=x", [], { cursor: 3 }).error, "queryComplete: arguments must be strings");
 });
 
 test("queryOffer writes the host's candidates the way the grammar needs them", () => {
-  const value = w.queryComplete("name=", completionFields, 5).result;
+  const value = w.queryComplete("name=", completionFields, { cursor: 5 }).result;
   let r = w.queryOffer(JSON.stringify(value), JSON.stringify(["web", "api server", "812", "a*b"]));
   assert.equal(r.error, undefined);
   assert.deepEqual(r.result.map((it) => it.text), ["web", '"api server"', '"812"', '"a*b"']);
   assert.deepEqual(r.result[1], { label: "api server", text: '"api server"', kind: "value" });
 
-  const number = w.queryComplete("replicas>", completionFields, 9).result;
+  const number = w.queryComplete("replicas>", completionFields, { cursor: 9 }).result;
   r = w.queryOffer(JSON.stringify(number), JSON.stringify(["3", "many"]));
   assert.deepEqual(r.result.map((it) => it.text), ["3", "many"]);
 
-  const key = w.queryComplete("labels.te", completionFields, 9).result;
+  const key = w.queryComplete("labels.te", completionFields, { cursor: 9 }).result;
   assert.equal(key.slot, "key");
   assert.equal(key.field, "labels");
   assert.equal(key.prefix, "te");
@@ -537,10 +543,38 @@ test("queryOffer writes the host's candidates the way the grammar needs them", (
   assert.deepEqual(r.result.map((it) => it.text), ["labels.team", "labels.app.kubernetes.io/name", '["labels.my key"]']);
   assert.equal(r.result[0].kind, "key");
 
-  const quoted = w.queryComplete('name="we', completionFields, 8).result;
+  const quoted = w.queryComplete('name="we', completionFields, { cursor: 8 }).result;
   assert.equal(quoted.quoted, true);
   r = w.queryOffer(JSON.stringify(quoted), JSON.stringify(["web"]));
   assert.deepEqual(r.result.map((it) => it.text), ['"web"']);
+});
+
+test("queryOffer keeps a number a number after a function, and drops text after arithmetic", () => {
+  const afterCall = w.queryComplete("len(name)>", completionFields).result;
+  assert.equal(afterCall.function, "len");
+  assert.equal(afterCall.field, undefined);
+  let r = w.queryOffer(JSON.stringify(afterCall), JSON.stringify(["5", "two words"]));
+  assert.deepEqual(r.result.map((it) => it.text), ["5", '"two words"']);
+
+  const operand = w.queryComplete("replicas>10 - 3", completionFields).result;
+  assert.equal(operand.arithmetic, true);
+  r = w.queryOffer(JSON.stringify(operand), JSON.stringify(["web", "5", "7d"]));
+  assert.deepEqual(r.result.map((it) => it.text), ["5", "7d"]);
+});
+
+test("accepting an item does not repeat the punctuation that follows it", () => {
+  const apply = (q, c, it) => q.slice(0, c.replace.offset) + it.text + q.slice(c.replace.offset + c.replace.length);
+  let q = "labels.foo=1";
+  let c = w.queryComplete(q, completionFields, { cursor: 6 }).result;
+  assert.equal(apply(q, c, c.items.find((it) => it.label === "labels")), "labels.foo=1");
+  q = "forks@al(kind=x)";
+  c = w.queryComplete(q, completionFields, { cursor: 8 }).result;
+  assert.equal(apply(q, c, c.items.find((it) => it.label === "@all(...)")), "forks@all(kind=x)");
+  q = '["labels.my"';
+  c = w.queryComplete(q, completionFields, { cursor: 11 }).result;
+  const key = w.queryOffer(JSON.stringify(c), JSON.stringify(["my key"])).result[0];
+  assert.equal(apply(q, c, key), '["labels.my key"]');
+  assert.equal(w.queryParse(apply(q, c, key) + "=x", strictGrammar).error, undefined);
 });
 
 test("queryOffer refuses what it cannot read", () => {
@@ -554,7 +588,7 @@ test("queryOffer refuses what it cannot read", () => {
 });
 
 test("a query built from suggestions parses and validates", () => {
-  const second = texts(w.queryComplete("status=", completionFields, 7))[1];
+  const second = texts(w.queryComplete("status=", completionFields, { cursor: 7 }))[1];
   const built = `status=${second} AND replicas>3`;
   assert.equal(built, 'status="not ready" AND replicas>3');
   assert.equal(w.queryParseAndValidate(built, completionFields, strictGrammar).error, undefined);

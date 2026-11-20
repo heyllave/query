@@ -85,7 +85,11 @@ type Completion struct {
 	// Operator is, for a value, the operator it follows as it is written
 	// ("=", ">=", ":" for a range, "IN" inside an IN list).
 	Operator string
-	// Function is, for an argument, the function being called.
+	// Function is, for an argument, the function being called. For a value
+	// it is the function on the left of the comparison, when there is one:
+	// in `len(name)>` Field is empty and Function is "len". Such a value is
+	// compared with what the function gives, so [Completion.Offer] does not
+	// assume it is text.
 	Function string
 	// Lists names the list selectors the position is inside, outermost
 	// first. Field is then a field of one element of the innermost.
@@ -93,6 +97,10 @@ type Completion struct {
 	// Quoted reports that the cursor is inside an open quoted string, so
 	// Replace starts at its quote and every Text is a whole quoted string.
 	Quoted bool
+	// Arithmetic reports that the value is an operand of arithmetic, as
+	// after the minus in `createdAt>now()-`. Only a number, a date or a
+	// duration can stand there, so Offer leaves out any other candidate.
+	Arithmetic bool
 }
 
 // At reports what can be written at byte offset cursor of query, for the
@@ -104,11 +112,12 @@ type Completion struct {
 func At(query string, cursor int, fields []validate.FieldConfig, cfg parser.Config) Completion {
 	cur := parser.CursorAt(query, cursor, cfg)
 	c := Completion{
-		Slot:     cur.Slot,
-		Replace:  cur.Word,
-		Prefix:   cur.Prefix,
-		Quoted:   cur.Quoted,
-		Function: cur.Function,
+		Slot:       cur.Slot,
+		Replace:    cur.Word,
+		Prefix:     cur.Prefix,
+		Quoted:     cur.Quoted,
+		Function:   cur.Function,
+		Arithmetic: cur.Arithmetic,
 	}
 	for _, list := range cur.Lists {
 		c.Lists = append(c.Lists, list.String())
@@ -140,6 +149,18 @@ func At(query string, cursor int, fields []validate.FieldConfig, cfg parser.Conf
 	case parser.SlotOperator:
 		cfg0, known, _ := resolve(scope, cur.Field)
 		c.Field, c.Known, c.Type = cur.Field.String(), known, cfg0.Type
+		if cur.Negated {
+			// After `name NOT` only an IN list continues the condition.
+			// Under the default grammar NOT may instead open the next
+			// one, so a field can follow.
+			if !known || cfg0.AllowsOp(validate.OpNeq) {
+				c.Items = keywordsAs(cur.Prefix, KindOperator, "IN (...)", "IN (", "is none of")
+			}
+			if !cfg.ExplicitAnd && cur.Prefix != "" && (!known || cfg0.AllowsOp(validate.OpPresence)) {
+				c.Items = append(c.Items, fieldItems(scope, cur.Prefix, true)...)
+			}
+			break
+		}
 		if known {
 			c.Items = operatorItems(cfg0, cur.Prefix)
 		}
@@ -163,7 +184,7 @@ func At(query string, cursor int, fields []validate.FieldConfig, cfg parser.Conf
 		cfg0, known, isKey := resolve(scope, cur.Field)
 		c.Field, c.Known, c.Type = cur.Field.String(), known, cfg0.Type
 		if known && !isKey {
-			c.Items = valueItems(cfg0, cur.Prefix, cur.Quoted)
+			c.Items = valueItems(cfg0, cur.Prefix, cur.Quoted, cur.Arithmetic)
 		}
 	case parser.SlotConnective:
 		c.Items = connectives(cur.Prefix, cur.Closable)
@@ -176,7 +197,38 @@ func At(query string, cursor int, fields []validate.FieldConfig, cfg parser.Conf
 		// field name can be vouched for.
 		c.Items = withoutKind(c.Items, KindField)
 	}
+	c.Items = withoutRepeat(c.Items, query[c.Replace.Offset+c.Replace.Length:])
 	return c
+}
+
+// withoutRepeat drops the punctuation an item ends with when the query
+// already goes on after the replaced span. A nested field's dot leads into
+// a key still to be typed, so it is added only at the end of the text:
+// before `.team` it would be written twice, and before `=x` it would break
+// the name. A parenthesis is dropped when one is already there, so `all(`
+// before `(x=1)` does not open two.
+func withoutRepeat(items []Item, after string) []Item {
+	if after == "" {
+		return items
+	}
+	for i, it := range items {
+		n := len(it.Text)
+		switch {
+		case n > 1 && it.Kind == KindField && it.Text[n-1] == '.':
+			items[i].Text = it.Text[:n-1]
+		case n > 1 && it.Text[n-1] == '(' && after[0] == '(':
+			items[i].Text = strings.TrimRight(it.Text[:n-1], " ")
+		}
+	}
+	return items
+}
+
+// keywordsAs is one item whose label is matched against what was typed.
+func keywordsAs(prefix string, kind Kind, label, text, detail string) []Item {
+	if !strings.HasPrefix(strings.ToUpper(label), strings.ToUpper(prefix)) {
+		return nil
+	}
+	return []Item{{Label: label, Text: text, Kind: kind, Detail: detail}}
 }
 
 // Offer turns candidates the host supplies into items for this completion,
@@ -210,7 +262,18 @@ func (c Completion) Offer(candidates ...string) []Item {
 		var text string
 		switch kind { //nolint:exhaustive // the three kinds chosen above
 		case KindValue:
-			text = valueText(cand, c.Type, c.Known, c.Quoted)
+			if c.Arithmetic {
+				if c.Quoted || !readsAsLiteral(cand) {
+					continue
+				}
+				text = cand
+				break
+			}
+			// A value compared with a function's result has no declared
+			// type, but it is not known to be text either: len(name)>5
+			// must not become len(name)>"5", which compares as text.
+			typed := (c.Known && c.Type != validate.TypeText) || (c.Field == "" && c.Function != "")
+			text = valueText(cand, typed, c.Quoted)
 		case KindKey:
 			if cand == "" {
 				continue
@@ -287,15 +350,16 @@ func bareValue(s string) (v ast.Value, ok bool) {
 	return q.Value, true
 }
 
-// valueText writes a candidate value for a field of type t. A text field,
-// or one nothing is known about, takes the candidate as text. Any other
-// type takes it as written when it reads as one literal, so 812 stays a
-// number on a numeric field; a candidate that does not is given as text.
-func valueText(s string, t validate.FieldValueType, known, quoted bool) string {
+// valueText writes a candidate value. Where text is expected (a text field,
+// or one nothing is known about) the candidate is written so that it reads
+// back as text. With typed set (a field of another type, or the result of a
+// function) it is taken as written when it reads as one literal, so 812
+// stays a number; a candidate that does not is given as text.
+func valueText(s string, typed, quoted bool) string {
 	if quoted {
 		return ast.StringValue(&ast.Value{Type: ast.ValueString, Raw: s, Str: s, Quoted: true})
 	}
-	if known && t != validate.TypeText && readsAsLiteral(s) {
+	if typed && readsAsLiteral(s) {
 		return s
 	}
 	return ValueText(s)
@@ -475,7 +539,7 @@ func selectorDetail(form string) string {
 
 // valueItems lists the values the schema knows a field takes: both
 // booleans, and whatever its config lists under Values.
-func valueItems(cfg validate.FieldConfig, prefix string, quoted bool) []Item {
+func valueItems(cfg validate.FieldConfig, prefix string, quoted, arithmetic bool) []Item {
 	values := cfg.Values
 	if cfg.Type == validate.TypeBoolean && len(values) == 0 {
 		values = []string{"true", "false"}
@@ -483,10 +547,10 @@ func valueItems(cfg validate.FieldConfig, prefix string, quoted bool) []Item {
 	var items []Item
 	for _, i := range matches(values, prefix) {
 		v := values[i]
-		if !utf8.ValidString(v) {
+		if !utf8.ValidString(v) || (arithmetic && (quoted || !readsAsLiteral(v))) {
 			continue
 		}
-		items = append(items, Item{Label: v, Text: valueText(v, cfg.Type, true, quoted), Kind: KindValue})
+		items = append(items, Item{Label: v, Text: valueText(v, cfg.Type != validate.TypeText, quoted), Kind: KindValue})
 	}
 	return items
 }

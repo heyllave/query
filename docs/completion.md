@@ -33,7 +33,7 @@ An unfinished query is not an error. A position the engine cannot place, such as
 | The cursor is | `slot` | Items |
 |---|---|---|
 | At the start, or after `AND`, `OR`, `NOT` or `(` | `field` | Field names, then `NOT`. |
-| After a field name and a space | `operator` | The operators the field allows, `IN (`, and a list's selectors. `AND` and `OR` too, when the bare name is a condition by itself. |
+| After a field name and a space | `operator` | The operators the field allows, `IN (`, and a list's selectors. `AND` and `OR` too, when the bare name is a condition by itself. After `name NOT`, only `IN (`. |
 | After the `@` of a list field | `selector` | The selectors the list allows. |
 | Inside `forks@(` | `field` | The fields of one element of the list. |
 | After an operator, or inside an `IN` list | `value` | `true` and `false` for a boolean, and the field's `Values`. Empty when only you know them. |
@@ -42,6 +42,8 @@ An unfinished query is not an error. A position the engine cannot place, such as
 | At an argument of a function | `argument` | Field names. |
 
 Items come best first: names that start with what was typed, then names that only contain it, each group in the order of your schema.
+
+An item never repeats what the query already has after the cursor. A nested field's `labels.` loses its dot unless it is the last thing in the text, and `@all(` loses its parenthesis before one that is already there.
 
 ## Values the schema knows
 
@@ -96,6 +98,11 @@ async function suggest(text: string, cursor: number) {
 
 The candidates are kept in the order you give them: you have already chosen and ranked them. `c.prefix` is what has been typed so far, for you to filter by; for a key it is the key alone, without `labels.`.
 
+Two more members say what kind of value belongs:
+
+- `c.function` is set, and `c.field` is not, when the value is compared with a function's result: `len(name)>`. The engine does not know what a function gives, so `offer` writes a candidate that reads as a number, a date or a duration as it is (`5`, not `"5"`) and quotes only what must be text.
+- `c.arithmetic` is true after an arithmetic sign, as in `createdAt>now()-`. Only a number, a date or a duration can stand there, so `offer` leaves out any other candidate.
+
 `c.lists` names the list selectors the cursor is inside, outermost first. Inside `forks@(kind=` the field is `kind` and `lists` is `["forks"]`, so you can tell an element's `kind` from a top-level field of the same name.
 
 ## Accepting a suggestion
@@ -110,7 +117,7 @@ input.value = next.query;
 input.setSelectionRange(next.cursor, next.cursor);
 ```
 
-`replace` covers the whole word under the cursor, not only the part before it, so accepting `status` with the cursor in the middle of `sta|t=x` gives `status=x`. Inside an open quote it starts at the quote, and every `text` is a whole quoted string. For a key it covers the whole name, because the name may need rewriting in the bracket form.
+`replace` covers the whole word under the cursor, not only the part before it, so accepting `status` with the cursor in the middle of `sta|t=x` gives `status=x`. Inside an open quote it starts at the quote, and every `text` is a whole quoted string. For a key it covers the whole name, because the name may need rewriting in the bracket form. A value that is the name of a call is replaced with its arguments.
 
 In the TypeScript client the cursor and `replace` index the string as `selectionStart` does. The Go API counts bytes. The C library counts bytes unless the request says `"utf16": true`.
 
@@ -147,4 +154,6 @@ if c.Slot == parser.SlotValue && c.Field == "cluster" {
 - It does not suggest function names, or values for a date or a duration beyond the ones you list.
 - It does not apply a validator's restrictions (`WithAllowedFields`, `WithAllowedOps`). Pass the fields the caller may use.
 - Inside a function's arguments it offers field names for a fresh argument and nothing after one.
+- Past the query length limit (256 characters unless you raise it) it offers nothing, since the query would be refused whole. Pass the same limit you parse with.
+- Under the strict grammar it offers nothing where only a connective can come and something else was typed, as after `name=x NOT`.
 - After text that does not lex, such as a stray `#`, it offers nothing until the text is fixed. [Errors and hints]({{ '/errors/' | relative_url }}) covers what to show then.

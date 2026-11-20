@@ -19,7 +19,7 @@
 //	const str = queryStringify(ast);
 //	const ok = queryMatch("total>50000", fieldsJSON, recordJSON);
 //	const v  = queryEval("[base]*1.1", fieldsJSON, recordJSON);
-//	const c  = queryComplete("state=dr", fieldsJSON, 8);
+//	const c  = queryComplete("state=dr", fieldsJSON, {cursor: 8});
 package main
 
 import (
