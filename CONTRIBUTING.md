@@ -43,7 +43,7 @@ the fuzz test, with the fix, rather than committing the generated file.
 
 | Change | Also update |
 |---|---|
-| Grammar or lexer behaviour | a case in `conformance/corpus.json`, the syntax table in `README.md`, and a seed in `parser/fuzz_test.go` if the shape was ever wrong |
+| Grammar or lexer behaviour | a case in `conformance/corpus.json`, the syntax table in `README.md`, a seed in `parser/fuzz_test.go` if the shape was ever wrong, and `go test ./parser -run Golden -update` with the changed inputs named in the PR. Lexer functions stay at 40 lines or less; a rule that needs no lexer state goes in `parser/internal/chars`, `literal` or `shape`. |
 | A built-in function | its `Arity`, a row in the README's function table, and a nil-argument case in `eval/coerce_test.go` |
 | Evaluation semantics | a case in `eval/review_regress_test.go` or `conformance/corpus.json`, and one in `conformance/sql/testdata/cases.json` when SQL should agree |
 | The JSON AST shape | `internal/bridgejson`, the TypeScript types in `clients/npm/src`, and the golden file |
