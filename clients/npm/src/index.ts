@@ -26,6 +26,10 @@ import type {
   EvalResult,
   QueryRecord,
   ParseOptions,
+  Completion,
+  CompleteOptions,
+  CompleteResult,
+  OfferResult,
 } from "./types.js";
 
 export type {
@@ -53,9 +57,16 @@ export type {
   QueryRecord,
   Visitor,
   ParseOptions,
+  Completion,
+  CompletionItem,
+  CompletionItemKind,
+  CompletionSlot,
+  CompleteOptions,
+  CompleteResult,
+  OfferResult,
 } from "./types.js";
 
-export { visit, walk, fields, fieldToString } from "./types.js";
+export { visit, walk, fields, fieldToString, applyCompletion } from "./types.js";
 
 // Extend the global scope for Go WASM functions.
 declare global {
@@ -79,6 +90,12 @@ declare global {
     recordJSON: string,
     maxLength?: number
   ): EvalResult;
+  function queryComplete(
+    q: string,
+    fieldsJSON: string,
+    options?: number | (ParseOptions & { cursor?: number })
+  ): CompleteResult;
+  function queryOffer(completionJSON: string, candidatesJSON: string): OfferResult;
 
   // Go's wasm_exec.js provides this constructor.
   class Go {
@@ -125,6 +142,38 @@ export interface QueryAPI {
    * computed value (number, string, boolean, or list).
    */
   eval(q: string, fields: FieldConfig[], record: QueryRecord, maxLength?: number): EvalResult;
+
+  /**
+   * Report what can be written at `cursor` in a query that is still being
+   * typed: field names, the operators a field allows, the selectors of a
+   * list, connectives, and the values a field is known to take. `cursor`
+   * indexes the string as `selectionStart` does.
+   *
+   * It answers from the schema alone, so it can run on every keystroke.
+   * Where only you know the candidates (the values of a field, the keys of a
+   * nested one) the result says what is being asked for; fetch them and
+   * pass them to {@link offer}.
+   *
+   * Pass the options the query will be parsed with, so that what is
+   * suggested is what will be accepted. A query that is merely unfinished is
+   * never an error: a position nothing can be said about has the slot
+   * `none`. An error means the call itself was wrong (a cursor outside the
+   * string, an invalid schema).
+   */
+  complete(
+    q: string,
+    cursor: number,
+    fields: FieldConfig[],
+    options?: CompleteOptions
+  ): CompleteResult;
+
+  /**
+   * Turn candidates you supply into items for a completion, each written the
+   * way the grammar needs it at that position: a value is quoted when it
+   * would not read back as itself, a key is joined to its field. The
+   * candidates are kept in the order given.
+   */
+  offer(completion: Completion, candidates: string[]): OfferResult;
 }
 
 /**
@@ -229,6 +278,19 @@ export async function loadQuery(source: WasmSource = "./query.wasm"): Promise<Qu
 
     eval(q: string, fields: FieldConfig[], record: QueryRecord, maxLength?: number): EvalResult {
       return queryEval(q, JSON.stringify(fields), JSON.stringify(record), maxLength);
+    },
+
+    complete(
+      q: string,
+      cursor: number,
+      fields: FieldConfig[],
+      options?: CompleteOptions
+    ): CompleteResult {
+      return queryComplete(q, JSON.stringify(fields), { ...options, cursor });
+    },
+
+    offer(completion: Completion, candidates: string[]): OfferResult {
+      return queryOffer(JSON.stringify(completion), JSON.stringify(candidates));
     },
   };
 }

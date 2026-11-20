@@ -11,6 +11,7 @@ import (
 	"testing"
 
 	"github.com/heyllave/query/ast"
+	"github.com/heyllave/query/complete"
 	"github.com/heyllave/query/eval"
 	"github.com/heyllave/query/internal/bridgejson"
 	"github.com/heyllave/query/parser"
@@ -38,6 +39,17 @@ type testCase struct {
 	ExpectString string         `json:"expectString"`
 	ExpectCode   string         `json:"expectCode"`
 	Tolerance    float64        `json:"tolerance"`
+
+	// For op "complete".
+	Cursor        int      `json:"cursor"`
+	Strict        bool     `json:"strict"`
+	Candidates    []string `json:"candidates"`
+	ExpectSlot    string   `json:"expectSlot"`
+	ExpectPrefix  string   `json:"expectPrefix"`
+	ExpectField   *string  `json:"expectField"`
+	ExpectTexts   []string `json:"expectTexts"`
+	ExpectReplace [2]int   `json:"expectReplace"`
+	ExpectOffered []string `json:"expectOffered"`
 }
 
 // fieldList decodes a field config the way every bridge does, so the Go run
@@ -52,7 +64,7 @@ func (l *fieldList) UnmarshalJSON(data []byte) error {
 }
 
 // expectedCaseCount guards against a stale/truncated corpus silently passing.
-const expectedCaseCount = 135
+const expectedCaseCount = 155
 
 func loadCorpus(t *testing.T) corpus {
 	t.Helper()
@@ -148,8 +160,48 @@ func runCase(t *testing.T, c corpus, tc testCase) {
 		if tc.ExpectValue != nil {
 			checkNumeric(t, toFloat(v), *tc.ExpectValue, tc.Tolerance)
 		}
+	case "complete":
+		cfg := parser.Config{MaxLength: 256}
+		if tc.Strict {
+			cfg = cfg.Strict()
+		}
+		got := complete.At(tc.Query, tc.Cursor, c.fields(tc), cfg)
+		if got.Slot.String() != tc.ExpectSlot {
+			t.Fatalf("slot = %s, want %s", got.Slot, tc.ExpectSlot)
+		}
+		if got.Prefix != tc.ExpectPrefix {
+			t.Errorf("prefix = %q, want %q", got.Prefix, tc.ExpectPrefix)
+		}
+		if tc.ExpectField != nil && got.Field != *tc.ExpectField {
+			t.Errorf("field = %q, want %q", got.Field, *tc.ExpectField)
+		}
+		if replace := [2]int{got.Replace.Offset, got.Replace.Length}; replace != tc.ExpectReplace {
+			t.Errorf("replace = %v, want %v", replace, tc.ExpectReplace)
+		}
+		checkTexts(t, "items", got.Items, tc.ExpectTexts)
+		if tc.Candidates != nil {
+			checkTexts(t, "offered", got.Offer(tc.Candidates...), tc.ExpectOffered)
+		}
 	default:
 		t.Fatalf("unknown op %q", tc.Op)
+	}
+}
+
+func checkTexts(t *testing.T, what string, items []complete.Item, want []string) {
+	t.Helper()
+	got := make([]string, len(items))
+	for i, it := range items {
+		got[i] = it.Text
+	}
+	if len(got) != len(want) {
+		t.Errorf("%s = %q, want %q", what, got, want)
+		return
+	}
+	for i := range got {
+		if got[i] != want[i] {
+			t.Errorf("%s = %q, want %q", what, got, want)
+			return
+		}
 	}
 }
 

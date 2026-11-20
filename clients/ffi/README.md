@@ -21,6 +21,8 @@ Each function takes one NUL-terminated UTF-8 JSON object and returns one.
 | `QueryParseAndValidate` | `{"query", "fields", "maxLength"?, "explicitAnd"?, "strictValues"?}` | `{"result": ast}` |
 | `QueryMatch` | `{"query", "fields", "record", "maxLength"?, "explicitAnd"?, "strictValues"?}` | `{"result": true}` |
 | `QueryEval` | `{"query", "fields", "record", "maxLength"?}` | `{"result": value}` |
+| `QueryComplete` | `{"query", "fields", "cursor"?, "utf16"?, "maxLength"?, "explicitAnd"?, "strictValues"?}` | `{"result": completion}` |
+| `QueryOffer` | `{"completion", "candidates"}` | `{"result": items}` |
 
 The table lists every key a call takes. Any other key is an error, so a
 misspelt option cannot pass for one. The one exception is an input of another

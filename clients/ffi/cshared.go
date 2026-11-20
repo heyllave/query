@@ -23,6 +23,8 @@
 //	QueryParseAndValidate {"query", "fields", "maxLength"?, "explicitAnd"?, "strictValues"?} -> {"result": ast}
 //	QueryMatch            {"query", "fields", "record", "maxLength"?, "explicitAnd"?, "strictValues"?} -> {"result": bool}
 //	QueryEval             {"query", "fields", "record", "maxLength"?} -> {"result": value}
+//	QueryComplete         {"query", "fields", "cursor"?, "utf16"?, "maxLength"?, "explicitAnd"?, "strictValues"?} -> {"result": completion}
+//	QueryOffer            {"completion", "candidates"} -> {"result": items}
 //
 // "maxLength" is the query length limit in characters (default 256); 0
 // disables it.
@@ -32,6 +34,13 @@
 // conditions is an error (code missingAnd), and with "strictValues" an
 // unquoted value may not contain =, < or >. A value that is not a boolean is
 // an error, and so is a key the call does not list.
+//
+// QueryComplete reports what can be written at "cursor" in a query that is
+// still being typed. The cursor is a byte offset, or a count of UTF-16 code
+// units when "utf16" is true, and the end of the query when absent; the
+// span in the answer is in the same unit. QueryOffer turns candidates the
+// host supplies (values it fetched, the keys of a nested field) into items
+// written the way the grammar needs them.
 //
 // A failure answers {"error": message} with "errors" (parse) or
 // "validationErrors" (validation) listing each failure's stable code and span.
@@ -149,11 +158,13 @@ var (
 	checkKeys    = []string{"query", "fields", "maxLength", "explicitAnd", "strictValues"}
 	matchKeys    = []string{"query", "fields", "record", "maxLength", "explicitAnd", "strictValues"}
 	evalKeys     = []string{"query", "fields", "record", "maxLength"}
+	completeKeys = []string{"query", "fields", "cursor", "utf16", "maxLength", "explicitAnd", "strictValues"}
+	offerKeys    = []string{"completion", "candidates"}
 )
 
 // inputKeys are the members that carry a call's input, as opposed to the
 // switches that change how it is read.
-var inputKeys = []string{"query", "ast", "fields", "record", "maxLength"}
+var inputKeys = []string{"query", "ast", "fields", "record", "maxLength", "cursor", "completion", "candidates"}
 
 func (r request) raw(key, fallback string) string {
 	if v, ok := r[key]; ok {
@@ -252,6 +263,47 @@ func QueryEval(req *C.char) *C.char {
 			return fail
 		}
 		return bridgejson.Eval(r.str("query"), r.raw("fields", "[]"), r.raw("record", "{}"), maxLen)
+	})
+}
+
+// QueryComplete reports what can be written at "cursor" in "query", a byte
+// offset unless "utf16" is true, and the end of the query when absent.
+//
+//export QueryComplete
+func QueryComplete(req *C.char) *C.char {
+	return call(req, completeKeys, func(r request) bridgejson.Envelope {
+		opts, fail := r.options()
+		if fail != nil {
+			return fail
+		}
+		query := r.str("query")
+		inUTF16 := false
+		if v, ok := r["utf16"]; ok {
+			if string(v) != "true" && string(v) != "false" {
+				return bridgejson.Fail("utf16 must be a boolean")
+			}
+			inUTF16 = string(v) == "true"
+		}
+		cursor := len(query)
+		if inUTF16 {
+			cursor = bridgejson.UTF16Len(query)
+		}
+		if v, ok := r["cursor"]; ok && string(v) != "null" {
+			if err := json.Unmarshal(v, &cursor); err != nil {
+				return bridgejson.Fail("cursor must be an integer")
+			}
+		}
+		return bridgejson.Complete(query, r.raw("fields", "[]"), cursor, inUTF16, opts)
+	})
+}
+
+// QueryOffer writes the host's "candidates" as items for a "completion"
+// that QueryComplete returned.
+//
+//export QueryOffer
+func QueryOffer(req *C.char) *C.char {
+	return call(req, offerKeys, func(r request) bridgejson.Envelope {
+		return bridgejson.Offer(r.raw("completion", "null"), r.raw("candidates", "null"))
 	})
 }
 

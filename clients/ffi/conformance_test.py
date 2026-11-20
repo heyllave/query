@@ -17,10 +17,11 @@ import threading
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 CORPUS = os.path.join(HERE, "..", "..", "conformance", "corpus.json")
-MIN_CASES = 135
+MIN_CASES = 155
 
 CALLS = ["QueryParse", "QueryValidate", "QueryStringify",
-         "QueryParseAndValidate", "QueryMatch", "QueryEval"]
+         "QueryParseAndValidate", "QueryMatch", "QueryEval",
+         "QueryComplete", "QueryOffer"]
 
 
 class Library:
@@ -60,6 +61,8 @@ def run_case(lib, corpus, tc):
     query = tc.get("query", "")
     op = tc["op"]
 
+    if op == "complete":
+        return run_complete(lib, fields, tc)
     if op == "parse":
         env = lib.call("QueryParse", query=query)
     elif op == "parseAndValidate":
@@ -91,6 +94,59 @@ def run_case(lib, corpus, tc):
     if "expectValue" in tc:
         tolerance = tc.get("tolerance", 1e-9)
         assert abs(float(env["result"]) - tc["expectValue"]) <= tolerance, f"value {env['result']}"
+
+
+def run_complete(lib, fields, tc):
+    """A completion case, in bytes and in UTF-16 code units, and through QueryOffer."""
+    strict = tc.get("strict", False)
+    for utf16, cursor, replace in ((False, tc["cursor"], tc["expectReplace"]),
+                                   (True, tc["cursorUtf16"], tc["expectReplaceUtf16"])):
+        env = lib.call("QueryComplete", query=tc["query"], fields=fields, cursor=cursor, utf16=utf16,
+                       explicitAnd=strict, strictValues=strict)
+        assert env.get("error") is None, f"unexpected error: {env.get('error')}"
+        c = env["result"]
+        assert c["slot"] == tc["expectSlot"], f"slot {c['slot']}"
+        assert c["prefix"] == tc["expectPrefix"], f"prefix {c['prefix']!r}"
+        if "expectField" in tc:
+            assert c.get("field", "") == tc["expectField"], f"field {c.get('field')!r}"
+        assert [c["replace"]["offset"], c["replace"]["length"]] == replace, f"replace {c['replace']} (utf16={utf16})"
+        assert [it["text"] for it in c["items"]] == tc["expectTexts"], f"items {[it['text'] for it in c['items']]}"
+        if "candidates" in tc:
+            offered = lib.call("QueryOffer", completion=c, candidates=tc["candidates"])
+            assert offered.get("error") is None, f"offer: {offered.get('error')}"
+            assert [it["text"] for it in offered["result"]] == tc["expectOffered"], f"offered {offered['result']}"
+
+
+def check_completion_input(lib):
+    """A cursor that is not a position in the query is the caller's mistake, and is said so."""
+    fields = [{"name": "name", "type": "text"}]
+    # Without a cursor the position is the end of the query, in either unit.
+    for utf16 in (False, True):
+        env = lib.call("QueryComplete", query="name=\u00e9", fields=fields, utf16=utf16)
+        assert env["result"]["slot"] == "value" and env["result"]["prefix"] == "\u00e9", env
+    assert lib.call("QueryComplete", query="name=", fields=fields, cursor=None)["result"]["slot"] == "value"
+    for cursor in (-1, 99):
+        env = lib.call("QueryComplete", query="name=x", fields=fields, cursor=cursor)
+        assert "is not a position in the query" in env.get("error", ""), env
+    # Inside the two bytes of a character.
+    env = lib.call("QueryComplete", query="caf\u00e9=x", fields=fields, cursor=4)
+    assert "cannot split a character" in env.get("error", ""), env
+    for bad in ("3", 1.5, [], {}):
+        env = lib.call("QueryComplete", query="name=x", fields=fields, cursor=bad)
+        assert env.get("error") == "cursor must be an integer", env
+    env = lib.call("QueryComplete", query="name=x", fields=fields, utf16="yes")
+    assert env.get("error") == "utf16 must be a boolean", env
+    env = lib.call("QueryComplete", query="name=x", fields=[{"type": "text"}])
+    assert env.get("error", "").startswith("invalid fields config"), env
+    env = lib.call("QueryComplete", query="name=x", fields=fields, record={})
+    assert env.get("error", "").startswith('unknown key "record"'), env
+    # QueryOffer refuses what it cannot read.
+    assert lib.call("QueryOffer", completion={"slot": "bogus"}, candidates=[]).get("error", "").startswith("invalid completion")
+    assert lib.call("QueryOffer", completion={"slot": "value"}, candidates="x").get("error") == "candidates must be an array of strings"
+    assert lib.call("QueryOffer", completion={"slot": "value"}).get("error") == "candidates must be an array of strings"
+    assert lib.call("QueryOffer", completion={"slot": "key"}, candidates=["a"]).get("error", "").startswith("invalid completion")
+    assert lib.call("QueryOffer", completion={"slot": "value", "type": "integer"}, candidates=["3", "x y"])["result"] == [
+        {"label": "3", "text": "3", "kind": "value"}, {"label": "x y", "text": '"x y"', "kind": "value"}]
 
 
 def check_hostile_input(lib):
@@ -197,14 +253,14 @@ def main():
             failed += 1
             print(f"FAIL {tc['op']}: {tc['id']}: {err}")
     for name, check in (("hostile input", check_hostile_input), ("strict options", check_strict_options), ("unknown keys", check_unknown_keys),
-                        ("threads", check_threads)):
+                        ("completion input", check_completion_input), ("threads", check_threads)):
         try:
             check(lib)
         except AssertionError as err:
             failed += 1
             print(f"FAIL {name}: {err}")
 
-    print(f"{len(cases) + 2 - failed} passed, {failed} failed")
+    print(f"{len(cases) + 5 - failed} passed, {failed} failed")
     sys.exit(1 if failed else 0)
 
 

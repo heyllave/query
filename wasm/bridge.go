@@ -46,8 +46,9 @@ func bridge(name string, need int, call func(args []js.Value) bridgejson.Envelop
 // The options each kind of call takes. Only a call that parses a condition
 // has a grammar to be strict about.
 var (
-	lengthOption = []string{"maxLength"}
-	parseOptions = []string{"maxLength", "explicitAnd", "strictValues"}
+	lengthOption    = []string{"maxLength"}
+	parseOptions    = []string{"maxLength", "explicitAnd", "strictValues"}
+	completeOptions = []string{"cursor", "maxLength", "explicitAnd", "strictValues"}
 )
 
 // maxLengthArg reads the optional last argument of a call that takes no
@@ -112,6 +113,46 @@ func optionsArg(args []js.Value, i int, known []string) (bridgejson.Options, bri
 		*sw.dst = v.Bool()
 	}
 	return o, nil
+}
+
+// jsComplete is queryComplete(query, fieldsJSON, cursor? | options?). The
+// cursor counts UTF-16 code units, as a JavaScript string is indexed, and
+// so does the span in the answer. It is given as a number, or as the cursor
+// member of an options object; without it the cursor is the end of the
+// query.
+func jsComplete(args []js.Value) bridgejson.Envelope {
+	query := args[0]
+	cursor := bridgejson.UTF16Len(query.String())
+	o := bridgejson.Options{MaxLength: bridgejson.DefaultMaxLength}
+	if len(args) > 2 {
+		arg := args[2]
+		at := arg
+		if arg.Type() != js.TypeNumber {
+			var fail bridgejson.Envelope
+			if o, fail = optionsArg(args, 2, completeOptions); fail != nil {
+				return fail
+			}
+			at = js.Undefined()
+			if arg.Type() == js.TypeObject {
+				at = arg.Get("cursor")
+			}
+		}
+		if !absent(at) {
+			if at.Type() != js.TypeNumber || at.Float() != float64(at.Int()) {
+				return bridgejson.Fail("cursor must be an integer")
+			}
+			cursor = at.Int()
+		}
+	}
+	return bridgejson.Complete(query.String(), args[1].String(), cursor, true, o)
+}
+
+// jsOffer is queryOffer(completionJSON, candidatesJSON).
+func jsOffer(args []js.Value) bridgejson.Envelope {
+	if len(args) > 2 {
+		return bridgejson.Fail("queryOffer: too many arguments")
+	}
+	return bridgejson.Offer(args[0].String(), args[1].String())
 }
 
 func absent(v js.Value) bool { return v.Type() == js.TypeUndefined }

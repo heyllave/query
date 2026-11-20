@@ -413,3 +413,149 @@ test("a declared list field checks its selectors and its elements", () => {
     /unknown selector/,
   );
 });
+
+// Completion. The cursor and the span it answers with index the JavaScript
+// string, in UTF-16 code units, like an input's selectionStart.
+const completionFields = JSON.stringify([
+  { name: "name", type: "text" },
+  { name: "status", type: "text", allowedOps: ["=", "!="], values: ["ready", "not ready", "812"] },
+  { name: "replicas", type: "integer" },
+  { name: "labels", type: "text", nested: true },
+  { name: "forks", type: "list", elements: [{ name: "kind", type: "text", values: ["Rollout"] }] },
+]);
+const strictGrammar = { explicitAnd: true, strictValues: true };
+const texts = (r) => r.result.items.map((it) => it.text);
+
+test("queryComplete walks a query from fields to values", () => {
+  let r = w.queryComplete("", completionFields, 0);
+  assert.equal(r.error, undefined);
+  assert.equal(r.result.slot, "field");
+  assert.deepEqual(texts(r), ["name", "status", "replicas", "labels.", "forks", "NOT"]);
+
+  r = w.queryComplete("status ", completionFields, 7);
+  assert.equal(r.result.slot, "operator");
+  assert.equal(r.result.field, "status");
+  assert.deepEqual(texts(r), ["=", "!=", "IN (", "NOT IN ("]);
+
+  r = w.queryComplete("status=", completionFields, 7);
+  assert.equal(r.result.slot, "value");
+  assert.equal(r.result.type, "text");
+  assert.equal(r.result.operator, "=");
+  assert.deepEqual(texts(r), ["ready", '"not ready"', '"812"']);
+  assert.deepEqual(r.result.items[1], { label: "not ready", text: '"not ready"', kind: "value" });
+
+  r = w.queryComplete("status=ready ", completionFields, 13);
+  assert.equal(r.result.slot, "connective");
+  assert.deepEqual(texts(r), ["AND", "OR"]);
+
+  r = w.queryComplete("forks@(kind=", completionFields, 12);
+  assert.deepEqual(r.result.lists, ["forks"]);
+  assert.deepEqual(texts(r), ["Rollout"]);
+});
+
+test("queryComplete defaults the cursor to the end of the query", () => {
+  for (const r of [
+    w.queryComplete("status=re", completionFields),
+    w.queryComplete("status=re", completionFields, undefined),
+    w.queryComplete("status=re", completionFields, {}),
+    w.queryComplete("status=re", completionFields, { cursor: undefined }),
+  ]) {
+    assert.equal(r.error, undefined);
+    assert.deepEqual(r.result.replace, { offset: 7, length: 2 });
+    // What starts with the typed text comes first, then what contains it.
+    assert.deepEqual(texts(r), ["ready", '"not ready"']);
+  }
+});
+
+test("queryComplete takes the cursor as a number or as an option", () => {
+  const byNumber = w.queryComplete("sta=x", completionFields, 3);
+  const byOption = w.queryComplete("sta=x", completionFields, { cursor: 3 });
+  assert.deepEqual(byNumber, byOption);
+  assert.deepEqual(byNumber.result.replace, { offset: 0, length: 3 });
+  assert.deepEqual(texts(byNumber), ["status"]);
+});
+
+test("queryComplete counts in UTF-16 code units", () => {
+  const q = 'name="café 🚀" AND st';
+  const r = w.queryComplete(q, completionFields, q.length);
+  assert.equal(r.error, undefined);
+  assert.deepEqual(r.result.replace, { offset: q.length - 2, length: 2 });
+  assert.equal(q.slice(r.result.replace.offset, r.result.replace.offset + r.result.replace.length), "st");
+  assert.deepEqual(texts(r), ["status"]);
+
+  // Between the two halves of the rocket is not a position.
+  const inside = q.indexOf("🚀") + 1;
+  assert.match(w.queryComplete(q, completionFields, inside).error, /cannot split a character/);
+});
+
+test("queryComplete follows the grammar the options name", () => {
+  const q = "name=x re";
+  assert.deepEqual(texts(w.queryComplete(q, completionFields, { cursor: q.length })), ["replicas"]);
+  assert.deepEqual(texts(w.queryComplete(q, completionFields, { cursor: q.length, ...strictGrammar })), []);
+  assert.equal(w.queryComplete(q, completionFields, { cursor: q.length, maxLength: 4 }).result.slot, "none");
+});
+
+test("queryComplete has nothing to say after text that does not read as a query", () => {
+  const r = w.queryComplete("name==", completionFields, 6);
+  assert.equal(r.error, undefined);
+  assert.deepEqual(r.result, { slot: "none", replace: { offset: 6, length: 0 }, prefix: "", items: [] });
+});
+
+test("queryComplete refuses a call that is wrong", () => {
+  assert.match(w.queryComplete("name=x", completionFields, -1).error, /is not a position in the query/);
+  assert.match(w.queryComplete("name=x", completionFields, 7).error, /from 0 to 6/);
+  assert.equal(w.queryComplete("name=x", completionFields, 1.5).error, "cursor must be an integer");
+  assert.equal(w.queryComplete("name=x", completionFields, { cursor: "3" }).error, "cursor must be an integer");
+  assert.equal(w.queryComplete("name=x", completionFields, { cursor: null }).error, "cursor must be an integer");
+  assert.match(w.queryComplete("name=x", completionFields, { cursr: 3 }).error, /unknown option "cursr"/);
+  assert.equal(w.queryComplete("name=x", completionFields, { explicitAnd: 1 }).error, "explicitAnd must be a boolean");
+  assert.match(w.queryComplete("name=x", completionFields, "3").error, /options must be/);
+  assert.match(w.queryComplete("name=x", "{", 3).error, /invalid fields config/);
+  assert.match(w.queryComplete("name=x", '[{"type":"text"}]', 3).error, /has no name/);
+  assert.equal(w.queryComplete("name=x").error, "queryComplete: missing arguments");
+  assert.equal(w.queryComplete("name=x", completionFields, 3, 4).error, "queryComplete: too many arguments");
+  assert.equal(w.queryComplete("name=x", [], 3).error, "queryComplete: arguments must be strings");
+});
+
+test("queryOffer writes the host's candidates the way the grammar needs them", () => {
+  const value = w.queryComplete("name=", completionFields, 5).result;
+  let r = w.queryOffer(JSON.stringify(value), JSON.stringify(["web", "api server", "812", "a*b"]));
+  assert.equal(r.error, undefined);
+  assert.deepEqual(r.result.map((it) => it.text), ["web", '"api server"', '"812"', '"a*b"']);
+  assert.deepEqual(r.result[1], { label: "api server", text: '"api server"', kind: "value" });
+
+  const number = w.queryComplete("replicas>", completionFields, 9).result;
+  r = w.queryOffer(JSON.stringify(number), JSON.stringify(["3", "many"]));
+  assert.deepEqual(r.result.map((it) => it.text), ["3", "many"]);
+
+  const key = w.queryComplete("labels.te", completionFields, 9).result;
+  assert.equal(key.slot, "key");
+  assert.equal(key.field, "labels");
+  assert.equal(key.prefix, "te");
+  assert.deepEqual(key.replace, { offset: 0, length: 9 });
+  r = w.queryOffer(JSON.stringify(key), JSON.stringify(["team", "app.kubernetes.io/name", "my key"]));
+  assert.deepEqual(r.result.map((it) => it.text), ["labels.team", "labels.app.kubernetes.io/name", '["labels.my key"]']);
+  assert.equal(r.result[0].kind, "key");
+
+  const quoted = w.queryComplete('name="we', completionFields, 8).result;
+  assert.equal(quoted.quoted, true);
+  r = w.queryOffer(JSON.stringify(quoted), JSON.stringify(["web"]));
+  assert.deepEqual(r.result.map((it) => it.text), ['"web"']);
+});
+
+test("queryOffer refuses what it cannot read", () => {
+  assert.match(w.queryOffer("{", "[]").error, /invalid completion/);
+  assert.match(w.queryOffer('{"slot":"bogus"}', "[]").error, /unknown slot "bogus"/);
+  assert.equal(w.queryOffer('{"slot":"value"}', '"x"').error, "candidates must be an array of strings");
+  assert.equal(w.queryOffer('{"slot":"value"}', "[1]").error, "candidates must be an array of strings");
+  assert.equal(w.queryOffer('{"slot":"value"}').error, "queryOffer: missing arguments");
+  assert.equal(w.queryOffer('{"slot":"value"}', "[]", {}).error, "queryOffer: too many arguments");
+  assert.equal(w.queryOffer({ slot: "value" }, "[]").error, "queryOffer: arguments must be strings");
+});
+
+test("a query built from suggestions parses and validates", () => {
+  const second = texts(w.queryComplete("status=", completionFields, 7))[1];
+  const built = `status=${second} AND replicas>3`;
+  assert.equal(built, 'status="not ready" AND replicas>3');
+  assert.equal(w.queryParseAndValidate(built, completionFields, strictGrammar).error, undefined);
+});
