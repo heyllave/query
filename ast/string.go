@@ -207,6 +207,12 @@ func writeValue(buf *strings.Builder, v *Value) {
 		writeFuncCall(buf, v.Func)
 		return
 	}
+	if v.Type == ValueArith && v.ShortDate {
+		// Printed as it was written: spaced out it would read back as a
+		// plain subtraction and lose what the run said.
+		buf.WriteString(v.Raw)
+		return
+	}
 	if v.Type == ValueArith && v.Arith != nil {
 		// Arithmetic over a string operand only lexes inside a paren group
 		// (the bare form would read as an unquoted string), so wrap it.

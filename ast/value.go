@@ -87,6 +87,13 @@ type Value struct {
 	Arith    *ArithExpr    // for ValueArith: arithmetic expression resolved at match time
 	List     []any         // for ValueList: elements produced at match time
 	Field    FieldPath     // for ValueFieldRef: the referenced field path
+	// ShortDate marks arithmetic that was written as one unbroken run with
+	// the shape of a date missing digits: 2026-11 or 2026-11-5. The grammar
+	// reads it as a subtraction; a validator that knows the field is a date
+	// may take it as the day it names. Only the source can tell it from the
+	// subtraction 2026 - 11 or (2026)-11, which Raw prints alike, so the
+	// parser records it here.
+	ShortDate bool
 }
 
 // DecodePattern turns a wildcard value's Str (its pattern form, where `\\`

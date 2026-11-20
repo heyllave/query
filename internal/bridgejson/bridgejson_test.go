@@ -415,3 +415,50 @@ func TestEntryPoints_HonourMaxLength(t *testing.T) {
 		t.Errorf("Eval with the limit disabled failed: %v", env["error"])
 	}
 }
+
+// A date written short on a date field becomes a date, and the tree that
+// reaches a client must still print and validate: the value carries the
+// date in full, not the text it was written as.
+func TestShortDate_SurvivesTheBridgeRoundTrip(t *testing.T) {
+	fields := `[{"name":"createdAt","type":"datetime"},{"name":"n","type":"integer"},{"name":"name","type":"text"}]`
+	for _, tc := range []struct{ query, printed string }{
+		{"createdAt=2026-11-5", "createdAt=2026-11-05"},
+		{`createdAt="2026-11-5"`, "createdAt=2026-11-05"},
+		{"createdAt:2026-1-1..2026-1-9", "createdAt:2026-01-01..2026-01-09"},
+		{"createdAt IN (2026-1-1, 2026-2-1)", "createdAt=2026-01-01 OR createdAt=2026-02-01"},
+		// A subtraction written out stays one through the round trip.
+		{"n=(2026-11)", "n=2026 - (11)"},
+		{"n=2026 - 11", "n=2026 - (11)"},
+	} {
+		parsed := wire(t, ParseAndValidate(tc.query, fields, DefaultMaxLength))
+		if msg, _ := parsed["error"].(string); msg != "" {
+			t.Fatalf("%s: %s", tc.query, msg)
+		}
+		tree, err := json.Marshal(parsed["result"])
+		if err != nil {
+			t.Fatal(err)
+		}
+		printed := wire(t, Stringify(string(tree), DefaultMaxLength))
+		if printed["result"] != tc.printed {
+			t.Errorf("%s: prints as %v (%v), want %s", tc.query, printed["result"], printed["error"], tc.printed)
+		}
+		if again := wire(t, Validate(string(tree), fields, DefaultMaxLength)); again["valid"] != true {
+			t.Errorf("%s: its tree does not validate: %v", tc.query, again)
+		}
+		// The printed form means the same as what was written.
+		reparsed := wire(t, ParseAndValidate(tc.printed, fields, DefaultMaxLength))
+		if msg, _ := reparsed["error"].(string); msg != "" {
+			t.Errorf("%s: its printed form %s is refused: %s", tc.query, tc.printed, msg)
+		}
+	}
+	// Without a schema the run prints as it was written, so it is still a
+	// date written short when it is read again.
+	parsed := wire(t, Parse("createdAt=2026-11-5", DefaultMaxLength))
+	tree, _ := json.Marshal(parsed["result"])
+	if printed := wire(t, Stringify(string(tree), DefaultMaxLength)); printed["result"] != "createdAt=2026-11-5" {
+		t.Errorf("unvalidated tree prints as %v, want createdAt=2026-11-5", printed)
+	}
+	if again := wire(t, Validate(string(tree), fields, DefaultMaxLength)); again["valid"] != true {
+		t.Errorf("unvalidated tree does not validate: %v", again)
+	}
+}

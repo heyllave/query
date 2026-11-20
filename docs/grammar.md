@@ -128,20 +128,35 @@ takes all ten characters: `2026-11-16` is a date, while `2026-11-5` and
 `2026-1` are subtractions like `10-3`. A date that is written in full but
 cannot exist, such as `2026-13-45`, is an error.
 
-The field's declared type then decides what a date written short means.
-The lexer cannot see the field, so it reads `2026-11-5` as a subtraction;
-the validator can, and gives it the meaning the field asks for:
+A date field is the one place a date written short is taken as a date. The
+lexer cannot see the field, so it reads `2026-11-5` as a subtraction; the
+validator can, and on a date field takes it as the day it names. Every other
+field keeps the subtraction and judges it as one:
 
-| Field type | `2026-11-5` | `2026-11` |
-|---|---|---|
-| date, datetime | the day 2026-11-05 | refused: a date needs a day |
-| text | the text `2026-11-5` | the text `2026-11` |
-| integer, decimal | refused: write the number itself, `2010` | refused: `2015` |
-| duration, boolean | refused | refused |
+| Field type | `2026-11-5` | `2026-11` | `10-3` |
+|---|---|---|---|
+| date, datetime | the day 2026-11-05 | refused: a date needs a day | refused: it gives a number |
+| text | refused: quote it | refused: quote it | refused: quote it |
+| integer, decimal | refused: write the number itself, `2010` | refused: `2015` | the number 7 |
+| duration, boolean | refused | refused | refused |
 
-Only a value that is exactly a date written short is converted. Date
-arithmetic takes the date in full: `2026-11-05-1d`, not `2026-11-5-1d`. A
-date written short that cannot exist, such as `2026-2-30`, is refused.
+A text field treats `2026-11-5` and `10-3` alike: both are arithmetic, and
+both are written in quotes when the characters are meant. A number field
+refuses the date-shaped run because nobody writes 2015 as `2026-11`.
+
+A date written short is exactly one unbroken run: four digits, then one or
+two groups of a hyphen and one or two digits. Anything else is an ordinary
+subtraction on every field:
+
+- a space or a parenthesis: `2026 - 11`, `(2026)-11` and `(2026-11)` are
+  the number 2015;
+- more after it: date arithmetic takes the date in full, `2026-11-05-1d`
+  and not `2026-11-5-1d`;
+- a time: `2026-11-5T10:00:00Z` is not a date. A date with a time is
+  written in full.
+
+A date written short that cannot exist, such as `2026-2-30`, is refused.
+Once validated, the value is that date: it prints as `2026-11-05`.
 
 A value that has the shape of a number, a date, a duration or arithmetic and
 is meant as text goes in quotes: `name="10-3"`. A field declared as text

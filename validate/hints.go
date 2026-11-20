@@ -245,8 +245,14 @@ const arithmeticOperandsHint = "numbers combine with numbers; a date takes + or 
 func arithmeticResultHint(cfg FieldConfig, val *ast.Value) string {
 	switch cfg.Type { //nolint:exhaustive // only the types arithmetic can be compared with
 	case TypeDate, TypeDatetime:
-		if isShortDate(val.Raw) {
-			return "a date needs a year, a month and a day: " + val.Raw + "-1"
+		if val.ShortDate {
+			// Only a real month is worth completing: 2026-13-1 would be
+			// advice to write a date that does not exist.
+			if month, err := strconv.Atoi(val.Raw[strings.LastIndexByte(val.Raw, '-')+1:]); err == nil &&
+				month >= 1 && month <= 12 && strings.Count(val.Raw, "-") == 1 {
+				return "a date needs a year, a month and a day: " + val.Raw + "-1"
+			}
+			return "a date is a year, a month and a day: 2026-11-5 or 2026-11-05"
 		}
 		if strings.Trim(val.Raw, "0123456789-") == "" {
 			return "a date is a year, a month and a day: 2026-11-5 or 2026-11-05"

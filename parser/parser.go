@@ -591,7 +591,40 @@ func (p *parser) parseFieldName() ast.FieldPath {
 // parseValue parses a value expression. Top-level entry runs additive
 // precedence so arithmetic like 50000*1.1 + 1000 is recognized.
 func (p *parser) parseValue() *ast.Value {
-	return p.parseValueAdditive()
+	start := p.pos
+	val := p.parseValueAdditive()
+	if val != nil && val.Type == ast.ValueArith && p.shortDateRun(start, p.pos) {
+		val.ShortDate = true
+	}
+	return val
+}
+
+// shortDateRun reports whether the tokens in [from, to) are a date written
+// without all its digits, as one unbroken run: four digits, then one or two
+// groups of a hyphen and one or two digits (2026-11, 2026-1-5). A space, a
+// parenthesis or a sign anywhere makes it an ordinary subtraction.
+func (p *parser) shortDateRun(from, to int) bool {
+	n := to - from
+	if n != 3 && n != 5 {
+		return false
+	}
+	for i := from; i < to; i++ {
+		tok := p.tokens[i]
+		if i > from && tok.Pos.Offset != p.tokens[i-1].Pos.Offset+p.tokens[i-1].Pos.Length {
+			return false
+		}
+		switch {
+		case (i-from)%2 == 1:
+			if tok.Type != token.Minus {
+				return false
+			}
+		case tok.Type != token.Integer || !allDigits(tok.Value):
+			return false
+		case i == from && len(tok.Value) != 4, i > from && len(tok.Value) > 2:
+			return false
+		}
+	}
+	return true
 }
 
 // parseValueAdditive: parseValueMultiplicative (('+' | '-') parseValueMultiplicative)*
@@ -896,6 +929,9 @@ func (p *parser) parseFuncArg() *ast.FuncArg {
 	// Literal value (use the value lexing for after-operator tokens)
 	val := p.parseValue()
 	if val != nil {
+		// An argument is not compared with a field, so there is no declared
+		// type that could make 2026-11-5 a date here: it is a subtraction.
+		val.ShortDate = false
 		return plainArg(val)
 	}
 
