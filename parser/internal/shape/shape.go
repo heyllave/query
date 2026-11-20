@@ -33,6 +33,32 @@ func IsArithmetic(s string, pos int) bool {
 	return scanRun(s, pos)
 }
 
+// RunEnd returns where the value run starting at s[pos] ends: the first
+// space, ')', ',' or '..' outside a group, a quoted string or a field
+// reference, or len(s). It is the span IsArithmetic judges, so a reader of
+// an arithmetic value must not stop before it.
+func RunEnd(s string, pos int) int {
+	depth := 0
+	for i := pos; i < len(s); i++ {
+		if depth == 0 && endsRun(s, i) {
+			return i
+		}
+		switch s[i] {
+		case '(':
+			depth++
+		case ')':
+			depth--
+		case '"':
+			i = chars.QuotedEnd(s, i)
+		case '[':
+			if end := chars.SkipFieldRef(s, i); end >= 0 {
+				i = end
+			}
+		}
+	}
+	return len(s)
+}
+
 // run is the state of one scan: where it began, how deep in parentheses it
 // is, and whether a two-sided operator has been seen.
 type run struct {
