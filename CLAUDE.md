@@ -33,8 +33,18 @@ query/
 ├── parser/             # Lexer and parser
 │   ├── doc.go
 │   ├── errors.go       # Error, ErrorKind, ErrorList
-│   ├── lexer.go        # Lex(), ParseDuration()
-│   ├── lexer_test.go
+│   ├── lexer.go        # lexer state, Lex(), LexValue(), the main loop
+│   ├── lex_field.go    # field position: names, keywords, operators, parens, lists
+│   ├── lex_value.go    # after an operator: quoted, bracketed and bare values
+│   ├── lex_number.go   # number, date and duration runs; classifyValue
+│   ├── lex_arith.go    # arithmetic values and function-call arguments
+│   ├── lex_quoted.go   # quoted strings and [field] references
+│   ├── literals.go     # ParseDateLiteral(), ParseDuration(), IsDayLiteral()
+│   ├── lexer_golden_test.go  # pins the lexer's answers for ~5,700 inputs
+│   ├── internal/
+│   │   ├── chars/      # one character: classes, spaces, identifiers, quotes
+│   │   ├── literal/    # one whole literal: dates, durations, numbers, patterns
+│   │   └── shape/      # is an unquoted value arithmetic or text (the lookahead)
 │   ├── parser.go       # Parse()
 │   ├── cursor.go       # CursorAt(): what the grammar expects at a position
 │   └── parser_test.go
@@ -58,6 +68,15 @@ query/
 4. **Consumers own code generation** — use ast.Visitor[T] to transform AST.
 
 ## Code Conventions
+
+### Small functions in the lexer
+
+Functions in `parser/lex*.go` and `parser/internal/` stay at 40 lines or less
+(`funlen` in `.golangci.yml` enforces it). A rule that does not need lexer
+state goes in `internal/chars`, `internal/literal` or `internal/shape`, pure
+on a string and an index, with a table test. A change to what the lexer
+produces shows up in `TestLexer_Golden`; regenerate it with
+`go test ./parser -run Golden -update` only when the change is meant.
 
 ### Import Order
 

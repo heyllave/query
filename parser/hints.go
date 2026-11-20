@@ -10,6 +10,7 @@ import (
 
 	"github.com/heyllave/query/internal/hintwords"
 	"github.com/heyllave/query/internal/nearest"
+	"github.com/heyllave/query/parser/internal/chars"
 	"github.com/heyllave/query/token"
 )
 
@@ -52,7 +53,7 @@ func annotate(input string, err error, value bool, cfg Config) error {
 // would otherwise quote a piece of it, "2026".
 func wholeTerm(q *query, e *Error) {
 	off := e.Position.Offset
-	if q.value || e.Code != CodeExpectedField || off < 0 || off >= len(q.input) || !isDigit(q.input[off]) {
+	if q.value || e.Code != CodeExpectedField || off < 0 || off >= len(q.input) || !chars.IsDigit(q.input[off]) {
 		return
 	}
 	c := newContext(q, off)
@@ -276,8 +277,7 @@ func mergeRepeats(input string, list ErrorList) ErrorList {
 // Hints use it to check a rewrite before suggesting it, without going back
 // through annotate.
 func parses(q string, cfg Config) bool {
-	l := &lexer{input: q, strictValues: cfg.StrictValues}
-	l.run()
+	l := lexAll(q, cfg)
 	if len(l.errors) > 0 {
 		return false
 	}

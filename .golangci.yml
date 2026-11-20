@@ -18,8 +18,15 @@ linters:
     - nilerr
     - thelper
     - exhaustive
+    - funlen
 
   settings:
+    # Small functions in the lexer, where the review risk is. Scoped to the
+    # lexer files and parser/internal below; widened as other files are split.
+    funlen:
+      lines: 40
+      statements: 30
+
     govet:
       enable-all: true
       disable:
@@ -46,6 +53,12 @@ linters:
       # cannot be type-checked outside a CGO_ENABLED build, like wasm.
       - clients
     rules:
+      - path-except: '^parser/(lex[^/]*\.go|internal/)'
+        linters:
+          - funlen
+      - path: _test\.go
+        linters:
+          - funlen
       - path: _test\.go
         linters:
           - revive

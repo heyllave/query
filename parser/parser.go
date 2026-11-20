@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/heyllave/query/ast"
+	"github.com/heyllave/query/parser/internal/chars"
 	"github.com/heyllave/query/token"
 )
 
@@ -619,7 +620,7 @@ func (p *parser) shortDateRun(from, to int) bool {
 			if tok.Type != token.Minus {
 				return false
 			}
-		case tok.Type != token.Integer || !allDigits(tok.Value):
+		case tok.Type != token.Integer || !chars.AllDigits(tok.Value):
 			return false
 		case i == from && len(tok.Value) != 4, i > from && len(tok.Value) > 2:
 			return false
