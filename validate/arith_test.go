@@ -31,10 +31,14 @@ func validateArith(t *testing.T, q string) error {
 
 func TestValidate_ArithmeticOverLiteralsThatFitsTheField(t *testing.T) {
 	for _, q := range []string{
-		// A date written short is a date on a date field, and text on a
-		// text field: the declared type decides what the lexer could not.
+		// A date written short is a date on a date field: the declared type
+		// decides what the lexer could not.
 		"createdAt=2026-11-5", "day>2026-1-5", "createdAt:2026-11-1..2026-11-30", "day IN (2026-1-1, 2026-12-31)",
-		`day="2026-11-5"`, "name=2026-11", "name=2026-11-5",
+		`day="2026-11-5"`, "NOT createdAt=2026-11-5", `name="2026-11-5"`, `name="2026-11"`,
+		// Written with a space or a parenthesis it is a subtraction, and a
+		// number field takes the number it gives.
+		"n=2026 - 11", "n=(2026)-11", "n=(2026-11)", "n=2026 - (11)", "n=2026 -11", "n>2026 - 11 - 5", "n IN (2026 - 11, 3)",
+		"n:(2026-11)..(2026-1)", "n>abs(2026-11-5)",
 		// numbers
 		"n=10-3", "n>2*3+1", "price<10/4", "n=10%3", "n>(1+2)*3", "n:1+1..10-1", "n IN (1+1, 2*2)",
 		// a date and a duration give a date
@@ -63,6 +67,26 @@ func TestValidate_ArithmeticOverLiteralsThatDoesNotFit(t *testing.T) {
 		{"day>2026-1", `value is arithmetic (2026-1), which gives a number and does not fit field "day" (type date)`,
 			"a date needs a year, a month and a day: 2026-1-1"},
 		{"createdAt=2026-11", `gives a number and does not fit field "createdAt"`, "2026-11-1"},
+		// A month that does not exist is not completed into a date that
+		// does not exist.
+		{"day=2026-13", `gives a number and does not fit field "day"`, "a date is a year, a month and a day: 2026-11-5 or 2026-11-05"},
+		{"day=2026-0", `gives a number and does not fit field "day"`, "2026-11-5 or 2026-11-05"},
+		// Written with a space or a parenthesis it is a subtraction, not a
+		// date written short, whatever the field.
+		{"createdAt=2026 - 11 - 5", `value is arithmetic (2026-11-5), which gives a number and does not fit field "createdAt"`, "a date is a year, a month and a day"},
+		{"createdAt=(2026)-11-5", `gives a number and does not fit field "createdAt"`, "a date is a year, a month and a day"},
+		{"createdAt=(2026-11-5)", `gives a number and does not fit field "createdAt"`, "a date is YYYY-MM-DD"},
+		{"day:2026-1-1..2026 - 1 - 2", `range end value is arithmetic`, "a date is a year, a month and a day"},
+		{"name=2026 - 11", `cannot produce a text for field "name"; quote it to compare as text`, ""},
+		{"name=(2026)-11", `cannot produce a text for field "name"`, ""},
+		// A text field refuses a date written short like any arithmetic,
+		// so 2026-11-5 and 10-3 are treated alike.
+		{"name=2026-11-5", `value is arithmetic (2026-11-5), which cannot produce a text for field "name"; quote it to compare as text`, ""},
+		{"name=2026-11", `cannot produce a text for field "name"`, ""},
+		{"name IN (a, 2026-11)", `cannot produce a text for field "name"`, ""},
+		// A number field refuses the run, and names the number it gives.
+		{"n=2026-11", `has the shape of a date that is not written in full, which field "n" (type integer) does not take`, "write 2015"},
+		{"price>2026-11-5", `has the shape of a date that is not written in full`, "write 2010"},
 		// A date written short that cannot exist.
 		{"day=2026-2-30", "value 2026-2-30 is not a date that exists", "the day exists in that month"},
 		{"createdAt:2026-1-1..2026-13-1", "range end value 2026-13-1 is not a date that exists", "the month is 1 to 12"},

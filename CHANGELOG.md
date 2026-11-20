@@ -20,13 +20,21 @@ semantic versioning.
   meaning together, such as `10-7d`, is refused as well. Both used to
   validate and then match nothing. Arithmetic that reads a field or calls a
   function is left to the evaluator, as before.
-- A date written short takes its meaning from the field's declared type.
-  On a date field `createdAt=2026-11-5` is the day 2026-11-05, in a
-  comparison, a range or an `IN` list, and quoted as well. On a text field
-  `period=2026-11` is the text `2026-11`, as it was before this release.
-  On a number field it is refused: `n=2026-11` would otherwise compare with
-  2015, and the hint names that number in case it was meant. Date
-  arithmetic still takes the date in full (`2026-11-05-1d`).
+- A date field takes a date written short. `createdAt=2026-11-5` is the
+  day 2026-11-05, in a comparison, a range or an `IN` list, and quoted as
+  well; validated, it prints as `2026-11-05`. It must be one unbroken run:
+  `2026 - 11 - 5` and `(2026)-11-5` are subtractions. `ast.Value.ShortDate`
+  marks such a run, set by the parser from the source.
+- A number field refuses a date-shaped run: `n=2026-11` would otherwise
+  compare with 2015, and the hint names that number in case it was meant.
+  Written as a subtraction, `n=2026 - 11`, it is 2015 as before.
+
+### Breaking
+
+- A text field no longer takes `2026-11` or `2026-11-5` unquoted. They are
+  arithmetic, like `10-3`, and a text field refuses arithmetic: write
+  `period="2026-11"`. Before this release the two were text while `10-3`
+  was refused.
 
 ### Changed
 

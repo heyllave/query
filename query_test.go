@@ -184,9 +184,10 @@ func TestEvalWith_PreservesExplicitLengthLimit(t *testing.T) {
 	}
 }
 
-// A date written short means what the field's declared type says: the day
-// on a date field, the characters on a text field. It is refused on a number
-// field, where it would otherwise be a subtraction nobody meant.
+// A date written short is the day it names on a date field. Everywhere else
+// it stays the subtraction the grammar reads: a text field refuses it like
+// any arithmetic, and a number field refuses it too, since it would
+// otherwise be a subtraction nobody meant.
 func TestShortDate_FollowsTheDeclaredType(t *testing.T) {
 	fields := []validate.FieldConfig{
 		{Name: "createdAt", Type: validate.TypeDatetime, AllowedOps: validate.DateOps},
@@ -210,8 +211,15 @@ func TestShortDate_FollowsTheDeclaredType(t *testing.T) {
 		`createdAt="2026-11-5"`:           true,
 		"day=2026-1-5":                    true,
 		"day IN (2026-1-4, 2026-1-5)":     true,
-		"period=2026-11":                  true,
-		"period=2026-11-5":                false,
+		`period="2026-11"`:                true,
+		// With a space or a parenthesis it is the subtraction, on a number
+		// field as on any other: 2026 - 11 is 2015.
+		"n=2026 - 11":        true,
+		"n=(2026)-11":        true,
+		"n=(2026-11)":        true,
+		"n=2026 - (11)":      true,
+		"n=2026 - 12":        false,
+		`period="2026-11-5"`: false,
 	} {
 		got, err := query.Match(q, fields, record)
 		if err != nil {
@@ -224,7 +232,12 @@ func TestShortDate_FollowsTheDeclaredType(t *testing.T) {
 	}
 	// Date arithmetic needs the date in full: only a value that is exactly a
 	// date written short is converted, so 2026-11-5-1d stays a subtraction.
-	for _, q := range []string{"n=2026-11", "n=2026-11-5", "day=2026-11", "day=2026-2-30", "createdAt>2026-11-5-1d"} {
+	// A text field refuses it like any other subtraction, 10-3 included.
+	for _, q := range []string{
+		"n=2026-11", "n=2026-11-5", "day=2026-11", "day=2026-2-30", "createdAt>2026-11-5-1d",
+		"period=2026-11", "period=2026-11-5", "period=10-3",
+		"period=2026 - 11", "createdAt=2026 - 11 - 5", "createdAt=(2026)-11-5", "createdAt=2026-11-5T10:00:00Z",
+	} {
 		if _, err := query.Match(q, fields, record); err == nil {
 			t.Errorf("%s: matched without an error, want it refused", q)
 		}
