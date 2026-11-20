@@ -126,7 +126,7 @@ below are tried in order, and the first that applies decides:
 | 1 | is a complete date, `YYYY-MM-DD`, alone or followed by `T` and a time | a date | `2026-11-16`, `2026-11-16T10:00:00Z` |
 | 2 | holds a word: letters that are not a function call and not one of the units `d` `h` `m` `w` directly after a digit | text, or a pattern if a `*` starts or ends it | `10-x`, `pr-10-3`, `5+3x`, `1e5`, `7days`, `a/b`, `TRUE`, `check*` |
 | 3 | holds a number with more than one dot | text | `1.2.3`, `10.0.0.1/24` |
-| 4 | has `+ - * / %` with a number, a date, a duration, a call or a group on both sides | arithmetic | `10-3`, `10/2`, `7d-1h`, `2026-11-5`, `now()-7d` |
+| 4 | has `+ - * / %` with a number, a date, a duration, a call or a group on both sides | arithmetic | `10-3`, `10/2`, `7d-1h`, `2026-11-5`, `now()-7d`, `2026-11-16T10:00:00Z-1h` |
 | 5 | is `true` or `false`, in lower case | a boolean | `true` |
 | 6 | is digits and one unit | a duration | `7d`, `30m` |
 | 7 | is a number, with or without a sign | an integer or a float | `42`, `-5`, `1.5`, `007` |
@@ -139,6 +139,10 @@ only one that is not a subtraction, and it takes all ten characters:
 `10-3`. (A hyphen is also plain text inside a word or a version, by steps 2
 and 3: `pr-10-3`, `1.2.3-4`.) A date that is written in full but cannot
 exist, such as `2026-13-45`, is an error.
+
+A date with a time is one operand, so `2026-11-16T10:00:00Z-1h` is that
+instant minus an hour. Its zone offset belongs to it: `2026-11-16T10:00:00-05:00`
+is an instant, and `2026-11-16T10:00:00-05:00+30m` adds half an hour to it.
 
 A star makes a pattern only out of text. After arithmetic it is an error,
 not a pattern: `name=2026-11*` and `n=10-3*` do not parse.
