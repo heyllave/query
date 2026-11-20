@@ -3,6 +3,7 @@ package query_test
 import (
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/heyllave/query"
 	"github.com/heyllave/query/validate"
@@ -180,5 +181,52 @@ func TestEvalWith_PreservesExplicitLengthLimit(t *testing.T) {
 	got, err := query.EvalWith("[total]+2", testFields, record, query.WithMaxLength(0))
 	if err != nil || got != float64(7) {
 		t.Fatalf("EvalWith = %v, %v; want 7", got, err)
+	}
+}
+
+// A date written short means what the field's declared type says: the day
+// on a date field, the characters on a text field. It is refused on a number
+// field, where it would otherwise be a subtraction nobody meant.
+func TestShortDate_FollowsTheDeclaredType(t *testing.T) {
+	fields := []validate.FieldConfig{
+		{Name: "createdAt", Type: validate.TypeDatetime, AllowedOps: validate.DateOps},
+		{Name: "day", Type: validate.TypeDate, AllowedOps: validate.DateOps},
+		{Name: "period", Type: validate.TypeText, AllowedOps: validate.TextOps},
+		{Name: "n", Type: validate.TypeInteger, AllowedOps: validate.NumericOps},
+	}
+	record := map[string]any{
+		"createdAt": time.Date(2026, 11, 5, 14, 30, 0, 0, time.UTC),
+		"day":       "2026-01-05",
+		"period":    "2026-11",
+		"n":         2015,
+	}
+	for q, want := range map[string]bool{
+		"createdAt=2026-11-5":             true,
+		"createdAt=2026-11-05":            true,
+		"createdAt=2026-11-6":             false,
+		"createdAt>2026-11-4":             true,
+		"createdAt:2026-11-1..2026-11-30": true,
+		"createdAt:2026-11-6..2026-11-30": false,
+		`createdAt="2026-11-5"`:           true,
+		"day=2026-1-5":                    true,
+		"day IN (2026-1-4, 2026-1-5)":     true,
+		"period=2026-11":                  true,
+		"period=2026-11-5":                false,
+	} {
+		got, err := query.Match(q, fields, record)
+		if err != nil {
+			t.Errorf("%s: %v", q, err)
+			continue
+		}
+		if got != want {
+			t.Errorf("%s: matched %v, want %v", q, got, want)
+		}
+	}
+	// Date arithmetic needs the date in full: only a value that is exactly a
+	// date written short is converted, so 2026-11-5-1d stays a subtraction.
+	for _, q := range []string{"n=2026-11", "n=2026-11-5", "day=2026-11", "day=2026-2-30", "createdAt>2026-11-5-1d"} {
+		if _, err := query.Match(q, fields, record); err == nil {
+			t.Errorf("%s: matched without an error, want it refused", q)
+		}
 	}
 }

@@ -3,6 +3,7 @@ package validate
 import (
 	"fmt"
 	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/heyllave/query/ast"
@@ -244,8 +245,11 @@ const arithmeticOperandsHint = "numbers combine with numbers; a date takes + or 
 func arithmeticResultHint(cfg FieldConfig, val *ast.Value) string {
 	switch cfg.Type { //nolint:exhaustive // only the types arithmetic can be compared with
 	case TypeDate, TypeDatetime:
+		if isShortDate(val.Raw) {
+			return "a date needs a year, a month and a day: " + val.Raw + "-1"
+		}
 		if strings.Trim(val.Raw, "0123456789-") == "" {
-			return "a date is written in full, YYYY-MM-DD: 2026-01-05 rather than 2026-1-5"
+			return "a date is a year, a month and a day: 2026-11-5 or 2026-11-05"
 		}
 		return "a date is YYYY-MM-DD; for a relative date use now()-7d or daysAgo(7)"
 	case TypeDuration:
@@ -254,6 +258,19 @@ func arithmeticResultHint(cfg FieldConfig, val *ast.Value) string {
 		return "a number looks like 42, -3 or 1.5"
 	}
 	return ""
+}
+
+// shortDateOnNumberHint is the advice when a number field gets a value that
+// reads as an unfinished date (isShortDate). It names the number the
+// subtraction gives, which is how to write it if a number was meant.
+func shortDateOnNumberHint(raw string) string {
+	parts := strings.Split(raw, "-")
+	n, _ := strconv.Atoi(parts[0])
+	for _, p := range parts[1:] {
+		d, _ := strconv.Atoi(p)
+		n -= d
+	}
+	return fmt.Sprintf("a number looks like 42 or 1.5; if you meant the number, write %d", n)
 }
 
 func numberHint(raw string) string {
