@@ -8,6 +8,12 @@ semantic versioning.
 
 ### Fixed
 
+- An `IN` inside a call's arguments no longer makes the next group an IN
+  list: in `a=f(x in) (b=1)`, `b=1` was read as one piece of text, and the
+  error pointed at its `=`. The query is still refused, now at the `in`.
+  Brackets nested inside an IN list no longer leave the list's commas
+  separating values after they close. Both only change which error a
+  refused query gets.
 - A date with a time can be an operand of arithmetic.
   `createdAt>2026-11-16T10:00:00Z-1h` was text, and refused on a date field
   with a hint that offered the form already typed; it is that instant minus

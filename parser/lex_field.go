@@ -16,7 +16,7 @@ func (l *lexer) lexFieldPosition() {
 	if ch != '(' {
 		// Only a '(' directly after IN opens a list; anything else means
 		// the word was a field name (IN=1, IN x(...)).
-		l.expectInList = false
+		l.leaveAfterIn()
 	}
 	if l.lexOperator() {
 		return
@@ -51,7 +51,9 @@ func (l *lexer) lexFieldWord(ch byte) {
 	case ch == '"':
 		l.lexQuotedString()
 	case chars.IsIdentStart(ch):
-		l.lexIdentOrKeyword()
+		if l.lexIdentOrKeyword() == token.In {
+			l.sawIn()
+		}
 	case chars.IsDigit(ch):
 		l.lexNumericLiteral()
 	default:
@@ -91,7 +93,7 @@ func (l *lexer) lexOperator() bool {
 			l.emit(op.typ, op.text)
 			l.pos += len(op.text)
 			if op.value {
-				l.afterOperator = true
+				l.expectValue()
 			}
 			return true
 		}
@@ -101,31 +103,21 @@ func (l *lexer) lexOperator() bool {
 
 // lexOpenParen lexes '(' : a group, a call's arguments, or an IN list.
 func (l *lexer) lexOpenParen() {
-	l.parens = append(l.parens, !l.expectInList && l.afterName())
+	l.openBracket()
 	l.emit(token.LParen, "(")
 	l.pos++
-	if l.expectInList {
-		l.expectInList = false
-		l.inList = true
-		l.afterOperator = true
-	}
 }
 
 func (l *lexer) lexCloseParen() {
 	l.emit(token.RParen, ")")
 	l.pos++
-	l.inList = false
-	if n := len(l.parens); n > 0 {
-		l.parens = l.parens[:n-1]
-	}
+	l.closeBracket()
 }
 
 func (l *lexer) lexComma() {
 	l.emit(token.Comma, ",")
 	l.pos++
-	if l.inList {
-		l.afterOperator = true
-	}
+	l.afterComma()
 }
 
 // lexContinuedArith lexes an arithmetic operator after whitespace that
@@ -133,8 +125,7 @@ func (l *lexer) lexComma() {
 // lexed in value mode so the parser sees the same tokens as for `10-3`.
 func (l *lexer) lexContinuedArith(ch byte) {
 	l.emitArith(ch)
-	l.afterOperator = true
-	l.argValue = len(l.parens) > 0 && l.parens[len(l.parens)-1]
+	l.expectOperand()
 }
 
 // keywords are the connectives, matched in any case.
@@ -145,25 +136,25 @@ var keywords = map[string]token.Type{
 	"IN":  token.In,
 }
 
-// lexIdentOrKeyword lexes a word in field position. The original casing is
-// kept in Token.Value so String() reproduces the input. true and false are
-// booleans in any position, as classifyValue reads them after an operator.
-func (l *lexer) lexIdentOrKeyword() {
+// lexIdentOrKeyword lexes a word as a keyword, a boolean or a name, and
+// returns its type. The original casing is kept in Token.Value so String()
+// reproduces the input. true and false are booleans in any position, as
+// classifyValue reads them after an operator. Whether an IN opens a list is
+// the caller's to say: only in field position does it.
+func (l *lexer) lexIdentOrKeyword() token.Type {
 	start := l.pos
 	l.pos = chars.IdentEnd(l.input, l.pos)
 	word := l.input[start:l.pos]
 	typ, keyword := keywords[strings.ToUpper(word)]
 	switch {
 	case keyword:
-		if typ == token.In {
-			l.expectInList = true
-		}
 	case word == "true" || word == "false":
 		typ = token.Boolean
 	default:
 		typ = token.Ident
 	}
 	l.tokens = append(l.tokens, token.Token{Type: typ, Value: word, Pos: token.Position{Offset: start, Length: l.pos - start}})
+	return typ
 }
 
 // afterListSep reports whether the previous token opened an argument or
