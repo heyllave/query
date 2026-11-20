@@ -34,12 +34,16 @@ Each function takes one NUL-terminated UTF-8 JSON object and returns one.
 | `QueryParseAndValidate` | `{"query", "fields", "maxLength"?, "explicitAnd"?, "strictValues"?}` | `{"result": tree}` |
 | `QueryMatch` | `{"query", "fields", "record", "maxLength"?, "explicitAnd"?, "strictValues"?}` | `{"result": true}` |
 | `QueryEval` | `{"query", "fields", "record", "maxLength"?}` | `{"result": value}` |
+| `QueryComplete` | `{"query", "fields", "cursor"?, "utf16"?, "maxLength"?, "explicitAnd"?, "strictValues"?}` | `{"result": completion}` |
+| `QueryOffer` | `{"completion", "candidates"}` | `{"result": items}` |
 
 `maxLength` is the query length limit in characters; it defaults to 256 and `0` disables it. For a tree, it bounds the text the tree carries as written (string values, field names), so a tree parsed under a larger limit is validated or printed under the same one.
 
 `QueryParse`, `QueryParseAndValidate` and `QueryMatch` also take two optional booleans, `"explicitAnd"` and `"strictValues"`, which turn off lenient forms of the grammar: `{"query": "a=1 b=2", "explicitAnd": true}` fails with the code `missingAnd`. A key a call does not take is an error, so a misspelt option cannot pass for one. An input of another call sent as `null` (`"fields": null` to `QueryParse`) is read as absent. See [Grammar](../grammar/#strict-options).
 
 A field in `"fields"` may be a list: `{"name": "orders", "type": "list", "elements": [{"name": "status", "type": "text"}]}`. The condition inside a selector is then checked against the element's fields. See [List fields](../go/#list-fields).
+
+`QueryComplete` reports what can be written at `"cursor"` in a query that is still being typed: `{"slot", "replace": {"offset", "length"}, "prefix", "items": [{"label", "text", "kind", "detail"?}], "field"?, "type"?, "operator"?, "function"?, "lists"?, "quoted"?}`. The cursor is a byte offset, or a count of UTF-16 code units with `"utf16": true`; without it the cursor is the end of the query, and `replace` is in the same unit. An unfinished query is not a failure: a position nothing can be said about has the slot `none`. A cursor that is not a position in the query is one. `QueryOffer` takes that completion back with `"candidates"`, an array of strings you fetched, and returns them as items written the way the grammar needs. See [Completing a query as it is typed](../completion/).
 
 A failure is `{"error": "message"}` with a list of coded entries: `errors` for syntax, `validationErrors` for validation. Each entry is `{code, message, offset, length}`, plus `hint` when the engine can tell what was meant. Show your own wording from `code`; the codes do not change, the messages may.
 
@@ -58,7 +62,8 @@ import ctypes, json
 
 lib = ctypes.CDLL("./libquery.so")
 for name in ("QueryParse", "QueryValidate", "QueryStringify",
-             "QueryParseAndValidate", "QueryMatch", "QueryEval"):
+             "QueryParseAndValidate", "QueryMatch", "QueryEval",
+             "QueryComplete", "QueryOffer"):
     fn = getattr(lib, name)
     fn.argtypes = [ctypes.c_char_p]
     fn.restype = ctypes.c_void_p

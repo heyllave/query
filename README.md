@@ -29,6 +29,7 @@ go get github.com/heyllave/query
 | `query/parser` | Lexer and recursive descent parser |
 | `query/validate` | Field configuration and AST validation |
 | `query/eval` | Compile-and-match engine (`Compile`/`Match`), value evaluation (`CompileValue`/`Eval`), functions, struct binding |
+| `query/complete` | Completion for a query being typed: what belongs at the cursor, and what the schema can suggest there |
 
 ## Quick Start
 
@@ -454,6 +455,33 @@ orders@all(price>0) AND orders@none(status=cancelled)
 
 Codegen via `Visitor[T]` is the consumer's responsibility — the library does not translate selectors into SQL `EXISTS` or JSON path queries. See `ast.VisitSelector` to plug in your target. `examples/sql/main.go` shows a translation to `EXISTS` / `NOT EXISTS` correlated subqueries.
 
+## Completion
+
+`query.Complete` tells a search box what to suggest at the cursor of a query that is still being typed. It answers from the schema, so it needs no network and never suggests what validation would refuse:
+
+```go
+fields := []validate.FieldConfig{
+    {Name: "status", Type: validate.TypeText, AllowedOps: validate.TextOps,
+        Values: []string{"ready", "not ready", "failed"}},
+    {Name: "cluster", Type: validate.TypeText, AllowedOps: validate.TextOps},
+}
+
+c := query.Complete("status=", 7, fields, query.WithStrict())
+// c.Slot  = value, c.Field = "status"
+// c.Items = ready, "not ready", failed   (a value with a space comes quoted)
+```
+
+Values that live in your own data go through `Offer`, which writes each candidate the way the grammar needs it:
+
+```go
+c = query.Complete("cluster=", 8, fields, query.WithStrict())
+if c.Slot == parser.SlotValue && c.Field == "cluster" {
+    items := c.Offer("prod", "staging us", "812") // prod, "staging us", "812"
+}
+```
+
+The TypeScript client has the same calls (`complete`, `offer`, `applyCompletion`) for use in the browser, and the C library has `QueryComplete` and `QueryOffer`. See the [completion guide](https://heyllave.github.io/query/completion/).
+
 ## Other Languages
 
 JavaScript and TypeScript use the npm package in `clients/npm`, which runs the Go engine compiled to WASM. Every other language uses the C shared library in `clients/ffi`:
@@ -463,7 +491,7 @@ make -C clients/ffi build   # libquery.so / libquery.dylib and libquery.h
 make -C clients/ffi test    # the shared corpus, run from Python through the library
 ```
 
-Each of the six functions (`QueryParse`, `QueryValidate`, `QueryStringify`, `QueryParseAndValidate`, `QueryMatch`, `QueryEval`) takes one JSON object as a C string and returns one, which the caller frees with `QueryFree`. They are safe to call from many threads, never return `NULL` and never abort the process. `clients/ffi/conformance_test.py` is a complete binding in about forty lines:
+Each of the eight functions (`QueryParse`, `QueryValidate`, `QueryStringify`, `QueryParseAndValidate`, `QueryMatch`, `QueryEval`, `QueryComplete`, `QueryOffer`) takes one JSON object as a C string and returns one, which the caller frees with `QueryFree`. They are safe to call from many threads, never return `NULL` and never abort the process. `clients/ffi/conformance_test.py` is a complete binding in about forty lines:
 
 ```python
 lib.call("QueryMatch",

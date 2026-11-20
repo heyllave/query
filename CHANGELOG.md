@@ -13,6 +13,30 @@ semantic versioning.
 
 ### Added
 
+- Completion for a query that is still being typed. `query.Complete(text,
+  cursor, fields)` (package `complete`) reports what the grammar expects at
+  the cursor and lists what the schema can suggest there: field names, the
+  operators a field allows, a list's selectors, `AND` and `OR`, and the
+  values a field is known to take. Inside a selector it offers the fields of
+  one element. It answers from the schema alone and never fails on an
+  unfinished query.
+- `Completion.Offer` for candidates that live outside the schema, such as
+  values a host fetches or the keys of a nested field. It writes each one
+  the way the grammar needs it: a value that would not read back as itself
+  is quoted, and a key is joined to its field, in the bracket form when it is
+  not a plain identifier. `complete.ValueText` and `complete.FieldText` are
+  the two writers.
+- `FieldConfig.Values`: values a field is known to take, offered by
+  completion. Validation does not hold a query to them.
+- `parser.CursorAt`, the layer under completion: the slot at a position, the
+  word under the cursor, the field it belongs to and the list selectors
+  around it, with no schema.
+- The TypeScript client has `complete`, `offer` and `applyCompletion`, with
+  the cursor counted as `selectionStart` counts it. The C library has
+  `QueryComplete` and `QueryOffer`, counting bytes, or UTF-16 code units
+  with `"utf16": true`.
+- Completion cases in the shared corpus, run by every client.
+- A "Completing a query as it is typed" guide.
 - A "query and jq" guide: the two tools on the same records, with the cases
   where they return different answers.
 
