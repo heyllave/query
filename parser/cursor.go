@@ -5,6 +5,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/heyllave/query/ast"
+	"github.com/heyllave/query/parser/internal/chars"
 	"github.com/heyllave/query/token"
 )
 
@@ -215,7 +216,7 @@ func danglingSign(prefix string, errs ErrorList, tokens []token.Token) (token.To
 		return token.Token{}, false
 	}
 	at := errs[0].Position.Offset
-	if at >= len(prefix) || !isArithOpChar(prefix[at]) || strings.TrimSpace(prefix[at+1:]) != "" {
+	if at >= len(prefix) || !chars.IsArithOp(prefix[at]) || strings.TrimSpace(prefix[at+1:]) != "" {
 		return token.Token{}, false
 	}
 	last := tokens[len(tokens)-1]
@@ -241,14 +242,14 @@ func dateInProgress(tokens []token.Token, offset int) (start int, ok bool) {
 		start--
 	}
 	run := tokens[start:]
-	if len(run) < 2 || run[0].Type != token.Integer || len(run[0].Value) != 4 || !allDigits(run[0].Value) {
+	if len(run) < 2 || run[0].Type != token.Integer || len(run[0].Value) != 4 || !chars.AllDigits(run[0].Value) {
 		return 0, false
 	}
 	for i, tok := range run {
 		switch {
 		case i%2 == 1 && tok.Type != token.Minus:
 			return 0, false
-		case i%2 == 0 && (tok.Type != token.Integer || !allDigits(tok.Value) || (i > 0 && len(tok.Value) > 2)):
+		case i%2 == 0 && (tok.Type != token.Integer || !chars.AllDigits(tok.Value) || (i > 0 && len(tok.Value) > 2)):
 			return 0, false
 		}
 	}
@@ -364,7 +365,7 @@ func dateEnd(input string, start, offset int, cfg Config) int {
 		}
 	}
 	i := offset
-	for i < len(input) && i-start < len("2026-01-01") && (isDigit(input[i]) || input[i] == '-') {
+	for i < len(input) && i-start < len("2026-01-01") && (chars.IsDigit(input[i]) || input[i] == '-') {
 		i++
 	}
 	return i
