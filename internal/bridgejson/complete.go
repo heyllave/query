@@ -28,6 +28,8 @@ type Completion struct {
 	// Arithmetic marks a value that is an operand of arithmetic, where only
 	// a number, a date or a duration can stand.
 	Arithmetic bool `json:"arithmetic,omitempty"`
+	// Sign is the arithmetic operator such a value follows.
+	Sign string `json:"sign,omitempty"`
 }
 
 // Span is a stretch of the query: where it starts and how long it is, in
@@ -85,6 +87,7 @@ func completionToJSON(c complete.Completion, query string, utf16 bool) Completio
 		Lists:      c.Lists,
 		Quoted:     c.Quoted,
 		Arithmetic: c.Arithmetic,
+		Sign:       c.Sign,
 	}
 	if c.Known {
 		out.Type = c.Type.String()
@@ -120,7 +123,7 @@ func Offer(completionJSON, candidatesJSON string) Envelope {
 	if !found {
 		return Fail(fmt.Sprintf("invalid completion: unknown slot %q", in.Slot))
 	}
-	c := complete.Completion{Slot: slot, Field: in.Field, Quoted: in.Quoted, Function: in.Function, Arithmetic: in.Arithmetic}
+	c := complete.Completion{Slot: slot, Field: in.Field, Quoted: in.Quoted, Function: in.Function, Arithmetic: in.Arithmetic, Sign: in.Sign}
 	if in.Type != "" {
 		if err := json.Unmarshal([]byte(fmt.Sprintf("%q", in.Type)), &c.Type); err != nil {
 			return Fail("invalid completion: " + err.Error())

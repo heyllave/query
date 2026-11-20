@@ -94,8 +94,9 @@ type Cursor struct {
 	// Arithmetic reports, for SlotValue, that the value is an operand of
 	// arithmetic: it follows `+ - * / %` in `total>10 - <here>`. Only a
 	// number, a date or a duration can stand there; text would end the
-	// arithmetic and leave the sign behind.
+	// arithmetic and leave the sign behind. Sign is that operator.
 	Arithmetic bool
+	Sign       token.Type
 	// Negated reports, for SlotOperator, that NOT follows the field, so
 	// only `IN (` can come: `name NOT <here>`.
 	Negated bool
@@ -136,9 +137,23 @@ func CursorAt(input string, offset int, cfg Config) Cursor {
 	tokens := l.tokens[:len(l.tokens)-1] // drop EOF
 
 	c := Cursor{Word: token.Position{Offset: offset}}
+	dated := false
+	if sign, ok := danglingSign(prefix, l.errors, tokens); ok {
+		// `total>10 - ` does not lex as arithmetic until an operand follows
+		// the sign, which is the very thing being asked for.
+		l.errors = nil
+		tokens = append(tokens, sign)
+	}
 	switch len(l.errors) {
 	case 0:
-		if n := len(tokens); n > 0 && isWord(tokens[n-1]) && end(tokens[n-1].Pos) == offset {
+		if start, ok := dateInProgress(tokens, offset); ok {
+			// A date being typed is one word, though short of its ten
+			// characters it lexes as digits and minus signs: 2026-01-0.
+			c.Word = token.Position{Offset: tokens[start].Pos.Offset, Length: offset - tokens[start].Pos.Offset}
+			c.Prefix = prefix[c.Word.Offset:]
+			tokens = tokens[:start]
+			dated = true
+		} else if n := len(tokens); n > 0 && isWord(tokens[n-1]) && end(tokens[n-1].Pos) == offset {
 			last := tokens[n-1]
 			tokens = tokens[:n-1]
 			c.Word = last.Pos
@@ -175,6 +190,13 @@ func CursorAt(input string, offset int, cfg Config) Cursor {
 	if c.Slot == SlotNone {
 		return Cursor{Word: token.Position{Offset: offset}}
 	}
+	if dated && c.Slot == SlotValue {
+		// The rest of the date goes with it: the whole date when the input
+		// has one there, else the digits and hyphens that follow.
+		i := dateEnd(input, c.Word.Offset, offset, cfg)
+		c.Word.Length = i - c.Word.Offset
+		return c
+	}
 	c.Word.Length = wordEnd(input, offset, c, cfg) - c.Word.Offset
 	if c.Slot == SlotKey {
 		c.FieldSpan.Length = end(c.Word) - c.FieldSpan.Offset
@@ -183,6 +205,63 @@ func CursorAt(input string, offset int, cfg Config) Cursor {
 }
 
 func end(p token.Position) int { return p.Offset + p.Length }
+
+// danglingSign reports whether the text before the cursor fails to lex only
+// because it ends in an arithmetic sign with no operand after it, following
+// something a sign can follow. It returns the sign as the token it will be
+// once the operand is written.
+func danglingSign(prefix string, errs ErrorList, tokens []token.Token) (token.Token, bool) {
+	if len(errs) != 1 || errs[0].Code != CodeUnexpectedChar || len(tokens) == 0 {
+		return token.Token{}, false
+	}
+	at := errs[0].Position.Offset
+	if at >= len(prefix) || !isArithOpChar(prefix[at]) || strings.TrimSpace(prefix[at+1:]) != "" {
+		return token.Token{}, false
+	}
+	last := tokens[len(tokens)-1]
+	follows := last.Type.IsValueEnd() || (last.Type == token.String && last.Quoted)
+	if end(last.Pos) > at || !follows {
+		return token.Token{}, false
+	}
+	return token.Token{Type: arithTokenFor(prefix[at]), Value: prefix[at : at+1], Pos: token.Position{Offset: at, Length: 1}}, true
+}
+
+// dateInProgress finds a date still being typed at the end of the tokens:
+// four digits, a hyphen, and then up to two groups of one or two digits,
+// with nothing between them, ending at the cursor and standing where a value
+// starts. It returns the index of its first token.
+func dateInProgress(tokens []token.Token, offset int) (start int, ok bool) {
+	n := len(tokens)
+	if n == 0 || end(tokens[n-1].Pos) != offset {
+		return 0, false
+	}
+	start = n - 1
+	for start > 0 && n-start < 5 && end(tokens[start-1].Pos) == tokens[start].Pos.Offset &&
+		(tokens[start-1].Type == token.Integer || tokens[start-1].Type == token.Minus) {
+		start--
+	}
+	run := tokens[start:]
+	if len(run) < 2 || run[0].Type != token.Integer || len(run[0].Value) != 4 || !allDigits(run[0].Value) {
+		return 0, false
+	}
+	for i, tok := range run {
+		switch {
+		case i%2 == 1 && tok.Type != token.Minus:
+			return 0, false
+		case i%2 == 0 && (tok.Type != token.Integer || !allDigits(tok.Value) || (i > 0 && len(tok.Value) > 2)):
+			return 0, false
+		}
+	}
+	// Where a value starts: after an operator, a comma, a parenthesis or
+	// the dots of a range, not in the middle of other arithmetic.
+	if start > 0 {
+		prev := tokens[start-1]
+		if !prev.Type.IsOperator() && prev.Type != token.Comma && prev.Type != token.LParen && prev.Type != token.Range {
+			return 0, false
+		}
+	}
+	return start, true
+}
 
 // isWord reports whether a token is text that is typed a character at a
 // time, so one that ends at the cursor is still being written. A closed
@@ -246,19 +325,67 @@ func wordEnd(input string, offset int, c Cursor, cfg Config) int {
 		return bracketEnd(input, offset, c.Word.Offset)
 	case c.Word.Length == 0:
 		return offset
+	case c.Slot == SlotKey:
+		// The whole key, dots included: labels.exa|mple.com/team.
+		i := offset
+		for i < len(input) && (input[i] == '.' || l.identEnd(i) > i) {
+			if input[i] == '.' {
+				i++
+				continue
+			}
+			i = l.identEnd(i)
+		}
+		return i
 	case c.Slot != SlotValue:
 		return l.identEnd(offset)
 	}
-	i := offset
-	for i < len(input) && l.spaceWidth(i) == 0 && strings.IndexByte(`(),"[]`, input[i]) < 0 {
-		i++
-	}
+	// The word ends where its token does in the whole input, so an operator
+	// or the dots of a range after it are left alone: count>4|*2 replaces
+	// the 4, and total:100|..500 the 100.
+	i := valueTokenEnd(input, c.Word.Offset, offset, cfg)
 	// A word that is the name of a call is replaced with its arguments, so
 	// no parenthesis is left behind: name=lo|wer(x).
 	if i < len(input) && input[i] == '(' {
 		if closed := l.skipCall(i); closed > 0 {
 			return closed
 		}
+	}
+	return i
+}
+
+// dateEnd returns where a date being typed from start ends in the whole
+// input, for a cursor at offset inside it.
+func dateEnd(input string, start, offset int, cfg Config) int {
+	l := &lexer{input: input, strictValues: cfg.StrictValues}
+	l.run()
+	for _, tok := range l.tokens {
+		if tok.Pos.Offset == start && tok.Type == token.Date && end(tok.Pos) >= offset {
+			return end(tok.Pos)
+		}
+	}
+	i := offset
+	for i < len(input) && i-start < len("2026-01-01") && (isDigit(input[i]) || input[i] == '-') {
+		i++
+	}
+	return i
+}
+
+// valueTokenEnd returns where the value word that starts at start ends in
+// the whole input: the end of the token the lexer makes of it there. When
+// the whole input does not give a token at that place (text further on
+// changed how it lexes), the word ends at the first character that cannot
+// be part of a value.
+func valueTokenEnd(input string, start, offset int, cfg Config) int {
+	l := &lexer{input: input, strictValues: cfg.StrictValues}
+	l.run()
+	for _, tok := range l.tokens {
+		if tok.Pos.Offset == start && isWord(tok) && end(tok.Pos) >= offset {
+			return end(tok.Pos)
+		}
+	}
+	i := offset
+	for i < len(input) && l.spaceWidth(i) == 0 && strings.IndexByte(`(),"[]`, input[i]) < 0 {
+		i++
 	}
 	return i
 }
@@ -294,14 +421,24 @@ func bracketEnd(input string, offset, open int) int {
 		return rest + 1
 	case end == offset:
 		return offset
-	case rest == len(input), strings.IndexByte("=!<>:)", input[rest]) >= 0:
-		// The name ended and its bracket is missing: `["labels.my"=x`. The
-		// closing quote is still the name's own.
-		return end
 	}
-	// Anything else after the quote means the quote found belongs to a
-	// later string, and the name runs on: `["labels.my AND x="y"`.
-	return offset
+	// The name ended and its bracket is missing. The quote found is the
+	// name's own when what follows it reads with its quotes in pairs:
+	// `["labels.my" AND name="y"`. When it does not, that quote opened a
+	// later string and the name runs on: `["labels.my AND x="y"`.
+	if strings.ContainsAny(input[offset:end-1], "=<>") {
+		// A comparison between the cursor and the quote: that quote opens
+		// the value of a later condition.
+		return offset
+	}
+	after := &lexer{input: input[end:]}
+	after.run()
+	for _, e := range after.errors {
+		if e.Code == CodeUnclosedString || e.Code == CodeUnclosedFieldRef {
+			return offset
+		}
+	}
+	return end
 }
 
 type cursorState int
@@ -341,6 +478,7 @@ type place struct {
 	// arith marks that the operand being written follows an arithmetic
 	// sign.
 	arith bool
+	sign  token.Type
 	// left is the function on the left of a comparison, when the left side
 	// is a call and not a field.
 	left string
@@ -522,6 +660,7 @@ func (m *machine) step(tok token.Token) {
 		switch {
 		case tok.Type.IsArithmetic():
 			m.at.arith = true
+			m.at.sign = tok.Type
 			m.st = stOperand
 		case tok.Type == token.Range:
 			m.at.ranged = true
@@ -714,6 +853,9 @@ func (m *machine) place(c *Cursor) {
 		c.Operator = m.at.op
 		c.Function = m.at.left
 		c.Arithmetic = m.at.arith
+		if m.at.arith {
+			c.Sign = m.at.sign
+		}
 	case stValue, stDone:
 		if inValue || (m.st == stValue && m.halfRange()) {
 			// Inside an IN list or a parenthesised value only ',' or ')'

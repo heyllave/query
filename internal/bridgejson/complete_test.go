@@ -178,7 +178,7 @@ func TestOffer(t *testing.T) {
 		wantErr    string
 	}{
 		{name: "text values", completion: `{"slot":"value","field":"name","type":"text"}`, candidates: `["web","api server","812"]`, want: []string{"web", `"api server"`, `"812"`}},
-		{name: "numeric values", completion: `{"slot":"value","field":"replicas","type":"integer"}`, candidates: `["3","many"]`, want: []string{"3", "many"}},
+		{name: "numeric values", completion: `{"slot":"value","field":"replicas","type":"integer"}`, candidates: `["3","many"]`, want: []string{"3"}},
 		{name: "values of a field that is not declared", completion: `{"slot":"value","field":"bogus"}`, candidates: `["3"]`, want: []string{`"3"`}},
 		{name: "values inside an open quote", completion: `{"slot":"value","field":"name","type":"text","quoted":true}`, candidates: `["web"]`, want: []string{`"web"`}},
 		{name: "keys", completion: `{"slot":"key","field":"labels"}`, candidates: `["team","my key",""]`, want: []string{"labels.team", `["labels.my key"]`}},

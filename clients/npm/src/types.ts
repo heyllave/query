@@ -501,6 +501,8 @@ export interface Completion {
    * so `offer` leaves out any other candidate.
    */
   arithmetic?: boolean;
+  /** The arithmetic operator such a value follows: `+`, `-`, `*`, `/` or `%`. */
+  sign?: string;
 }
 
 /** Options for {@link QueryAPI.complete}: the grammar the query will be parsed under. */

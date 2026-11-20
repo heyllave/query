@@ -100,7 +100,9 @@ type Completion struct {
 	// Arithmetic reports that the value is an operand of arithmetic, as
 	// after the minus in `createdAt>now()-`. Only a number, a date or a
 	// duration can stand there, so Offer leaves out any other candidate.
+	// Sign is the operator it follows, as written.
 	Arithmetic bool
+	Sign       string
 }
 
 // At reports what can be written at byte offset cursor of query, for the
@@ -118,6 +120,9 @@ func At(query string, cursor int, fields []validate.FieldConfig, cfg parser.Conf
 		Quoted:     cur.Quoted,
 		Function:   cur.Function,
 		Arithmetic: cur.Arithmetic,
+	}
+	if cur.Arithmetic {
+		c.Sign = token.OperatorSymbol(cur.Sign)
 	}
 	for _, list := range cur.Lists {
 		c.Lists = append(c.Lists, list.String())
@@ -184,7 +189,7 @@ func At(query string, cursor int, fields []validate.FieldConfig, cfg parser.Conf
 		cfg0, known, isKey := resolve(scope, cur.Field)
 		c.Field, c.Known, c.Type = cur.Field.String(), known, cfg0.Type
 		if known && !isKey {
-			c.Items = valueItems(cfg0, cur.Prefix, cur.Quoted, cur.Arithmetic)
+			c.Items = valueItems(cfg0, cur.Prefix, c.place())
 		}
 	case parser.SlotConnective:
 		c.Items = connectives(cur.Prefix, cur.Closable)
@@ -236,8 +241,12 @@ func keywordsAs(prefix string, kind Kind, label, text, detail string) []Item {
 // quoted when it would not read back as itself, a key is joined to its
 // field, and a name that is not a plain identifier takes the bracket form.
 // The candidates are kept as given, in order; the host has already chosen
-// and ranked them. One that cannot be written (it is not valid UTF-8, or is
-// an empty key) is left out.
+// and ranked them.
+//
+// A candidate that could not be accepted at the position is left out: one
+// that is not valid UTF-8, an empty key, a value the field's type refuses
+// (a word on a number field), and after an arithmetic sign anything but a
+// number, a date or a duration that suits the field.
 //
 // It serves the slots whose candidates live outside the schema: a value, a
 // key, and a field or argument when the host adds names of its own. For any
@@ -262,18 +271,10 @@ func (c Completion) Offer(candidates ...string) []Item {
 		var text string
 		switch kind { //nolint:exhaustive // the three kinds chosen above
 		case KindValue:
-			if c.Arithmetic {
-				if c.Quoted || !readsAsLiteral(cand) {
-					continue
-				}
-				text = cand
-				break
+			var ok bool
+			if text, ok = c.place().write(cand); !ok {
+				continue
 			}
-			// A value compared with a function's result has no declared
-			// type, but it is not known to be text either: len(name)>5
-			// must not become len(name)>"5", which compares as text.
-			typed := (c.Known && c.Type != validate.TypeText) || (c.Field == "" && c.Function != "")
-			text = valueText(cand, typed, c.Quoted)
 		case KindKey:
 			if cand == "" {
 				continue
@@ -350,19 +351,145 @@ func bareValue(s string) (v ast.Value, ok bool) {
 	return q.Value, true
 }
 
-// valueText writes a candidate value. Where text is expected (a text field,
-// or one nothing is known about) the candidate is written so that it reads
-// back as text. With typed set (a field of another type, or the result of a
-// function) it is taken as written when it reads as one literal, so 812
-// stays a number; a candidate that does not is given as text.
-func valueText(s string, typed, quoted bool) string {
-	if quoted {
-		return ast.StringValue(&ast.Value{Type: ast.ValueString, Raw: s, Str: s, Quoted: true})
+// place is what is known about a value position, which decides how a
+// candidate is written there and whether it can be written at all.
+type place struct {
+	// typ is the type the value is held to, and typed says there is one:
+	// the declared type of the field, or what the function on the left
+	// gives. Without one the value is taken as text.
+	typ   validate.FieldValueType
+	typed bool
+	// loose marks a function whose result is not known: a candidate that
+	// reads as a number, a date or a duration is left as written, since
+	// quoting it would make a text comparison of len-like results.
+	loose bool
+	// quoted says the cursor is inside an open quote.
+	quoted bool
+	// sign is the arithmetic operator the value follows, "" when it
+	// follows none.
+	sign string
+}
+
+// funcResults is what the built-in functions give, for a value compared
+// with one: lower(name)= takes text, so 812 is written "812", and
+// len(name)> takes a number, so text is not offered. A function that is not
+// here, such as a host's own or coalesce, gives whatever its arguments do.
+var funcResults = func() map[string]validate.FieldValueType {
+	m := map[string]validate.FieldValueType{}
+	for typ, names := range map[validate.FieldValueType][]string{
+		validate.TypeText:     {"lower", "upper", "trim", "string"},
+		validate.TypeDecimal:  {"len", "abs", "ceil", "floor", "round", "sqrt", "pow", "year", "month", "day", "hour", "minute", "second", "weekday", "count", "sum", "avg", "int", "float"},
+		validate.TypeDatetime: {"now", "today", "daysAgo", "addDays", "addBusinessDays"},
+		validate.TypeBoolean:  {"contains", "startsWith", "endsWith", "isBusinessDay"},
+	} {
+		for _, name := range names {
+			m[name] = typ
+		}
 	}
-	if typed && readsAsLiteral(s) {
-		return s
+	return m
+}()
+
+// place gathers what the completion knows about its value position.
+func (c Completion) place() place {
+	p := place{typ: c.Type, typed: c.Known, quoted: c.Quoted}
+	if c.Arithmetic {
+		p.sign = c.Sign
+		if p.sign == "" {
+			p.sign = "+"
+		}
 	}
-	return ValueText(s)
+	if !c.Known && c.Field == "" && c.Function != "" {
+		if typ, ok := funcResults[c.Function]; ok {
+			p.typ, p.typed = typ, true
+		} else {
+			p.loose = true
+		}
+	}
+	return p
+}
+
+// write gives the text to insert for a candidate, or false when nothing
+// written at this position would be accepted for it: a word on a number
+// field, text after an arithmetic sign.
+func (p place) write(cand string) (string, bool) {
+	quoted := ast.StringValue(&ast.Value{Type: ast.ValueString, Raw: cand, Str: cand, Quoted: true})
+	switch {
+	case p.sign != "":
+		if p.quoted || !p.operand(cand) {
+			return "", false
+		}
+		return cand, true
+	case p.typed && p.typ != validate.TypeText:
+		// Held to the type, the way the validator will hold it. Inside an
+		// open quote the quoted form is tried first, for the types that
+		// take one (a date); the bare form replaces the quote otherwise.
+		forms := []string{cand, quoted}
+		if p.quoted {
+			forms = []string{quoted, cand}
+		}
+		for _, form := range forms {
+			// Bare, the candidate must be one literal: 10-3 is not a
+			// number somebody listed, it is arithmetic that happens to
+			// give one.
+			if (form == quoted || readsAsLiteral(cand)) && fits(p.typ, form) {
+				return form, true
+			}
+		}
+		return "", false
+	case p.quoted:
+		return quoted, true
+	case p.loose && readsAsLiteral(cand):
+		return cand, true
+	}
+	return ValueText(cand), true
+}
+
+// fits reports whether text, written after an operator, is a value the
+// validator accepts for a field of type t.
+func fits(t validate.FieldValueType, text string) bool {
+	expr, err := parser.ParseWith("f="+text, parser.Config{}.Strict())
+	if err != nil {
+		return false
+	}
+	field := validate.FieldConfig{Name: "f", Type: t, AllowedOps: validate.DefaultOps(t)}
+	return validate.New([]validate.FieldConfig{field}).Validate(expr) == nil
+}
+
+// operand reports whether cand can stand after the arithmetic sign: it must
+// read as one number, date or duration there, and be of a kind that gives
+// the field's type with that sign. A date field after a minus takes a
+// duration, and a duration field after a star takes a number.
+func (p place) operand(cand string) bool {
+	v, ok := bareValue(cand)
+	if !ok || v.Raw != cand {
+		return false
+	}
+	// As an operand, not only after an operator: .5 reads as a number after
+	// "=" and not after "-".
+	expr, err := parser.ParseWith("f>(1"+p.sign+cand+")", parser.Config{}.Strict())
+	if err != nil {
+		return false
+	}
+	q, isQualifier := expr.(*ast.QualifierExpr)
+	if !isQualifier || q.Value.Arith == nil || q.Value.Arith.Right == nil || q.Value.Arith.Right.Type != v.Type {
+		return false
+	}
+	number := v.Type == ast.ValueInteger || v.Type == ast.ValueFloat
+	duration := v.Type == ast.ValueDuration
+	date := v.Type == ast.ValueDate
+	additive := p.sign == "+" || p.sign == "-"
+	if !p.typed {
+		return number || duration || date
+	}
+	switch p.typ { //nolint:exhaustive // no arithmetic gives text, a boolean or a list
+	case validate.TypeInteger, validate.TypeDecimal:
+		return number
+	case validate.TypeDate, validate.TypeDatetime:
+		return duration && additive
+	case validate.TypeDuration:
+		return (duration && additive) || (number && (p.sign == "*" || p.sign == "/"))
+	}
+	return false
 }
 
 // readsAsLiteral reports whether s, written bare, is one literal that is
@@ -539,7 +666,7 @@ func selectorDetail(form string) string {
 
 // valueItems lists the values the schema knows a field takes: both
 // booleans, and whatever its config lists under Values.
-func valueItems(cfg validate.FieldConfig, prefix string, quoted, arithmetic bool) []Item {
+func valueItems(cfg validate.FieldConfig, prefix string, at place) []Item {
 	values := cfg.Values
 	if cfg.Type == validate.TypeBoolean && len(values) == 0 {
 		values = []string{"true", "false"}
@@ -547,10 +674,13 @@ func valueItems(cfg validate.FieldConfig, prefix string, quoted, arithmetic bool
 	var items []Item
 	for _, i := range matches(values, prefix) {
 		v := values[i]
-		if !utf8.ValidString(v) || (arithmetic && (quoted || !readsAsLiteral(v))) {
+		if !utf8.ValidString(v) {
 			continue
 		}
-		items = append(items, Item{Label: v, Text: valueText(v, cfg.Type != validate.TypeText, quoted), Kind: KindValue})
+		// A listed value the field itself would refuse is not offered.
+		if text, ok := at.write(v); ok {
+			items = append(items, Item{Label: v, Text: text, Kind: KindValue})
+		}
 	}
 	return items
 }

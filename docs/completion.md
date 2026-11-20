@@ -92,16 +92,19 @@ async function suggest(text: string, cursor: number) {
 | `staging us` | a text value | `"staging us"` | A space ends an unquoted value. |
 | `812` | a text value | `"812"` | Bare, it is a number. |
 | `812` | an integer field's value | `812` | The field wants a number. |
+| `many` | an integer field's value | left out | The field would refuse it. |
 | `a*b` | a text value | `"a*b"` | Bare, the star is a wildcard. |
 | `team` | a key of `labels` | `labels.team` | |
 | `my key` | a key of `labels` | `["labels.my key"]` | A name that is not a plain identifier takes the bracket form. |
 
-The candidates are kept in the order you give them: you have already chosen and ranked them. `c.prefix` is what has been typed so far, for you to filter by; for a key it is the key alone, without `labels.`.
+The candidates are kept in the order you give them: you have already chosen and ranked them. One that could not be accepted at the position is left out, so what comes back is safe to show. The same holds for the `Values` in the schema: a listed value the field's own type refuses is not offered.
+
+Inside a quote opened on a field that is not text, as in `ready="`, the item's text has no quotes and replaces the one that was typed: accepting `true` gives `ready=true`. `c.prefix` is what has been typed so far, for you to filter by; for a key it is the key alone, without `labels.`.
 
 Two more members say what kind of value belongs:
 
-- `c.function` is set, and `c.field` is not, when the value is compared with a function's result: `len(name)>`. The engine does not know what a function gives, so `offer` writes a candidate that reads as a number, a date or a duration as it is (`5`, not `"5"`) and quotes only what must be text.
-- `c.arithmetic` is true after an arithmetic sign, as in `createdAt>now()-`. Only a number, a date or a duration can stand there, so `offer` leaves out any other candidate.
+- `c.function` is set, and `c.field` is not, when the value is compared with a function's result: `len(name)>`. `offer` writes for what the function gives. After `len` that is a number, so `5` stays `5` and a word is left out. After `lower` it is text, so `812` becomes `"812"`. For a function of your own, whose result the engine does not know, a candidate that reads as a number, a date or a duration is left as written and anything else is text.
+- `c.arithmetic` is true after an arithmetic sign, and `c.sign` is the sign. Only what gives the field's type can stand there: after `createdAt>now()-` a duration, after `ttl>1h*` a number. `offer` leaves out every other candidate.
 
 `c.lists` names the list selectors the cursor is inside, outermost first. Inside `forks@(kind=` the field is `kind` and `lists` is `["forks"]`, so you can tell an element's `kind` from a top-level field of the same name.
 
@@ -117,7 +120,7 @@ input.value = next.query;
 input.setSelectionRange(next.cursor, next.cursor);
 ```
 
-`replace` covers the whole word under the cursor, not only the part before it, so accepting `status` with the cursor in the middle of `sta|t=x` gives `status=x`. Inside an open quote it starts at the quote, and every `text` is a whole quoted string. For a key it covers the whole name, because the name may need rewriting in the bracket form. A value that is the name of a call is replaced with its arguments.
+`replace` covers the whole word under the cursor, not only the part before it, so accepting `status` with the cursor in the middle of `sta|t=x` gives `status=x`. It stops where the word does: in `count>4|*2` it is the `4`, and in `total:100|..500` the `100`. A date being typed, such as `2026-01-0`, is one word. Inside an open quote it starts at the quote, and every `text` is a whole quoted string. For a key it covers the whole name, because the name may need rewriting in the bracket form. A value that is the name of a call is replaced with its arguments.
 
 In the TypeScript client the cursor and `replace` index the string as `selectionStart` does. The Go API counts bytes. The C library counts bytes unless the request says `"utf16": true`.
 

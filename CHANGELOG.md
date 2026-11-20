@@ -6,7 +6,57 @@ semantic versioning.
 
 ## Unreleased
 
+### Fixed
+
+- A date that is not written in full is no longer text. Four digits and a
+  hyphen used to be kept together on the promise of a date, so `2026-11-5`
+  and `2026-1` were text while `10-3` was a subtraction, and `2026-1-1` was
+  text minus one. Only a complete `YYYY-MM-DD` is a date now; anything
+  shorter is a subtraction, like every other run of digits and hyphens. To
+  compare with those characters as text, quote them: `name="2026-11-5"`.
+- The validator works out what arithmetic over literals gives and refuses
+  it when it cannot fit the field: `createdAt>10*3` (a number where a date
+  belongs), `ttl>10-3`, `n>7d-1h`. Arithmetic whose operands have no
+  meaning together, such as `10-7d`, is refused as well. Both used to
+  validate and then match nothing. Arithmetic that reads a field or calls a
+  function is left to the evaluator, as before.
+- A date field takes a date written short. `createdAt=2026-11-5` is the
+  day 2026-11-05, in a comparison, a range or an `IN` list, and quoted as
+  well; validated, it prints as `2026-11-05`. It must be one unbroken run:
+  `2026 - 11 - 5` and `(2026)-11-5` are subtractions. `ast.Value.ShortDate`
+  marks such a run, set by the parser from the source.
+- A number field refuses a date-shaped run: `n=2026-11` would otherwise
+  compare with 2015, and the hint names that number in case it was meant.
+  Written as a subtraction, `n=2026 - 11`, it is 2015 as before.
+
+- A date written short is refused where no declared type says what it is:
+  as a function's argument (`contains(name, 2026-11)`) and compared with a
+  function's result (`upper(name)=2026-11-5`, `year(day)=2026-11`). The
+  hint gives the date in full, the text in quotes and the subtraction with
+  spaces. A run is date-shaped only when its parts could be a month and a
+  day, so `n<1500-50` is 1450.
+- Arithmetic over literals that has no result is refused instead of
+  matching nothing: a divisor written as zero (`n=10/0`, `ttl>7d/0`), text
+  as an operand (`ttl>7d-1.5h`, where `1.5h` is not a duration), and a
+  fractional modulo. A field of whole numbers refuses a fraction:
+  `n=10/4`, like `n=2.5`.
+- A bare `2026-11` where a field belongs is reported whole, not as `2026`.
+
+### Breaking
+
+- With no schema, `2026-11` and `2026-11-5` evaluate as subtractions:
+  `query.Eval("2026-11")` is 2015. They were text.
+- `contains(name, 2026-11)` searched for the text `2026-11`; it is refused
+  now, and `contains(name, "2026-11")` is how to write it.
+- A text field no longer takes `2026-11` or `2026-11-5` unquoted. They are
+  arithmetic, like `10-3`, and a text field refuses arithmetic: write
+  `period="2026-11"`. Before this release the two were text while `10-3`
+  was refused.
+
 ### Changed
+
+- The Grammar page states how an unquoted value gets its type as ordered
+  steps, each with examples, and a test holds the parser to every one.
 
 - The documentation is in three parts: Language, Clients and Guides. Page
   addresses are unchanged.
@@ -37,9 +87,14 @@ semantic versioning.
   with `"utf16": true`.
 - Completion says when a value is compared with a function's result
   (`Completion.Function`) or is an operand of arithmetic
-  (`Completion.Arithmetic`), and `Offer` writes candidates to suit: a number
-  stays a number after `len(name)>`, and text is left out after
-  `now()-`.
+  (`Completion.Arithmetic`, `Completion.Sign`), and `Offer` writes
+  candidates to suit: a number stays a number after `len(name)>`, `812`
+  is quoted after `lower(name)=`, and after `createdAt>now()-` only a
+  duration is offered.
+- Nothing is offered that the field would refuse. A value from `Values` or
+  from `Offer` is checked against the field's type the way the validator
+  checks it, and one that does not fit is left out. Inside a quote opened
+  on a field that is not text, the item replaces the quote.
 - Completion cases in the shared corpus, run by every client.
 - A "Completing a query as it is typed" guide.
 - A "query and jq" guide: the two tools on the same records, with the cases

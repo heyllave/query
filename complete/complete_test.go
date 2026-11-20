@@ -381,7 +381,9 @@ func TestCompletion_Offer(t *testing.T) {
 	})
 	t.Run("values of a typed field keep the form of their type", func(t *testing.T) {
 		c, _ := at(t, "replicas>|", strict)
-		if got, want := texts(c.Offer("3", "1.5", "many", "10-3")), []string{"3", "1.5", "many", `"10-3"`}; !reflect.DeepEqual(got, want) {
+		// What an integer field would refuse is left out: a fraction, a
+		// word, arithmetic.
+		if got, want := texts(c.Offer("3", "1.5", "many", "10-3", "-4", "007")), []string{"3", "-4", "007"}; !reflect.DeepEqual(got, want) {
 			t.Errorf("integer field: %q, want %q", got, want)
 		}
 		c, _ = at(t, "ttl>|", strict)
@@ -696,7 +698,8 @@ func FuzzValueText(f *testing.F) {
 		if !utf8.ValidString(s) {
 			return
 		}
-		for _, text := range []string{ValueText(s), valueText(s, false, true)} {
+		inQuote, _ := place{quoted: true}.write(s)
+		for _, text := range []string{ValueText(s), inQuote} {
 			expr, err := parser.ParseWith("f="+text, strict)
 			if err != nil {
 				t.Fatalf("ValueText(%q) = %s, which does not parse: %v", s, text, err)
@@ -759,8 +762,9 @@ func TestCompletion_OfferAfterAFunctionKeepsLiterals(t *testing.T) {
 	if c.Slot != parser.SlotValue || c.Function != "len" || c.Field != "" {
 		t.Fatalf("completion = %+v", c)
 	}
+	// len gives a number, so only numbers are offered.
 	items := c.Offer("5", "10", "1.5", "7d", "two words", "abc")
-	if got, want := texts(items), []string{"5", "10", "1.5", "7d", `"two words"`, "abc"}; !reflect.DeepEqual(got, want) {
+	if got, want := texts(items), []string{"5", "10", "1.5"}; !reflect.DeepEqual(got, want) {
 		t.Fatalf("texts = %q, want %q", got, want)
 	}
 
@@ -797,6 +801,30 @@ func TestCompletion_OfferAfterAFunctionKeepsLiterals(t *testing.T) {
 	c, _ = at(t, `lower(name)="a|`, strict)
 	if got := texts(c.Offer("5")); !reflect.DeepEqual(got, []string{`"5"`}) {
 		t.Errorf("inside a quote after a function: %q", got)
+	}
+	// A function that gives text takes text: 812 bare would be compared as
+	// a number and miss the name "812".
+	for _, q := range []string{"lower(name)=|", "trim(name)=|", "upper(name) IN (a, |"} {
+		c, _ = at(t, q, strict)
+		if got, want := texts(c.Offer("812", "1.50", "web", "two words", "7d")), []string{`"812"`, `"1.50"`, "web", `"two words"`, `"7d"`}; !reflect.DeepEqual(got, want) {
+			t.Errorf("%s: %q, want %q", q, got, want)
+		}
+	}
+	accepted := `lower(name)="812"`
+	prog, err := eval.Compile(accepted, fields)
+	if err != nil || !prog.Match(map[string]any{"name": "812"}) {
+		t.Errorf("%s does not match the name 812 (%v)", accepted, err)
+	}
+	// A function that gives a date takes a date, bare or in quotes.
+	c, _ = at(t, "addDays(createdAt, 1)>|", strict)
+	if got, want := texts(c.Offer("2026-01-01", "soon", "5")), []string{"2026-01-01"}; !reflect.DeepEqual(got, want) {
+		t.Errorf("after a date function: %q, want %q", got, want)
+	}
+	// One whose result is not known keeps a literal as written and quotes
+	// only what must be text.
+	c, _ = at(t, "coalesce(name, description)=|", strict)
+	if got, want := texts(c.Offer("5", "two words", "abc")), []string{"5", `"two words"`, "abc"}; !reflect.DeepEqual(got, want) {
+		t.Errorf("after a function of unknown result: %q, want %q", got, want)
 	}
 	// A field nothing is known about is still taken as text.
 	c, _ = at(t, "bogus>|", strict)
@@ -993,8 +1021,9 @@ func TestCompletion_OfferForAnOperandOfArithmetic(t *testing.T) {
 	if c.Slot != parser.SlotValue || !c.Arithmetic {
 		t.Fatalf("completion = %+v", c)
 	}
-	items := c.Offer("web", "5", "two words", "7d", "2026-01-01", "1.5", "true")
-	if got, want := texts(items), []string{"5", "7d", "2026-01-01", "1.5", "true"}; !reflect.DeepEqual(got, want) {
+	// replicas is a number, so the operand is one too.
+	items := c.Offer("web", "5", "two words", "7d", "2026-01-01", "1.5", "true", ".5", "5.")
+	if got, want := texts(items), []string{"5", "1.5"}; !reflect.DeepEqual(got, want) {
 		t.Fatalf("texts = %q, want %q", got, want)
 	}
 	if got := apply(query, c, items[0]); got != "replicas>10 - 5" {
@@ -1005,8 +1034,161 @@ func TestCompletion_OfferForAnOperandOfArithmetic(t *testing.T) {
 	if got, want := texts(c.Items), []string{"42"}; !reflect.DeepEqual(got, want) {
 		t.Errorf("schema values = %q, want %q", got, want)
 	}
+	// The field's type and the sign decide the kind: a date takes a
+	// duration after + or -, a duration takes a duration after + or - and
+	// a number after * or /.
+	for _, tc := range []struct {
+		query string
+		want  []string
+	}{
+		{"createdAt>now() - |", []string{"7d", "1h"}},
+		{"createdAt>2026-01-01 + |", []string{"7d", "1h"}},
+		{"createdAt>now() * |", nil},
+		{"ttl>1h + |", []string{"7d", "1h"}},
+		{"ttl>1h * |", []string{"5", "1.5"}},
+		{"ttl>1h % |", nil},
+		{"replicas>10 - |", []string{"5", "1.5"}},
+		{"replicas>10 -|", []string{"5", "1.5"}},
+		{"bogus>10 - |", []string{"5", "7d", "1h", "2026-01-01", "1.5"}},
+		{"len(name)>10 - |", []string{"5", "1.5"}},
+	} {
+		c, _ := at(t, tc.query, strict)
+		if c.Slot != parser.SlotValue || !c.Arithmetic {
+			t.Errorf("%s: slot %s arithmetic %v", tc.query, c.Slot, c.Arithmetic)
+			continue
+		}
+		got := texts(c.Offer("web", "5", "7d", "1h", "2026-01-01", "1.5", "true", "two words"))
+		if !reflect.DeepEqual(got, tc.want) && (len(got) > 0 || len(tc.want) > 0) {
+			t.Errorf("%s: %q, want %q", tc.query, got, tc.want)
+		}
+	}
 	// A plain value slot is not marked.
 	if c, _ := at(t, "replicas>|", strict); c.Arithmetic {
 		t.Error("replicas>: marked as an operand of arithmetic")
+	}
+}
+
+// Nothing is offered that the field would refuse, from the schema's own
+// list or from the host, in a quote or out of one.
+func TestAt_OffersOnlyWhatTheFieldAccepts(t *testing.T) {
+	fields := []validate.FieldConfig{
+		{Name: "ready", Type: validate.TypeBoolean, AllowedOps: validate.BoolOps},
+		{Name: "count", Type: validate.TypeInteger, AllowedOps: validate.NumericOps, Values: []string{"3", "1.5", "many", "42"}},
+		{Name: "ttl", Type: validate.TypeDuration, AllowedOps: validate.DurationOps, Values: []string{"7d", "1h30m", "90m"}},
+		{Name: "day", Type: validate.TypeDate, AllowedOps: validate.DateOps, Values: []string{"2026-01-01", "soon", "2026-1-5"}},
+		{Name: "name", Type: validate.TypeText, AllowedOps: validate.TextOps, Values: []string{"web", "812", "two words"}},
+	}
+	validator := validate.New(fields)
+	for _, tc := range []struct {
+		query string // with the cursor
+		want  []string
+		host  []string // what Offer keeps of 3, abc, true, 7d, 2026-01-01 and "two words"
+	}{
+		{"ready=|", []string{"true", "false"}, []string{"true"}},
+		{`ready="|`, []string{"true", "false"}, []string{"true"}},
+		{`ready="t|`, []string{"true"}, []string{"true"}},
+		{"count=|", []string{"3", "42"}, []string{"3"}},
+		{`count="|`, []string{"3", "42"}, []string{"3"}},
+		{"count IN (1, |", []string{"3", "42"}, []string{"3"}},
+		{"ttl<=|", []string{"7d", "90m"}, []string{"7d"}},
+		{`ttl<="|`, []string{"7d", "90m"}, []string{"7d"}},
+		// A date without its zeros is not one literal bare, so it goes in
+		// quotes, where a date field takes it.
+		{"day>|", []string{"2026-01-01", `"2026-1-5"`}, []string{"2026-01-01"}},
+		{`day>"|`, []string{`"2026-01-01"`, `"2026-1-5"`}, []string{`"2026-01-01"`}},
+		{"name=|", []string{"web", `"812"`, `"two words"`}, []string{`"3"`, "abc", `"true"`, `"7d"`, `"2026-01-01"`, `"two words"`}},
+		{`name="|`, []string{`"web"`, `"812"`, `"two words"`}, []string{`"3"`, `"abc"`, `"true"`, `"7d"`, `"2026-01-01"`, `"two words"`}},
+	} {
+		offset := strings.IndexByte(tc.query, '|')
+		query := tc.query[:offset] + tc.query[offset+1:]
+		c := At(query, offset, fields, strict)
+		if got := texts(c.Items); !reflect.DeepEqual(got, tc.want) {
+			t.Errorf("%s: items %q, want %q", tc.query, got, tc.want)
+		}
+		host := c.Offer("3", "abc", "true", "7d", "2026-01-01", "two words")
+		if got := texts(host); !reflect.DeepEqual(got, tc.host) {
+			t.Errorf("%s: Offer keeps %q, want %q", tc.query, got, tc.host)
+		}
+		// Whatever is offered, once accepted, parses and validates.
+		for _, it := range append(append([]Item{}, c.Items...), host...) {
+			out := apply(query, c, it)
+			if strings.Contains(out, " IN (") {
+				out += ")"
+			}
+			expr, err := parser.ParseWith(out, strict)
+			if err != nil {
+				t.Errorf("%s: accepting %q gives %q, which does not parse: %v", tc.query, it.Text, out, err)
+				continue
+			}
+			if err := validator.Validate(expr); err != nil {
+				t.Errorf("%s: accepting %q gives %q, which the field refuses: %v", tc.query, it.Text, out, err)
+			}
+		}
+	}
+}
+
+// Accepting a value leaves what follows it as it was: an operator, the dots
+// of a range, the rest of a key.
+func TestAt_AcceptingAValueKeepsWhatFollows(t *testing.T) {
+	fields := []validate.FieldConfig{
+		{Name: "count", Type: validate.TypeInteger, AllowedOps: validate.NumericOps, Values: []string{"2", "40"}},
+		{Name: "total", Type: validate.TypeDecimal, AllowedOps: validate.NumericOps, Values: []string{"100", "250"}},
+		{Name: "day", Type: validate.TypeDate, AllowedOps: validate.DateOps, Values: []string{"2026-01-01", "2026-01-15", "2026-02-01"}},
+		{Name: "ready", Type: validate.TypeBoolean, AllowedOps: validate.BoolOps},
+		{Name: "labels", Type: validate.TypeText, AllowedOps: validate.TextOps, Nested: true},
+		{Name: "name", Type: validate.TypeText, AllowedOps: validate.TextOps},
+	}
+	for _, tc := range []struct {
+		query, pick, want string
+	}{
+		{"count>4|*2 AND ready=true", "2", "count>2*2 AND ready=true"},
+		{"count>4|0*2", "40", "count>40*2"},
+		{"day>2026-01-01|-7d", "2026-01-15", "day>2026-01-15-7d"},
+		{"total:100|..500", "250", "total:250..500"},
+		{"total:1..10|0 AND ready=true", "250", "total:1..250 AND ready=true"},
+		// A date being typed is one word, with or without its last digits.
+		{"day=2026-01-0|", "2026-01-01", "day=2026-01-01"},
+		{"day=2026-0|", "2026-02-01", "day=2026-02-01"},
+		{"day=2026-01-|", "2026-01-15", "day=2026-01-15"},
+		{"day=2026-0|1-15 AND ready=true", "2026-01-01", "day=2026-01-01 AND ready=true"},
+		{"day IN (2026-01-01, 2026-0|", "2026-02-01", "day IN (2026-01-01, 2026-02-01"},
+	} {
+		offset := strings.IndexByte(tc.query, '|')
+		query := tc.query[:offset] + tc.query[offset+1:]
+		c := At(query, offset, fields, strict)
+		// Through Offer, so the candidate does not have to start with what
+		// is already typed.
+		offered := c.Offer(tc.pick)
+		if len(offered) != 1 {
+			t.Errorf("%s: %q is not offered (slot %s, prefix %q)", tc.query, tc.pick, c.Slot, c.Prefix)
+			continue
+		}
+		picked := &offered[0]
+		if got := apply(query, c, *picked); got != tc.want {
+			t.Errorf("%s: accepting %q gives %q, want %q", tc.query, tc.pick, got, tc.want)
+		}
+	}
+	// A key is replaced whole, dots and all.
+	for _, tc := range []struct{ query, want string }{
+		{"labels.exa|mple.com/team=x", `["labels.my key"]=x`},
+		{"labels.a|.b.c AND name=x", `["labels.my key"] AND name=x`},
+		{`["labels.my|" AND name="y"`, `["labels.my key"] AND name="y"`},
+		{`["labels.my|"`, `["labels.my key"]`},
+	} {
+		offset := strings.IndexByte(tc.query, '|')
+		query := tc.query[:offset] + tc.query[offset+1:]
+		c := At(query, offset, fields, strict)
+		items := c.Offer("my key")
+		if c.Slot != parser.SlotKey || len(items) != 1 {
+			t.Errorf("%s: slot %s, offered %q", tc.query, c.Slot, texts(items))
+			continue
+		}
+		got := apply(query, c, items[0])
+		if got != tc.want {
+			t.Errorf("%s: accepting the key gives %q, want %q", tc.query, got, tc.want)
+		}
+		if _, err := parser.ParseWith(got, strict); err != nil {
+			t.Errorf("%s: %q does not parse: %v", tc.query, got, err)
+		}
 	}
 }
