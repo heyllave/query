@@ -46,8 +46,9 @@ func bridge(name string, need int, call func(args []js.Value) bridgejson.Envelop
 // The options each kind of call takes. Only a call that parses a condition
 // has a grammar to be strict about.
 var (
-	lengthOption = []string{"maxLength"}
-	parseOptions = []string{"maxLength", "explicitAnd", "strictValues"}
+	lengthOption    = []string{"maxLength"}
+	parseOptions    = []string{"maxLength", "explicitAnd", "strictValues"}
+	completeOptions = []string{"cursor", "maxLength", "explicitAnd", "strictValues"}
 )
 
 // maxLengthArg reads the optional last argument of a call that takes no
@@ -112,6 +113,38 @@ func optionsArg(args []js.Value, i int, known []string) (bridgejson.Options, bri
 		*sw.dst = v.Bool()
 	}
 	return o, nil
+}
+
+// jsComplete is queryComplete(query, fieldsJSON, maxLength? | options?). The
+// last argument is what every other call takes, a number for maxLength or an
+// options object, and the object also carries cursor. The cursor counts
+// UTF-16 code units, as a JavaScript string is indexed, and so does the span
+// in the answer. Absent or null, as in the C library, it is the end of the
+// query.
+func jsComplete(args []js.Value) bridgejson.Envelope {
+	query := args[0].String()
+	cursor := bridgejson.UTF16Len(query)
+	o, fail := optionsArg(args, 2, completeOptions)
+	if fail != nil {
+		return fail
+	}
+	if len(args) > 2 && args[2].Type() == js.TypeObject {
+		if at := args[2].Get("cursor"); !absent(at) && at.Type() != js.TypeNull {
+			if at.Type() != js.TypeNumber || at.Float() != float64(at.Int()) {
+				return bridgejson.Fail("cursor must be an integer")
+			}
+			cursor = at.Int()
+		}
+	}
+	return bridgejson.Complete(query, args[1].String(), cursor, true, o)
+}
+
+// jsOffer is queryOffer(completionJSON, candidatesJSON).
+func jsOffer(args []js.Value) bridgejson.Envelope {
+	if len(args) > 2 {
+		return bridgejson.Fail("queryOffer: too many arguments")
+	}
+	return bridgejson.Offer(args[0].String(), args[1].String())
 }
 
 func absent(v js.Value) bool { return v.Type() == js.TypeUndefined }

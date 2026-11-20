@@ -11,16 +11,16 @@ build:
 test:
 	$(GOTEST) $(GOFLAGS) -count=1 ./...
 
-COVERPKG := ./token/...,./ast/...,./parser/...,./validate/...,./eval/...,./
+COVERPKG := ./token/...,./ast/...,./parser/...,./validate/...,./eval/...,./complete/...,./
 
 coverage:
 	$(GOTEST) $(GOFLAGS) -coverprofile=$(COVERAGE) -covermode=atomic \
 		-coverpkg=$(COVERPKG) \
-		./token/... ./ast/... ./parser/... ./validate/... ./eval/... .
+		./token/... ./ast/... ./parser/... ./validate/... ./eval/... ./complete/... .
 	$(GO) tool cover -func=$(COVERAGE) | tail -1
 
 lint:
-	golangci-lint run ./cmd/... ./token/... ./ast/... ./parser/... ./validate/... ./eval/... ./examples/... ./internal/... ./conformance/... .
+	golangci-lint run ./cmd/... ./token/... ./ast/... ./parser/... ./validate/... ./eval/... ./complete/... ./examples/... ./internal/... ./conformance/... .
 
 fmt:
 	gofmt -w .
@@ -47,6 +47,11 @@ fuzz:
 	$(GOTEST) -run=^$$ -fuzz=^FuzzCompileMatch$$ -fuzztime=$(FUZZTIME) ./eval/
 	$(GOTEST) -run=^$$ -fuzz=^FuzzCompileValue$$ -fuzztime=$(FUZZTIME) ./eval/
 	$(GOTEST) -run=^$$ -fuzz=^FuzzBridgeRoundTrip$$ -fuzztime=$(FUZZTIME) ./internal/bridgejson/
+	$(GOTEST) -run=^$$ -fuzz=^FuzzCursorAt$$ -fuzztime=$(FUZZTIME) ./parser/
+	$(GOTEST) -run=^$$ -fuzz=^FuzzAt$$ -fuzztime=$(FUZZTIME) ./complete/
+	$(GOTEST) -run=^$$ -fuzz=^FuzzValueText$$ -fuzztime=$(FUZZTIME) ./complete/
+	$(GOTEST) -run=^$$ -fuzz=^FuzzFieldText$$ -fuzztime=$(FUZZTIME) ./complete/
+	$(GOTEST) -run=^$$ -fuzz=^FuzzBridgeComplete$$ -fuzztime=$(FUZZTIME) ./internal/bridgejson/
 
 # Run every example program the way the README shows.
 examples:

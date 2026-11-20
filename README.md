@@ -29,6 +29,7 @@ go get github.com/heyllave/query
 | `query/parser` | Lexer and recursive descent parser |
 | `query/validate` | Field configuration and AST validation |
 | `query/eval` | Compile-and-match engine (`Compile`/`Match`), value evaluation (`CompileValue`/`Eval`), functions, struct binding |
+| `query/complete` | Completion for a query being typed: what belongs at the cursor, and what the schema can suggest there |
 
 ## Quick Start
 
@@ -454,6 +455,33 @@ orders@all(price>0) AND orders@none(status=cancelled)
 
 Codegen via `Visitor[T]` is the consumer's responsibility — the library does not translate selectors into SQL `EXISTS` or JSON path queries. See `ast.VisitSelector` to plug in your target. `examples/sql/main.go` shows a translation to `EXISTS` / `NOT EXISTS` correlated subqueries.
 
+## Completion
+
+`query.Complete` tells a search box what to suggest at the cursor of a query that is still being typed. It answers from the schema, so it needs no network and never suggests what validation would refuse:
+
+```go
+fields := []validate.FieldConfig{
+    {Name: "status", Type: validate.TypeText, AllowedOps: validate.TextOps,
+        Values: []string{"ready", "not ready", "failed"}},
+    {Name: "cluster", Type: validate.TypeText, AllowedOps: validate.TextOps},
+}
+
+c := query.Complete("status=", 7, fields, query.WithStrict())
+// c.Slot  = value, c.Field = "status"
+// c.Items = ready, "not ready", failed   (a value with a space comes quoted)
+```
+
+Values that live in your own data go through `Offer`, which writes each candidate the way the grammar needs it:
+
+```go
+c = query.Complete("cluster=", 8, fields, query.WithStrict())
+if c.Slot == parser.SlotValue && c.Field == "cluster" {
+    c.Items = c.Offer("prod", "staging us", "812") // prod, "staging us", "812"
+}
+```
+
+The TypeScript client has the same calls (`complete`, `offer`, `applyCompletion`) for use in the browser, and the C library has `QueryComplete` and `QueryOffer`. See the [completion guide](https://heyllave.github.io/query/completion/).
+
 ## Other Languages
 
 JavaScript and TypeScript use the npm package in `clients/npm`, which runs the Go engine compiled to WASM. Every other language uses the C shared library in `clients/ffi`:
@@ -463,7 +491,7 @@ make -C clients/ffi build   # libquery.so / libquery.dylib and libquery.h
 make -C clients/ffi test    # the shared corpus, run from Python through the library
 ```
 
-Each of the six functions (`QueryParse`, `QueryValidate`, `QueryStringify`, `QueryParseAndValidate`, `QueryMatch`, `QueryEval`) takes one JSON object as a C string and returns one, which the caller frees with `QueryFree`. They are safe to call from many threads, never return `NULL` and never abort the process. `clients/ffi/conformance_test.py` is a complete binding in about forty lines:
+Each of the eight functions (`QueryParse`, `QueryValidate`, `QueryStringify`, `QueryParseAndValidate`, `QueryMatch`, `QueryEval`, `QueryComplete`, `QueryOffer`) takes one JSON object as a C string and returns one, which the caller frees with `QueryFree`. They are safe to call from many threads, never return `NULL` and never abort the process. `clients/ffi/conformance_test.py` is a complete binding in about forty lines:
 
 ```python
 lib.call("QueryMatch",
@@ -550,7 +578,7 @@ The language covers most of what general-purpose expression engines offer for fi
 - **Negated comparisons** — `total!>50000` desugars to `NOT total>50000`; missing-field safe. The same holds through a function: `len(name)!>5`.
 - **Negated wildcards** — `name!=Jo*` is the negation of the pattern on a present field; `ast.SQLOperator` renders it as `NOT LIKE`.
 - **Datetime literals** — `created_at>=2026-01-01T10:00:00Z` (RFC 3339, optional fraction and zone) is an instant. A quoted timestamp on a date field is read the same way.
-- **Day literals** — a date without a time (`created_at=2026-09-28`) denotes the whole UTC day: `=` matches any instant in it, `!=` any instant outside it, `<=` anything before its end, `>` anything at or after its end, and a range `created_at:2026-01-01..2026-01-31` covers all of the 31st. A value stored at midnight reads the same either way, so pure date fields are unaffected. SQL backends should lower `=` on a day literal to `>= day AND < day+1` (see `examples/sql`).
+- **Day literals** — a date without a time (`created_at=2026-09-28`) denotes the whole UTC day: `=` matches any instant in it, `!=` any instant outside it, `<=` anything before its end, `>` anything at or after its end, and a range `created_at:2026-01-01..2026-01-31` covers all of the 31st. A value stored at midnight reads the same either way, so pure date fields are unaffected. SQL backends should lower `=` on a day literal to `>= day AND < day+1` (see `examples/sql`). On a field declared as a date, the day may be written without its leading zeros, `created_at=2026-9-5`; anywhere else that run is the subtraction it looks like, and a text or number field refuses it (see the Grammar page).
 - **Non-ASCII terms** — a bare word may contain any non-ASCII character (`café`, `日本`), in field position or as a value. Unicode spaces (no-break, ideographic) separate terms like an ASCII space.
 - **Addresses and versions are one value** — a digit run with more than one dot is not a number, so `ip=10.0.0.1/24` is the string `10.0.0.1/24`, not a division.
 - **Signed literals in arguments and lists** — `addDays(d, -7)`, `n IN (-1, 2)`; wildcards are allowed in `IN` lists too. Arguments may be arithmetic (`addDays(d, 1-8)`), and an operand may be signed (`n>10*-3`).

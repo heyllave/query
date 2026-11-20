@@ -56,7 +56,7 @@ jobs:
         uses: golangci/golangci-lint-action@ba0d7d2ec06a0ea1cb5fa41b2e4a3ab91d21278a # v9
         with:
           version: v2.13
-          args: ./cmd/... ./token/... ./ast/... ./parser/... ./validate/... ./eval/... ./examples/... ./internal/... ./conformance/... .
+          args: ./cmd/... ./token/... ./ast/... ./parser/... ./validate/... ./eval/... ./complete/... ./examples/... ./internal/... ./conformance/... .
 
   test:
     name: Unit tests
@@ -93,8 +93,8 @@ jobs:
         run: |
           go test -race -count=1 \
             -coverprofile=coverage.out -covermode=atomic \
-            -coverpkg=./token/...,./ast/...,./parser/...,./validate/...,./eval/...,./ \
-            ./token/... ./ast/... ./parser/... ./validate/... ./eval/... ./conformance/... \
+            -coverpkg=./token/...,./ast/...,./parser/...,./validate/...,./eval/...,./complete/...,./ \
+            ./token/... ./ast/... ./parser/... ./validate/... ./eval/... ./complete/... ./conformance/... \
             ./internal/... ./cmd/... .
 
       # The library packages sit near 95%; a change that drops them below 90%

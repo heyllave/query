@@ -13,6 +13,13 @@ layout: default
   Nothing is sent to a server.
 </p>
 
+<p>
+  As you type, the engine suggests what can come next: fields, the operators a
+  field allows, and the values a field lists. Label keys and the values of the
+  other fields are taken from the record below, the way a host would fetch
+  them from its own data. Use the arrow keys and Enter or Tab, or click one.
+</p>
+
 <style>
   .pg label { display: block; font-weight: 600; margin: 1rem 0 0.25rem; }
   .pg input[type="text"], .pg textarea {
@@ -42,12 +49,29 @@ layout: default
   .pg ul.pg-errors { margin: 0.5rem 0 0; padding-left: 1.2rem; }
   .pg ul.pg-errors code { font-size: 0.8rem; }
   .pg .pg-hint { margin: 0.15rem 0 0.4rem; color: #17602f; }
+  .pg .pg-box { position: relative; }
+  .pg ul.pg-suggest {
+    position: absolute; left: 0; right: 0; top: 100%; z-index: 10; margin: 2px 0 0; padding: 0.2rem 0;
+    list-style: none; max-height: 16rem; overflow: auto; background: #fff;
+    border: 1px solid #c9c9d4; border-radius: 4px; box-shadow: 0 4px 12px rgba(39, 38, 43, 0.12);
+  }
+  .pg ul.pg-suggest li {
+    display: flex; gap: 0.75rem; align-items: baseline; margin: 0; padding: 0.25rem 0.6rem; cursor: pointer;
+    font-family: SFMono-Regular, Menlo, Consolas, monospace; font-size: 0.8rem;
+  }
+  .pg ul.pg-suggest li::before { content: none; }
+  .pg ul.pg-suggest li[aria-selected="true"] { background: #ecebfa; }
+  .pg ul.pg-suggest .pg-kind { margin-left: auto; color: #6b6a75; font-family: inherit; font-size: 0.7rem; }
 </style>
 
 <div class="pg">
   <label for="pg-query">Query</label>
-  <input id="pg-query" type="text" spellcheck="false" autocomplete="off" autocapitalize="off"
-         value="labels.team=payments AND replicas>=2 AND created_at>=2026-01-01">
+  <div class="pg-box">
+    <input id="pg-query" type="text" spellcheck="false" autocomplete="off" autocapitalize="off"
+           role="combobox" aria-autocomplete="list" aria-controls="pg-suggest" aria-expanded="false"
+           value="labels.team=payments AND replicas>=2 AND created_at>=2026-01-01">
+    <ul class="pg-suggest" id="pg-suggest" role="listbox" aria-label="Suggestions" hidden></ul>
+  </div>
   <div class="pg-examples" id="pg-examples" aria-label="Example queries"></div>
 
   <div class="pg-verdict" id="pg-verdict" role="status" aria-live="polite">Loading the engine…</div>

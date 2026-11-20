@@ -157,6 +157,20 @@ prog, err := eval.Compile("wordCount(description)>3", fields,
 
 A panic inside your function becomes an error from that call. It does not crash the caller.
 
+## Complete a query being typed
+
+```go
+c := query.Complete("status=re", 9, fields, query.WithStrict())
+c.Slot    // parser.SlotValue
+c.Field   // "status"
+c.Prefix  // "re"
+c.Items   // the values status lists in FieldConfig.Values that fit "re"
+```
+
+`query.Complete` says what the grammar expects at a byte offset of a query that is still being written, and lists what the schema can suggest there. It never fails: a position it cannot place has `parser.SlotNone`. Candidates that live outside the schema go through `c.Offer(names...)`, which writes each one the way the grammar needs it. The [completion guide]({{ '/completion/' | relative_url }}) has the slots and a full example.
+
+`parser.CursorAt` is the layer underneath, for a tool that wants the position without a schema: the slot, the word under the cursor, the field it belongs to and the list selectors around it.
+
 ## Translate the tree
 
 Implement `ast.Visitor[T]` to turn a tree into SQL, JSON or anything else. See [Filtering a list with SQL]({{ '/sql/' | relative_url }}).

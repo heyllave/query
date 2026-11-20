@@ -591,7 +591,48 @@ func (p *parser) parseFieldName() ast.FieldPath {
 // parseValue parses a value expression. Top-level entry runs additive
 // precedence so arithmetic like 50000*1.1 + 1000 is recognized.
 func (p *parser) parseValue() *ast.Value {
-	return p.parseValueAdditive()
+	start := p.pos
+	val := p.parseValueAdditive()
+	if val != nil && val.Type == ast.ValueArith && p.shortDateRun(start, p.pos) {
+		val.ShortDate = true
+	}
+	return val
+}
+
+// shortDateRun reports whether the tokens in [from, to) are a date written
+// without all its digits, as one unbroken run: four digits, then one or two
+// groups of a hyphen and one or two digits (2026-11, 2026-1-5), where the
+// first group could be a month and the second a day. A space, a parenthesis
+// or a sign anywhere makes it an ordinary subtraction.
+func (p *parser) shortDateRun(from, to int) bool {
+	n := to - from
+	if n != 3 && n != 5 {
+		return false
+	}
+	for i := from; i < to; i++ {
+		tok := p.tokens[i]
+		if i > from && tok.Pos.Offset != p.tokens[i-1].Pos.Offset+p.tokens[i-1].Pos.Length {
+			return false
+		}
+		switch {
+		case (i-from)%2 == 1:
+			if tok.Type != token.Minus {
+				return false
+			}
+		case tok.Type != token.Integer || !allDigits(tok.Value):
+			return false
+		case i == from && len(tok.Value) != 4, i > from && len(tok.Value) > 2:
+			return false
+		case i > from:
+			// A month is 1 to 12 and a day 1 to 31. Anything else was not
+			// meant as a date: 1500-50 is a subtraction and nothing more.
+			n, _ := strconv.Atoi(tok.Value)
+			if limit := map[int]int{2: 12, 4: 31}[i-from]; n < 1 || n > limit {
+				return false
+			}
+		}
+	}
+	return true
 }
 
 // parseValueAdditive: parseValueMultiplicative (('+' | '-') parseValueMultiplicative)*

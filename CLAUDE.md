@@ -36,12 +36,15 @@ query/
 │   ├── lexer.go        # Lex(), ParseDuration()
 │   ├── lexer_test.go
 │   ├── parser.go       # Parse()
+│   ├── cursor.go       # CursorAt(): what the grammar expects at a position
 │   └── parser_test.go
 ├── validate/           # Field config and AST validation
 │   ├── doc.go
 │   ├── config.go       # FieldConfig, FieldValueType, Op, operator groups
 │   ├── validate.go     # Validator, New(), Validate()
 │   └── validate_test.go
+├── complete/           # Completion for a query being typed
+│   └── complete.go     # At(), Completion, Offer(), ValueText(), FieldText()
 └── wasm/               # WASM build target
     ├── main.go
     └── Makefile

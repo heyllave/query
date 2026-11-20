@@ -2,6 +2,7 @@ package query
 
 import (
 	"github.com/heyllave/query/ast"
+	"github.com/heyllave/query/complete"
 	"github.com/heyllave/query/eval"
 	"github.com/heyllave/query/parser"
 	"github.com/heyllave/query/validate"
@@ -133,4 +134,21 @@ func EvalWith(q string, fields []validate.FieldConfig, record map[string]any, op
 		return nil, err
 	}
 	return prog.Eval(record)
+}
+
+// Complete reports what can be written at byte offset cursor of a query
+// that is still being typed: field names, the operators a field allows, the
+// selectors of a list, connectives, and the values a field is known to
+// take. Pass the options the query will be parsed with, so that what is
+// suggested is what will be accepted. It never fails; a position nothing can
+// be said about has the slot [github.com/heyllave/query/parser.SlotNone].
+//
+// See [github.com/heyllave/query/complete] for how a host adds candidates
+// of its own, such as values it fetches.
+func Complete(q string, cursor int, fields []validate.FieldConfig, opts ...Option) complete.Completion {
+	o := defaultOptions()
+	for _, opt := range opts {
+		opt(&o)
+	}
+	return complete.At(q, cursor, fields, o.parse)
 }

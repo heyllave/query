@@ -13,7 +13,7 @@ const wasmPath = join(here, "..", "query.wasm");
 const wasmExecPath = join(here, "..", "src", "wasm_exec.js");
 const corpusPath = join(here, "..", "..", "..", "conformance", "corpus.json");
 
-const EXPECTED_CASES = 135;
+const EXPECTED_CASES = 173;
 
 async function loadWasm() {
   await import(wasmExecPath);
@@ -77,6 +77,34 @@ for (const tc of corpus.cases) {
             Math.abs(Number(r.result) - tc.expectValue) <= tol,
             `value ${r.result}, want ${tc.expectValue} (±${tol})`
           );
+        }
+        break;
+      }
+      case "complete": {
+        // A JavaScript string is indexed in UTF-16 code units, so this
+        // client reads the cursor and the span the corpus gives in that unit.
+        const r = w.queryComplete(tc.query, fieldsFor(tc), {
+          cursor: tc.cursorUtf16,
+          explicitAnd: tc.strict,
+          strictValues: tc.strict,
+        });
+        assert.equal(r.error, undefined, r.error);
+        const c = r.result;
+        assert.equal(c.slot, tc.expectSlot);
+        assert.equal(c.prefix, tc.expectPrefix);
+        if (tc.expectField !== undefined) assert.equal(c.field ?? "", tc.expectField);
+        assert.deepEqual([c.replace.offset, c.replace.length], tc.expectReplaceUtf16);
+        assert.deepEqual(c.items.map((it) => it.text), tc.expectTexts);
+        assert.equal(
+          tc.query.slice(c.replace.offset, c.replace.offset + c.replace.length).startsWith(
+            c.quoted ? '"' : ""
+          ),
+          true
+        );
+        if (tc.candidates) {
+          const offered = w.queryOffer(JSON.stringify(c), JSON.stringify(tc.candidates));
+          assert.equal(offered.error, undefined, offered.error);
+          assert.deepEqual(offered.result.map((it) => it.text), tc.expectOffered);
         }
         break;
       }

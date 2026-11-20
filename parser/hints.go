@@ -41,8 +41,31 @@ func annotate(input string, err error, value bool, cfg Config) error {
 		if e.Hint == "" {
 			e.Hint = hintFor(q, e)
 		}
+		wholeTerm(q, e)
 	}
 	return list
+}
+
+// wholeTerm makes a "got ..." message about a number standing where a field
+// belongs name everything that was typed. The parser stops at its first
+// token, and since a run such as 2026-11 is several tokens the message
+// would otherwise quote a piece of it, "2026".
+func wholeTerm(q *query, e *Error) {
+	off := e.Position.Offset
+	if q.value || e.Code != CodeExpectedField || off < 0 || off >= len(q.input) || !isDigit(q.input[off]) {
+		return
+	}
+	c := newContext(q, off)
+	start, end := c.termBounds()
+	if start != off || end-start <= e.Position.Length {
+		return
+	}
+	term := q.input[start:end]
+	if strings.ContainsAny(term, "=<>!:\"[]") {
+		return
+	}
+	e.Message = fmt.Sprintf("expected a field name, got %q", term)
+	e.Position.Length = end - start
 }
 
 // dropRepeatedSQL removes a missing connective that only repeats the one

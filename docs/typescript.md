@@ -90,6 +90,19 @@ q.stringify(parsed.result!);
 
 No call throws on a bad query. Every result is an object with either `result` or `error`.
 
+## Complete a query being typed
+
+```ts
+const c = q.complete("status=re", 9, fields, { explicitAnd: true, strictValues: true }).result!;
+c.slot;    // "value"
+c.field;   // "status"
+c.prefix;  // "re"
+c.replace; // { offset: 7, length: 2 }
+c.items;   // the field's Values that fit "re"
+```
+
+`complete` says what the grammar expects at the cursor and lists what the schema can suggest: field names, a field's operators, a list's selectors, `AND` and `OR`, and the values a field lists in `Values`. `offer` turns candidates you fetched into items, quoting a value that needs it, and `applyCompletion` puts an accepted item into the text. The cursor indexes the string as `selectionStart` does. [Completing a query as it is typed]({{ '/completion/' | relative_url }}) takes a search box from start to finish.
+
 ## Length limit
 
 Every call takes an optional last argument, `maxLength`: the query length limit in characters. It defaults to 256 and `0` disables it. `validate` and `stringify` take it too, because a tree is held to the same limit as the query it came from: pass the limit the tree was parsed under.

@@ -146,6 +146,10 @@ type FieldConfig struct {
 	Nested     bool           // has sub-fields (like labels.*)
 	Elements   []FieldConfig  // for TypeList: the fields of one element
 	Selectors  []string       // for TypeList: the selectors allowed; nil means DefaultSelectors
+	// Values are values the field is known to take, for completion to
+	// offer (see the complete package). They are suggestions: validation
+	// does not hold a query to them, so the list need not be exhaustive.
+	Values []string
 }
 
 // AllowsSelector reports whether a list field accepts the selector, named as

@@ -28,6 +28,19 @@ type corpusCase struct {
 	ExpectMatch  *bool           `json:"expectMatch"`
 	ExpectValue  *float64        `json:"expectValue"`
 	Tolerance    *float64        `json:"tolerance"`
+
+	// For op "complete".
+	Cursor             int      `json:"cursor"`
+	CursorUTF16        int      `json:"cursorUtf16"`
+	Strict             bool     `json:"strict"`
+	Candidates         []string `json:"candidates"`
+	ExpectSlot         string   `json:"expectSlot"`
+	ExpectPrefix       string   `json:"expectPrefix"`
+	ExpectField        *string  `json:"expectField"`
+	ExpectTexts        []string `json:"expectTexts"`
+	ExpectReplace      [2]int   `json:"expectReplace"`
+	ExpectReplaceUTF16 [2]int   `json:"expectReplaceUtf16"`
+	ExpectOffered      []string `json:"expectOffered"`
 }
 
 // wire sends an envelope through JSON, as every bridge does, so the
@@ -57,8 +70,8 @@ func TestCorpus_ThroughBridgeEnvelopes(t *testing.T) {
 	if err := json.Unmarshal(data, &corpus); err != nil {
 		t.Fatal(err)
 	}
-	if len(corpus.Cases) < 135 {
-		t.Fatalf("corpus has %d cases, expected at least 135 (stale?)", len(corpus.Cases))
+	if len(corpus.Cases) < 173 {
+		t.Fatalf("corpus has %d cases, expected at least 173 (stale?)", len(corpus.Cases))
 	}
 
 	for _, tc := range corpus.Cases {
@@ -89,6 +102,9 @@ func TestCorpus_ThroughBridgeEnvelopes(t *testing.T) {
 				got = wire(t, Guard(func() Envelope { return Match(tc.Query, fields, record, DefaultMaxLength) }))
 			case "eval":
 				got = wire(t, Guard(func() Envelope { return Eval(tc.Query, fields, record, DefaultMaxLength) }))
+			case "complete":
+				checkCompleteCase(t, tc, fields)
+				return
 			default:
 				t.Fatalf("unknown op %q", tc.Op)
 			}
@@ -387,4 +403,78 @@ func TestParseFields_ElementDefaults(t *testing.T) {
 	if !list.AllowsSelector("first") || list.AllowsSelector("last") {
 		t.Errorf("default selectors are not first, @(...), all, none")
 	}
+}
+
+// checkCompleteCase runs a completion case in both units a client may count
+// in, bytes and UTF-16 code units, and through Offer when the case supplies
+// candidates.
+func checkCompleteCase(t *testing.T, tc corpusCase, fields string) {
+	t.Helper()
+	o := Options{MaxLength: DefaultMaxLength}
+	if tc.Strict {
+		o = o.Strict()
+	}
+	for _, unit := range []struct {
+		name    string
+		utf16   bool
+		cursor  int
+		replace [2]int
+	}{
+		{"bytes", false, tc.Cursor, tc.ExpectReplace},
+		{"utf16", true, tc.CursorUTF16, tc.ExpectReplaceUTF16},
+	} {
+		got := wire(t, Guard(func() Envelope { return Complete(tc.Query, fields, unit.cursor, unit.utf16, o) }))
+		if msg, _ := got["error"].(string); msg != "" {
+			t.Fatalf("%s: unexpected error: %s", unit.name, msg)
+		}
+		c, _ := got["result"].(map[string]any)
+		if c["slot"] != tc.ExpectSlot {
+			t.Fatalf("%s: slot = %v, want %q", unit.name, c["slot"], tc.ExpectSlot)
+		}
+		if c["prefix"] != tc.ExpectPrefix {
+			t.Errorf("%s: prefix = %v, want %q", unit.name, c["prefix"], tc.ExpectPrefix)
+		}
+		if tc.ExpectField != nil {
+			if field, _ := c["field"].(string); field != *tc.ExpectField {
+				t.Errorf("%s: field = %q, want %q", unit.name, field, *tc.ExpectField)
+			}
+		}
+		span, _ := c["replace"].(map[string]any)
+		if span["offset"] != float64(unit.replace[0]) || span["length"] != float64(unit.replace[1]) {
+			t.Errorf("%s: replace = %v, want %v", unit.name, span, unit.replace)
+		}
+		if got := wireTexts(c["items"]); strings.Join(got, "\x00") != strings.Join(tc.ExpectTexts, "\x00") {
+			t.Errorf("%s: items = %q, want %q", unit.name, got, tc.ExpectTexts)
+		}
+		if tc.Candidates == nil {
+			continue
+		}
+		completion, err := json.Marshal(c)
+		if err != nil {
+			t.Fatal(err)
+		}
+		candidates, err := json.Marshal(tc.Candidates)
+		if err != nil {
+			t.Fatal(err)
+		}
+		offered := wire(t, Guard(func() Envelope { return Offer(string(completion), string(candidates)) }))
+		if msg, _ := offered["error"].(string); msg != "" {
+			t.Fatalf("%s: Offer: %s", unit.name, msg)
+		}
+		if got := wireTexts(offered["result"]); strings.Join(got, "\x00") != strings.Join(tc.ExpectOffered, "\x00") {
+			t.Errorf("%s: offered = %q, want %q", unit.name, got, tc.ExpectOffered)
+		}
+	}
+}
+
+// wireTexts reads the text of each item of a list that has been through JSON.
+func wireTexts(v any) []string {
+	list, _ := v.([]any)
+	out := make([]string, 0, len(list))
+	for _, it := range list {
+		item, _ := it.(map[string]any)
+		text, _ := item["text"].(string)
+		out = append(out, text)
+	}
+	return out
 }

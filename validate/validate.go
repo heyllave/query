@@ -3,8 +3,11 @@ package validate
 import (
 	"errors"
 	"fmt"
+	"math"
 	"sort"
+	"strconv"
 	"strings"
+	"time"
 
 	"github.com/heyllave/query/ast"
 	"github.com/heyllave/query/internal/hintwords"
@@ -317,6 +320,11 @@ func (v *Validator) validateQualifier(q *ast.QualifierExpr) {
 	// The operator is still policed: against the global allowed set, and
 	// against each argument field's own operators.
 	if q.HasFieldFunc() {
+		// What the function gives is not known here, so a date written
+		// short cannot be given a meaning: it is neither taken as a day nor
+		// left to be the subtraction nobody meant.
+		v.refuseShortDate(&q.Value, q.Position, "value", "compared with "+q.FieldFunc.Name+"()")
+		v.refuseShortDate(q.EndValue, q.Position, "range end value", "compared with "+q.FieldFunc.Name+"()")
 		fields := v.validateFuncCallFields(q.FieldFunc)
 		if !v.opGloballyAllowed(op) {
 			v.addError(ErrOperatorNotAllowed, q.Position, "", string(op),
@@ -409,19 +417,298 @@ func mirrorOp(op Op) Op {
 // coerceLiteral). Function- and field-valued operands are resolved at match
 // time and skipped; arithmetic is checked for fields it can never produce.
 func (v *Validator) checkValue(cfg FieldConfig, val *ast.Value, pos token.Position, fieldName, what string) {
+	if !v.coerceShortDate(cfg, val, pos, fieldName, what) {
+		return
+	}
 	coerceLiteral(cfg.Type, val)
 	if isDynamicValue(*val) {
-		if val.Type == ast.ValueArith && (cfg.Type == TypeText || cfg.Type == TypeBoolean) {
+		if val.Type != ast.ValueArith {
+			return
+		}
+		if cfg.Type == TypeText {
 			v.addError(ErrTypeMismatch, pos, fieldName, "",
 				"%s is arithmetic (%s), which cannot produce a %s for field %q; quote it to compare as text",
 				what, val.Raw, cfg.Type, fieldName)
+			return
 		}
+		if cfg.Type == TypeBoolean {
+			v.addHinted(func() string { return "a boolean is true or false" }, ErrTypeMismatch, pos, fieldName, "",
+				"%s is arithmetic (%s), which cannot produce a %s for field %q",
+				what, val.Raw, cfg.Type, fieldName)
+			return
+		}
+		v.checkArithmetic(cfg, val, pos, fieldName, what)
 		return
 	}
 	if !typeCompatible(cfg.Type, *val) {
 		v.addHinted(func() string { return v.typeHint(cfg, val) }, ErrTypeMismatch, pos, fieldName, "",
 			"%s %q (%s) does not fit field %q (type %s)", what, val.Raw, val.Type, fieldName, cfg.Type)
 	}
+}
+
+// kind is what a value is, as far as it can be told without a record: the
+// result of arithmetic over literals has one, a function or a field does not.
+type kind int
+
+const (
+	kindUnknown   kind = iota // depends on a function or a field
+	kindNumber                // an integer or a float
+	kindDate                  // a date or an instant
+	kindDuration              // a length of time
+	kindUndefined             // operands the operator has no meaning for
+)
+
+func (k kind) String() string {
+	switch k {
+	case kindNumber:
+		return "number"
+	case kindDate:
+		return "date"
+	case kindDuration:
+		return "duration"
+	default:
+		return "value"
+	}
+}
+
+// kindOf works out what a value gives when every operand is a literal,
+// following the evaluator's rules: a date plus or minus a duration is a
+// date, two dates subtract to a duration, a duration scales by a number.
+// An operand that is a function, a field or text makes the result unknown,
+// which is left to the evaluator.
+func kindOf(val *ast.Value) kind {
+	if val == nil {
+		return kindUnknown
+	}
+	switch val.Type { //nolint:exhaustive // every other type is unknown until matched
+	case ast.ValueInteger, ast.ValueFloat:
+		return kindNumber
+	case ast.ValueDate:
+		return kindDate
+	case ast.ValueDuration:
+		return kindDuration
+	case ast.ValueString, ast.ValueBoolean:
+		// The evaluator has no arithmetic over text or booleans: 7d-1.5h
+		// subtracts the text "1.5h" and never has a result.
+		return kindUndefined
+	case ast.ValueArith:
+		if val.Arith == nil {
+			return kindUnknown
+		}
+		k := arithKind(kindOf(val.Arith.Left), kindOf(val.Arith.Right), val.Arith.Op)
+		if (k == kindNumber || k == kindDuration) && dividesByZero(val.Arith) {
+			return kindUndefined
+		}
+		if k == kindNumber {
+			if _, _, ok := number(val); !ok {
+				return kindUndefined
+			}
+		}
+		return k
+	default:
+		return kindUnknown
+	}
+}
+
+// number folds arithmetic over number literals to its value, by the
+// evaluator's rules: two integers stay an integer except under division,
+// and a modulo is defined for whole numbers only. ok is false when the
+// value is not such arithmetic or has no result.
+func number(val *ast.Value) (n float64, whole, ok bool) {
+	switch val.Type { //nolint:exhaustive // only numbers fold
+	case ast.ValueInteger:
+		return float64(val.Int), true, true
+	case ast.ValueFloat:
+		return val.Float, false, true
+	case ast.ValueArith:
+		if val.Arith == nil {
+			return 0, false, false
+		}
+		a, aWhole, okA := number(val.Arith.Left)
+		b, bWhole, okB := number(val.Arith.Right)
+		if !okA || !okB {
+			return 0, false, false
+		}
+		switch val.Arith.Op {
+		case ast.ArithAdd:
+			return a + b, aWhole && bWhole, true
+		case ast.ArithSub:
+			return a - b, aWhole && bWhole, true
+		case ast.ArithMul:
+			return a * b, aWhole && bWhole, true
+		case ast.ArithDiv:
+			if b == 0 {
+				return 0, false, false
+			}
+			return a / b, false, true
+		case ast.ArithMod:
+			if b == 0 || a != math.Trunc(a) || b != math.Trunc(b) {
+				return 0, false, false
+			}
+			return math.Mod(a, b), true, true
+		}
+	}
+	return 0, false, false
+}
+
+// dividesByZero reports whether an expression divides, or takes a modulo,
+// by arithmetic over literals that comes to zero.
+func dividesByZero(a *ast.ArithExpr) bool {
+	if a.Op != ast.ArithDiv && a.Op != ast.ArithMod {
+		return false
+	}
+	n, _, ok := number(a.Right)
+	return ok && n == 0
+}
+
+// hasZeroDivisor reports whether a zero divisor is anywhere in the tree, to
+// say so in the hint.
+func hasZeroDivisor(val *ast.Value) bool {
+	if val == nil || val.Type != ast.ValueArith || val.Arith == nil {
+		return false
+	}
+	return dividesByZero(val.Arith) || hasZeroDivisor(val.Arith.Left) || hasZeroDivisor(val.Arith.Right)
+}
+
+func arithKind(left, right kind, op ast.ArithOp) kind {
+	if left == kindUndefined || right == kindUndefined {
+		return kindUndefined
+	}
+	if left == kindUnknown || right == kindUnknown {
+		return kindUnknown
+	}
+	additive := op == ast.ArithAdd || op == ast.ArithSub
+	switch {
+	case left == kindNumber && right == kindNumber:
+		return kindNumber
+	case left == kindDate && right == kindDuration && additive:
+		return kindDate
+	case left == kindDate && right == kindDate && op == ast.ArithSub:
+		return kindDuration
+	case left == kindDuration && right == kindDuration && additive:
+		return kindDuration
+	case left == kindDuration && right == kindNumber && (op == ast.ArithMul || op == ast.ArithDiv):
+		return kindDuration
+	case left == kindNumber && right == kindDuration && op == ast.ArithMul:
+		return kindDuration
+	}
+	return kindUndefined
+}
+
+// fits reports whether a value of kind k can be compared with a field of
+// type t.
+func (k kind) fits(t FieldValueType) bool {
+	switch t { //nolint:exhaustive // text, boolean and list are refused before this
+	case TypeInteger, TypeDecimal:
+		return k == kindNumber
+	case TypeDate, TypeDatetime:
+		return k == kindDate
+	case TypeDuration:
+		return k == kindDuration
+	}
+	return true
+}
+
+// checkArithmetic refuses arithmetic over literals whose result is already
+// known not to fit the field: createdAt=2026-11-5 subtracts three numbers,
+// and ttl>10-3 compares a duration with 7. Left alone these never match,
+// which reads as "there are none" rather than as a mistake.
+func (v *Validator) checkArithmetic(cfg FieldConfig, val *ast.Value, pos token.Position, fieldName, what string) {
+	switch k := kindOf(val); {
+	case k == kindUnknown:
+	case k == kindUndefined:
+		v.addHinted(func() string { return undefinedHint(val) }, ErrTypeMismatch, pos, fieldName, "",
+			"%s is arithmetic (%s) that has no result", what, val.Raw)
+	case !k.fits(cfg.Type):
+		v.addHinted(func() string { return arithmeticResultHint(cfg, val, k) }, ErrTypeMismatch, pos, fieldName, "",
+			"%s is arithmetic (%s), which gives a %s and does not fit field %q (type %s)",
+			what, val.Raw, k, fieldName, cfg.Type)
+	case cfg.Type == TypeInteger && !val.ShortDate:
+		// n=10/4 is 2.5, and n=2.5 is refused when written out.
+		if n, whole, ok := number(val); ok && !whole && n != math.Trunc(n) {
+			v.addHinted(func() string { return fmt.Sprintf("%s holds whole numbers", fieldName) }, ErrTypeMismatch, pos, fieldName, "",
+				"%s is arithmetic (%s), which gives %s and does not fit field %q (type %s)",
+				what, val.Raw, strconv.FormatFloat(n, 'g', -1, 64), fieldName, cfg.Type)
+			return
+		}
+	case (cfg.Type == TypeInteger || cfg.Type == TypeDecimal) && val.ShortDate:
+		// The result is a number and the field takes numbers, but the
+		// writer almost surely meant a date: n=2026-11 would otherwise
+		// compare with 2015 and silently match the wrong records.
+		v.addHinted(func() string { return shortDateOnNumberHint(val.Raw) }, ErrTypeMismatch, pos, fieldName, "",
+			"%s %s has the shape of a date that is not written in full, which field %q (type %s) does not take",
+			what, val.Raw, fieldName, cfg.Type)
+	}
+}
+
+// refuseShortDate refuses a date written short where no declared type says
+// what it is: as a function's argument, or compared with a function's
+// result. Left alone it is a subtraction, so contains(name, 2026-11) would
+// search for "2015". where says which of the two places this is.
+func (v *Validator) refuseShortDate(val *ast.Value, pos token.Position, what, where string) {
+	if val == nil || !val.ShortDate {
+		return
+	}
+	v.addHinted(func() string { return shortDateHint(val.Raw) }, ErrTypeMismatch, pos, "", "",
+		"%s %s has the shape of a date that is not written in full, and %s it has no declared type to settle what it is",
+		what, val.Raw, where)
+}
+
+// shortDateLayout reads a date whose month and day may have one digit.
+const shortDateLayout = "2006-1-2"
+
+// coerceShortDate takes a date written short (2026-11-5) as the day it
+// names when the field is a date. The lexer reads it as a subtraction,
+// because it cannot see the field; the validator can. Every other field
+// keeps the subtraction and judges it as one: a text field refuses it like
+// any arithmetic, and a number field refuses it in checkArithmetic. It
+// reports false when it has already added an error and the value needs no
+// more checks.
+func (v *Validator) coerceShortDate(cfg FieldConfig, val *ast.Value, pos token.Position, fieldName, what string) bool {
+	if val.Type != ast.ValueArith || !val.ShortDate || (cfg.Type != TypeDate && cfg.Type != TypeDatetime) {
+		return true
+	}
+	if strings.Count(val.Raw, "-") != 2 {
+		return true // no day: refused by checkArithmetic with a hint
+	}
+	t, err := time.Parse(shortDateLayout, val.Raw)
+	if err != nil {
+		v.addHinted(func() string { return "the month is 1 to 12 and the day exists in that month" },
+			ErrTypeMismatch, pos, fieldName, "", "%s %s is not a date that exists", what, val.Raw)
+		return false
+	}
+	// Raw is the date in full, so the value prints as what it now is and
+	// reads back as a date with no schema at hand.
+	*val = ast.Value{Type: ast.ValueDate, Raw: t.Format(time.DateOnly), Date: t, DayOnly: true}
+	return true
+}
+
+// isShortDate reports whether text is a date written without all its
+// digits: four digits, then one or two hyphen-separated groups of one or two
+// digits (2026-11, 2026-1-5, 2026-11-5). It is for text that is known to be
+// one run, such as a quoted string. Arithmetic is asked through
+// [ast.Value.ShortDate], which the parser sets from the source: a value's
+// Raw prints 2026 - 11 and (2026)-11 the same way as 2026-11.
+func isShortDate(raw string) bool {
+	parts := strings.Split(raw, "-")
+	if len(parts) < 2 || len(parts) > 3 || len(parts[0]) != 4 || !isDigits(parts[0]) {
+		return false
+	}
+	for _, p := range parts[1:] {
+		if len(p) < 1 || len(p) > 2 || !isDigits(p) {
+			return false
+		}
+	}
+	return true
+}
+
+func isDigits(s string) bool {
+	for i := 0; i < len(s); i++ {
+		if s[i] < '0' || s[i] > '9' {
+			return false
+		}
+	}
+	return s != ""
 }
 
 // opGloballyAllowed reports whether op passes the WithAllowedOps restriction
@@ -478,6 +765,10 @@ func coerceLiteral(ft FieldValueType, val *ast.Value) {
 		if val.Type == ast.ValueString && !val.Wildcard {
 			if t, err := parser.ParseDateLiteral(val.Str); err == nil {
 				*val = ast.Value{Type: ast.ValueDate, Raw: val.Raw, Date: t, Quoted: val.Quoted, DayOnly: parser.IsDayLiteral(val.Str)}
+			} else if strings.Count(val.Str, "-") == 2 && isShortDate(val.Str) {
+				if t, err := time.Parse(shortDateLayout, val.Str); err == nil {
+					*val = ast.Value{Type: ast.ValueDate, Raw: t.Format(time.DateOnly), Date: t, Quoted: val.Quoted, DayOnly: true}
+				}
 			}
 		}
 	case TypeInteger, TypeDecimal, TypeBoolean, TypeDuration, TypeList:
@@ -538,6 +829,7 @@ func (v *Validator) validateFuncCallFields(fc *ast.FuncCallExpr) []resolvedField
 		case arg.Call != nil:
 			fields = append(fields, v.validateFuncCallFields(arg.Call)...)
 		case arg.Value != nil:
+			v.refuseShortDate(arg.Value, fc.Position, "argument", "passed to "+fc.Name+"()")
 			fields = append(fields, v.validateValueFuncs(arg.Value, fc.Position)...)
 		}
 	}

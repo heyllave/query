@@ -1,6 +1,7 @@
 package eval
 
 import (
+	"strings"
 	"testing"
 	"time"
 
@@ -55,13 +56,19 @@ func TestEval_Arith_ParenPrecedence(t *testing.T) {
 }
 
 func TestEval_Arith_DivisionByZero(t *testing.T) {
-	// Division by zero should fall back to false (resolver returns nil).
-	prog, err := Compile("total>=10/0", parityFields)
+	// A zero written in the query is a mistake the validator can see, so it
+	// is refused instead of matching nothing.
+	if _, err := Compile("total>=10/0", parityFields); err == nil || !strings.Contains(err.Error(), "divided by zero") {
+		t.Fatalf("compile: got %v, want the division by zero refused", err)
+	}
+	// A zero that comes from a record is only known when matching, and
+	// there the comparison is false.
+	prog, err := Compile("total>=10/[year]", parityFields)
 	if err != nil {
 		t.Fatalf("compile: %v", err)
 	}
-	if prog.Match(map[string]any{"total": 5.0}) {
-		t.Error("comparison against div-by-zero should not match")
+	if prog.Match(map[string]any{"total": 5.0, "year": 0}) {
+		t.Error("comparison against a division by a zero field should not match")
 	}
 }
 
