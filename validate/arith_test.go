@@ -17,6 +17,7 @@ func arithFields() []FieldConfig {
 		{Name: "day", Type: TypeDate, AllowedOps: DateOps},
 		{Name: "ttl", Type: TypeDuration, AllowedOps: DurationOps},
 		{Name: "name", Type: TypeText, AllowedOps: TextOps},
+		{Name: "flag", Type: TypeBoolean, AllowedOps: BoolOps},
 	}
 }
 
@@ -38,7 +39,11 @@ func TestValidate_ArithmeticOverLiteralsThatFitsTheField(t *testing.T) {
 		// Written with a space or a parenthesis it is a subtraction, and a
 		// number field takes the number it gives.
 		"n=2026 - 11", "n=(2026)-11", "n=(2026-11)", "n=2026 - (11)", "n=2026 -11", "n>2026 - 11 - 5", "n IN (2026 - 11, 3)",
-		"n:(2026-11)..(2026-1)", "n>abs(2026-11-5)",
+		"n:(2026-11)..(2026-1)", "n>abs(2026 - 11 - 5)", "n>abs((2026-11-5))",
+		// A number that could not be a month or a day is not date-shaped.
+		"n<1500-50", "n<999-50", "n<5000 - 10", "n=2026-13", "n=2026-0", "n=2026-1-32", "n=2026-11-5-3",
+		// Division with a result that fits.
+		"n=10/2", "n=10/5*3", "price=10/4", "price>1/3", "n>7%2", "ttl>7d/2",
 		// numbers
 		"n=10-3", "n>2*3+1", "price<10/4", "n=10%3", "n>(1+2)*3", "n:1+1..10-1", "n IN (1+1, 2*2)",
 		// a date and a duration give a date
@@ -69,14 +74,15 @@ func TestValidate_ArithmeticOverLiteralsThatDoesNotFit(t *testing.T) {
 		{"createdAt=2026-11", `gives a number and does not fit field "createdAt"`, "2026-11-1"},
 		// A month that does not exist is not completed into a date that
 		// does not exist.
-		{"day=2026-13", `gives a number and does not fit field "day"`, "a date is a year, a month and a day: 2026-11-5 or 2026-11-05"},
+		{"day=2026-13", `gives a number and does not fit field "day"`, "a date is a year, a month from 1 to 12 and a day: 2026-11-5 or 2026-11-05"},
 		{"day=2026-0", `gives a number and does not fit field "day"`, "2026-11-5 or 2026-11-05"},
+		{"day=2026-1-32", `gives a number and does not fit field "day"`, "a month from 1 to 12 and a day"},
 		// Written with a space or a parenthesis it is a subtraction, not a
 		// date written short, whatever the field.
-		{"createdAt=2026 - 11 - 5", `value is arithmetic (2026-11-5), which gives a number and does not fit field "createdAt"`, "a date is a year, a month and a day"},
-		{"createdAt=(2026)-11-5", `gives a number and does not fit field "createdAt"`, "a date is a year, a month and a day"},
+		{"createdAt=2026 - 11 - 5", `value is arithmetic (2026-11-5), which gives a number and does not fit field "createdAt"`, "a date is a year, a month from 1 to 12 and a day"},
+		{"createdAt=(2026)-11-5", `gives a number and does not fit field "createdAt"`, "a date is a year, a month from 1 to 12 and a day"},
 		{"createdAt=(2026-11-5)", `gives a number and does not fit field "createdAt"`, "a date is YYYY-MM-DD"},
-		{"day:2026-1-1..2026 - 1 - 2", `range end value is arithmetic`, "a date is a year, a month and a day"},
+		{"day:2026-1-1..2026 - 1 - 2", `range end value is arithmetic`, "a date is a year, a month from 1 to 12 and a day"},
 		{"name=2026 - 11", `cannot produce a text for field "name"; quote it to compare as text`, ""},
 		{"name=(2026)-11", `cannot produce a text for field "name"`, ""},
 		// A text field refuses a date written short like any arithmetic,
@@ -89,9 +95,11 @@ func TestValidate_ArithmeticOverLiteralsThatDoesNotFit(t *testing.T) {
 		{"price>2026-11-5", `has the shape of a date that is not written in full`, "write 2010"},
 		// A date written short that cannot exist.
 		{"day=2026-2-30", "value 2026-2-30 is not a date that exists", "the day exists in that month"},
-		{"createdAt:2026-1-1..2026-13-1", "range end value 2026-13-1 is not a date that exists", "the month is 1 to 12"},
+		{"createdAt:2026-1-1..2026-13-1", "range end value is arithmetic (2026-13-1), which gives a number", "a month from 1 to 12"},
+		{"createdAt:2026-1-1..2026-2-30", "range end value 2026-2-30 is not a date that exists", "the month is 1 to 12"},
 		{"createdAt>10*3", `gives a number and does not fit field "createdAt"`, "for a relative date use now()-7d"},
-		{"createdAt>7d-1h", `gives a duration and does not fit field "createdAt"`, "for a relative date"},
+		{"createdAt>7d-1h", `gives a duration and does not fit field "createdAt"`, "that is a length of time"},
+		{"createdAt>2026-11-05 - (2026-11-01)", `gives a duration and does not fit field "createdAt"`, "take a duration from a date"},
 		// Numbers where a duration belongs, and the other way round.
 		{"ttl>10-3", `gives a number and does not fit field "ttl" (type duration)`, "a duration is a number and one unit"},
 		{"ttl=2026-01-01+7d", `gives a date and does not fit field "ttl"`, "a duration is a number and one unit"},
@@ -106,6 +114,31 @@ func TestValidate_ArithmeticOverLiteralsThatDoesNotFit(t *testing.T) {
 		{"createdAt>2026-01-01+(2026-01-02)", "that has no result", "a date takes"},
 		{"ttl>3/1h", "that has no result", "numbers combine"},
 		{"n>(10-7d)*2", "that has no result", "numbers combine"},
+		// Text is not an operand: 1.5h and -1d are not durations.
+		{"ttl>7d-1.5h", "value is arithmetic (7d-1.5h) that has no result", "numbers combine with numbers"},
+		{"n=10+1.5h", "that has no result", "numbers combine with numbers"},
+		{"day>2026-11-05+-1d", "that has no result", "a date takes + or - a duration"},
+		// A zero divisor written in the query.
+		{"n=10/0", "value is arithmetic (10/0) that has no result", "nothing can be divided by zero"},
+		{"n=10%0", "that has no result", "nothing can be divided by zero"},
+		{"ttl>7d/0", "that has no result", "nothing can be divided by zero"},
+		{"n>1+10/(2-2)", "that has no result", "nothing can be divided by zero"},
+		{"n IN (1, 10/0)", "that has no result", "nothing can be divided by zero"},
+		{"n>7%1.5", "that has no result", "numbers combine"},
+		// A fraction where the field holds whole numbers, as with n=2.5.
+		{"n=10/4", `value is arithmetic (10/4), which gives 2.5 and does not fit field "n" (type integer)`, "n holds whole numbers"},
+		{"n>1.5*3", `gives 4.5 and does not fit field "n"`, "n holds whole numbers"},
+		// A boolean field is told what a boolean is, not to quote.
+		{"flag=10-3", `cannot produce a boolean for field "flag"`, "a boolean is true or false"},
+		// A date written short inside a function, or compared with one,
+		// has no declared type to settle it and is never left a number.
+		{"n>abs(2026-11-5)", "argument 2026-11-5 has the shape of a date that is not written in full, and passed to abs() it has no declared type", "for the date write it in full, 2026-11-05"},
+		{"contains(name, 2026-11)", "argument 2026-11 has the shape of a date", `for the text put it in quotes, "2026-11"`},
+		{"upper(name)=2026-11-5", "value 2026-11-5 has the shape of a date that is not written in full, and compared with upper()", `"2026-11-5"`},
+		{"year(day)=2026-11", "compared with year() it has no declared type", "for the subtraction put spaces around the minus, 2026 - 11"},
+		{"len(name):1..2026-11", "range end value 2026-11 has the shape of a date", "2026 - 11"},
+		{"len(name) IN (1, 2026-11)", "value 2026-11 has the shape of a date", "2026-11-01"},
+		{"createdAt>addDays(2026-11-5, 1)", "argument 2026-11-5 has the shape of a date", "2026-11-05"},
 		// Text and boolean fields refuse any arithmetic, as before.
 		{"name=10-3", `cannot produce a text for field "name"; quote it to compare as text`, ""},
 		// A date written short gives a number, but a number field still

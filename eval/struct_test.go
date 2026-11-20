@@ -258,8 +258,6 @@ func TestMatchStruct_Arithmetic(t *testing.T) {
 		{"ttl>=1h*3", false},
 		// duration + duration
 		{"ttl>=1h+30m", true},
-		// division by zero → nil → false
-		{"total>=10/0", false},
 		// modulo
 		{"year>=2020+(6%2)", true},
 	}

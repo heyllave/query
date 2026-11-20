@@ -52,7 +52,7 @@ func (l *fieldList) UnmarshalJSON(data []byte) error {
 }
 
 // expectedCaseCount guards against a stale/truncated corpus silently passing.
-const expectedCaseCount = 135
+const expectedCaseCount = 153
 
 func loadCorpus(t *testing.T) corpus {
 	t.Helper()

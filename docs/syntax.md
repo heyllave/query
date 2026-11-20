@@ -48,7 +48,7 @@ A host can require the connective: with the `ExplicitAnd` option a space is not 
 | Text | `draft`, `"John Doe"`, `customer_john-doe` | Quote a value that has spaces or special characters. |
 | Number | `42`, `-3`, `1.5` | Only ASCII digits make a number. |
 | Boolean | `true`, `false` | |
-| Date | `2026-01-01` | A date without a time means the whole UTC day. |
+| Date | `2026-01-01` | A date without a time means the whole UTC day. On a date field it may be written `2026-1-1`; see [Grammar]({{ '/grammar/' | relative_url }}#the-type-of-an-unquoted-value). |
 | Datetime | `2026-01-01T10:00:00Z` | RFC 3339. |
 | Duration | `30m`, `4h`, `1d` | One unit per literal. |
 | Wildcard | `Jo*`, `*son`, `*oh*` | `\*` is a literal star. |

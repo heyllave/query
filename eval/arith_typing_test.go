@@ -3,7 +3,6 @@ package eval
 import (
 	"errors"
 	"fmt"
-	"strings"
 	"testing"
 	"time"
 
@@ -23,7 +22,7 @@ func TestValidatorAgreesWithTheEvaluatorOnLiteralArithmetic(t *testing.T) {
 		{Name: "at", Type: validate.TypeDatetime, AllowedOps: validate.DateOps},
 		{Name: "ttl", Type: validate.TypeDuration, AllowedOps: validate.DurationOps},
 	}
-	operands := []string{"2", "1.5", "7d", "(2026-01-01)"}
+	operands := []string{"2", "0", "1.5", "7d", "(2026-01-01)"}
 	ops := []string{"+", "-", "*", "/", "%"}
 
 	var exprs []string
@@ -64,13 +63,6 @@ func TestValidatorAgreesWithTheEvaluatorOnLiteralArithmetic(t *testing.T) {
 			default:
 				t.Fatalf("%s evaluated to %T", expr, got)
 			}
-		}
-		// A division or a modulo can have no result for these particular
-		// numbers (a zero divisor, a fractional modulo) while being
-		// well-typed. The validator judges types, not numbers, so those
-		// are left out.
-		if kind == "none" && strings.ContainsAny(expr, "/%") {
-			continue
 		}
 		checked[kind]++
 		for _, f := range fields {

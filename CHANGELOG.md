@@ -29,8 +29,25 @@ semantic versioning.
   compare with 2015, and the hint names that number in case it was meant.
   Written as a subtraction, `n=2026 - 11`, it is 2015 as before.
 
+- A date written short is refused where no declared type says what it is:
+  as a function's argument (`contains(name, 2026-11)`) and compared with a
+  function's result (`upper(name)=2026-11-5`, `year(day)=2026-11`). The
+  hint gives the date in full, the text in quotes and the subtraction with
+  spaces. A run is date-shaped only when its parts could be a month and a
+  day, so `n<1500-50` is 1450.
+- Arithmetic over literals that has no result is refused instead of
+  matching nothing: a divisor written as zero (`n=10/0`, `ttl>7d/0`), text
+  as an operand (`ttl>7d-1.5h`, where `1.5h` is not a duration), and a
+  fractional modulo. A field of whole numbers refuses a fraction:
+  `n=10/4`, like `n=2.5`.
+- A bare `2026-11` where a field belongs is reported whole, not as `2026`.
+
 ### Breaking
 
+- With no schema, `2026-11` and `2026-11-5` evaluate as subtractions:
+  `query.Eval("2026-11")` is 2015. They were text.
+- `contains(name, 2026-11)` searched for the text `2026-11`; it is refused
+  now, and `contains(name, "2026-11")` is how to write it.
 - A text field no longer takes `2026-11` or `2026-11-5` unquoted. They are
   arithmetic, like `10-3`, and a text field refuses arithmetic: write
   `period="2026-11"`. Before this release the two were text while `10-3`

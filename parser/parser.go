@@ -601,8 +601,9 @@ func (p *parser) parseValue() *ast.Value {
 
 // shortDateRun reports whether the tokens in [from, to) are a date written
 // without all its digits, as one unbroken run: four digits, then one or two
-// groups of a hyphen and one or two digits (2026-11, 2026-1-5). A space, a
-// parenthesis or a sign anywhere makes it an ordinary subtraction.
+// groups of a hyphen and one or two digits (2026-11, 2026-1-5), where the
+// first group could be a month and the second a day. A space, a parenthesis
+// or a sign anywhere makes it an ordinary subtraction.
 func (p *parser) shortDateRun(from, to int) bool {
 	n := to - from
 	if n != 3 && n != 5 {
@@ -622,6 +623,13 @@ func (p *parser) shortDateRun(from, to int) bool {
 			return false
 		case i == from && len(tok.Value) != 4, i > from && len(tok.Value) > 2:
 			return false
+		case i > from:
+			// A month is 1 to 12 and a day 1 to 31. Anything else was not
+			// meant as a date: 1500-50 is a subtraction and nothing more.
+			n, _ := strconv.Atoi(tok.Value)
+			if limit := map[int]int{2: 12, 4: 31}[i-from]; n < 1 || n > limit {
+				return false
+			}
 		}
 	}
 	return true
@@ -929,9 +937,6 @@ func (p *parser) parseFuncArg() *ast.FuncArg {
 	// Literal value (use the value lexing for after-operator tokens)
 	val := p.parseValue()
 	if val != nil {
-		// An argument is not compared with a field, so there is no declared
-		// type that could make 2026-11-5 a date here: it is a subtraction.
-		val.ShortDate = false
 		return plainArg(val)
 	}
 
