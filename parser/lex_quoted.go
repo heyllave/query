@@ -26,8 +26,6 @@ func (l *lexer) lexQuotedString() {
 		return
 	}
 	l.tokens = append(l.tokens, token.Token{Type: token.String, Value: value, Pos: pos, Quoted: true})
-	// A quoted string is a whole value; one is no longer expected.
-	l.afterOperator = false
 }
 
 // lexFieldRef lexes a bracketed field reference with the opening '[' at
@@ -54,8 +52,6 @@ func (l *lexer) lexFieldRef() {
 	}
 	pos := token.Position{Offset: start, Length: l.pos - start}
 	l.tokens = append(l.tokens, token.Token{Type: token.FieldRef, Value: name, Pos: pos, Quoted: quoted})
-	// A field reference is a complete value.
-	l.afterOperator = false
 }
 
 // readFieldRefName reads the name inside a field reference: a quoted string,
