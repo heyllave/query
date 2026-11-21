@@ -34,6 +34,7 @@ query/
 │   ├── doc.go
 │   ├── errors.go       # Error, ErrorKind, ErrorList
 │   ├── lexer.go        # lexer state, Lex(), LexValue(), the main loop
+│   ├── lex_mode.go     # what comes next (mode) and what each open '(' means; every change of mode
 │   ├── lex_field.go    # field position: names, keywords, operators, parens, lists
 │   ├── lex_value.go    # after an operator: quoted, bracketed and bare values
 │   ├── lex_number.go   # number, date and duration runs; classifyValue

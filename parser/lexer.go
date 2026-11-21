@@ -14,21 +14,19 @@ import (
 
 // lexer tokenizes a query string into a sequence of tokens.
 type lexer struct {
-	input         string
-	pos           int
-	start         int
-	tokens        []token.Token
-	errors        ErrorList
-	afterOperator bool
-	// expectInList is set right after an IN keyword; the next '(' opens an
-	// IN list, inside which every element is lexed in value mode.
-	expectInList bool
-	inList       bool
-	// parens records, for each '(' open in field position, whether it opened
-	// a function call's arguments; argValue is set while lexing an operand in
-	// one, where a ',' ends the value as it does in an IN list.
-	parens   []bool
-	argValue bool
+	input  string
+	pos    int
+	start  int
+	tokens []token.Token
+	errors ErrorList
+	// mode is what comes next, and brackets what each '(' still open in
+	// field position means. They change only in lex_mode.go.
+	mode     mode
+	brackets []bracket
+	// commaEnds is set while a bare value is read where a ',' separates
+	// values instead of being part of one: an IN-list slot, or the operand
+	// of a sign inside a call's arguments.
+	commaEnds bool
 	// strictValues refuses a comparison character inside an unquoted value;
 	// see Config.
 	strictValues bool
@@ -64,7 +62,7 @@ func LexValue(input string, maxLength int) ([]token.Token, error) {
 		return nil, err
 	}
 
-	l := &lexer{input: input, afterOperator: true}
+	l := &lexer{input: input, mode: modeValue}
 	l.run()
 
 	if err := l.errors.errOrNil(); err != nil {
@@ -152,9 +150,8 @@ func (l *lexer) run() {
 			break
 		}
 		l.start = l.pos
-		if l.afterOperator {
+		if l.mode.expectsValue() {
 			l.lexValue()
-			l.argValue = false
 			continue
 		}
 		l.lexFieldPosition()

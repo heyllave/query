@@ -16,7 +16,7 @@ import (
 // field reference, so [base]*1.1 is one arithmetic value; shape decides it
 // and keeps year=202* a pattern.
 func (l *lexer) lexValue() {
-	l.afterOperator = false
+	l.startValue()
 	l.skipWhitespace()
 	if l.pos >= len(l.input) {
 		return
@@ -90,7 +90,7 @@ func (l *lexer) endsBareValue() bool {
 	switch {
 	case chars.SpaceWidth(l.input, l.pos) > 0 || ch == ')' || ch == '[' || ch == ']':
 		return true
-	case ch == ',' && (l.inList || l.argValue):
+	case ch == ',' && l.commaEnds:
 		return true
 	}
 	return ch == '.' && l.peek(1) == '.'
