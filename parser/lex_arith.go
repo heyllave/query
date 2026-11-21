@@ -5,7 +5,6 @@ import (
 	"unicode/utf8"
 
 	"github.com/heyllave/query/parser/internal/chars"
-	"github.com/heyllave/query/parser/internal/shape"
 	"github.com/heyllave/query/token"
 )
 
@@ -108,14 +107,36 @@ func (l *lexer) atConnective() bool {
 // Read on, it would become a second condition joined by AND. After a
 // number or a duration the likeliest mistake is a unit (7x, 1h30m).
 func (l *lexer) refuseGluedValue() {
-	_, width := utf8.DecodeRuneInString(l.input[l.pos:])
+	width := gluedWidth(l.input, l.pos)
 	e := newError(CodeUnexpected, ErrSyntax, token.Position{Offset: l.pos, Length: width},
 		"unexpected %q right after a value", l.input[l.pos:l.pos+width])
 	e.Hint = "put an operator between two values (now()-7d), or a space before the next condition (a=now() AND x); text that holds both goes in quotes"
-	if prev := l.input[l.pos-1]; prev != ')' && prev != ']' && shape.EndsPrimary(l.input, l.pos-1) {
+	if c := l.input[l.pos]; l.afterCount() && (chars.IsIdentStart(c) || chars.IsDigit(c)) {
 		e.Hint = hintDurationForm + "; write 90m rather than 1h30m"
 	}
 	l.errors.add(e)
+}
+
+// gluedWidth is the span an error names for the term glued at s[i]: the
+// whole word or count when one starts there (NOT, not N; 30m, not 3),
+// otherwise one character.
+func gluedWidth(s string, i int) int {
+	if chars.IsIdentStart(s[i]) || chars.IsDigit(s[i]) {
+		return chars.IdentEnd(s, i) - i
+	}
+	_, width := utf8.DecodeRuneInString(s[i:])
+	return width
+}
+
+// afterCount reports whether the last token is a number or a duration, so a
+// word or count glued to it is most likely a unit: 7x, 1h30m. A date is not a count;
+// 2026-11-16[b] gets the general hint.
+func (l *lexer) afterCount() bool {
+	if len(l.tokens) == 0 {
+		return false
+	}
+	t := l.tokens[len(l.tokens)-1].Type
+	return t == token.Integer || t == token.Float || t == token.Duration
 }
 
 // lexArithPrimary lexes one primary of an arithmetic value, other than a

@@ -47,6 +47,9 @@
 
     { "id": "parse-range-colon", "desc": "a range is field:low..high, one qualifier", "op": "parse", "query": "total:100..500", "expectAst": "qualifier" },
     { "id": "parse-range-eq", "desc": "= does not introduce a range", "op": "parse", "query": "total=100..500", "expectError": true, "expectCode": "unexpected" },
+    { "id": "parse-glued-call", "desc": "a word glued to a value is an error, not a second condition", "op": "parse", "query": "a=now()x", "expectError": true, "expectCode": "unexpected" },
+    { "id": "parse-glued-fieldref", "desc": "a field reference glued to a value is an error", "op": "parse", "query": "a=10[b]", "expectError": true, "expectCode": "unexpected" },
+    { "id": "parse-glued-and", "desc": "a glued AND still joins two conditions", "op": "parse", "query": "total>[base]AND x=1", "expectAst": "binary" },
     { "id": "parse-colon-needs-range", "desc": "a colon is the range introducer, not contains", "op": "parse", "query": "state:draft", "expectError": true, "expectCode": "expectedRange" },
     { "id": "parse-in-lowered", "desc": "IN lowers to an OR chain of equalities", "op": "parse", "query": "state IN (draft, sent)", "expectAst": "binary" },
     { "id": "parse-negated-lowered", "desc": "a negated comparison lowers to NOT", "op": "parse", "query": "total!>500", "expectAst": "not" },
