@@ -48,6 +48,7 @@ fuzz:
 	$(GOTEST) -run=^$$ -fuzz=^FuzzCompileValue$$ -fuzztime=$(FUZZTIME) ./eval/
 	$(GOTEST) -run=^$$ -fuzz=^FuzzBridgeRoundTrip$$ -fuzztime=$(FUZZTIME) ./internal/bridgejson/
 	$(GOTEST) -run=^$$ -fuzz=^FuzzCursorAt$$ -fuzztime=$(FUZZTIME) ./parser/
+	$(GOTEST) -run=^$$ -fuzz=^FuzzArithmeticReadsTheWholeRun$$ -fuzztime=$(FUZZTIME) ./parser/
 	$(GOTEST) -run=^$$ -fuzz=^FuzzAt$$ -fuzztime=$(FUZZTIME) ./complete/
 	$(GOTEST) -run=^$$ -fuzz=^FuzzValueText$$ -fuzztime=$(FUZZTIME) ./complete/
 	$(GOTEST) -run=^$$ -fuzz=^FuzzFieldText$$ -fuzztime=$(FUZZTIME) ./complete/

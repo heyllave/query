@@ -1,6 +1,9 @@
 package parser
 
 import (
+	"strings"
+	"unicode/utf8"
+
 	"github.com/heyllave/query/parser/internal/chars"
 	"github.com/heyllave/query/token"
 )
@@ -18,6 +21,7 @@ func (l *lexer) lexArithValueExpr() {
 	depth := 0
 	expectPrimary := true
 	for l.pos < len(l.input) {
+		before := l.pos
 		l.skipWhitespace()
 		if l.pos >= len(l.input) {
 			break
@@ -30,7 +34,7 @@ func (l *lexer) lexArithValueExpr() {
 		if expectPrimary {
 			depth, expectPrimary, ok = l.lexArithOperand(depth)
 		} else {
-			depth, expectPrimary, ok = l.lexArithOperator(depth)
+			depth, expectPrimary, ok = l.lexArithOperator(depth, l.pos > before)
 		}
 		if !ok {
 			return
@@ -61,9 +65,11 @@ func (l *lexer) lexArithOperand(depth int) (newDepth int, expectPrimary, ok bool
 }
 
 // lexArithOperator lexes what may follow an operand: an operator, a ')'
-// closing a group, or a ','. Anything else, such as a letter, ends the
-// value.
-func (l *lexer) lexArithOperator(depth int) (newDepth int, expectPrimary, ok bool) {
+// closing a group, or a ','. Anything else ends the value. After a space
+// at depth 0 that is the next condition (now()-7d AND x). A term glued to
+// the operand, or after a space inside a group, is refused: now()x would
+// otherwise read as now() AND x, and (1 2) would close the group early.
+func (l *lexer) lexArithOperator(depth int, spaced bool) (newDepth int, expectPrimary, ok bool) {
 	switch ch := l.input[l.pos]; {
 	case chars.IsArithOp(ch):
 		l.emitArith(ch)
@@ -77,7 +83,60 @@ func (l *lexer) lexArithOperator(depth int) (newDepth int, expectPrimary, ok boo
 		l.pos++
 		return depth, true, true
 	}
+	if beginsTerm(l.input[l.pos]) && (!spaced || depth > 0) && !l.atConnective() {
+		l.refuseGluedValue()
+	}
 	return depth, false, false
+}
+
+// beginsTerm reports whether c can begin a term of its own: a word, a
+// number, a quoted string, a bracketed field or a group.
+func beginsTerm(c byte) bool {
+	return chars.IsIdentStart(c) || chars.IsDigit(c) || c == '"' || c == '[' || c == '('
+}
+
+// atConnective reports whether the word at l.pos is AND or OR, which joins
+// two conditions whether or not a space comes before it: total>[base]AND x.
+func (l *lexer) atConnective() bool {
+	word := strings.ToUpper(l.input[l.pos:chars.IdentEnd(l.input, l.pos)])
+	return word == "AND" || word == "OR"
+}
+
+// refuseGluedValue reports a term that follows an arithmetic operand with no
+// space and no operator between them: [a]x, now()"q", 2026-11-16[b], 7d7d.
+// Read on, it would become a second condition joined by AND. After a
+// number or a duration the likeliest mistake is a unit (7x, 1h30m).
+func (l *lexer) refuseGluedValue() {
+	width := gluedWidth(l.input, l.pos)
+	e := newError(CodeUnexpected, ErrSyntax, token.Position{Offset: l.pos, Length: width},
+		"unexpected %q right after a value", l.input[l.pos:l.pos+width])
+	e.Hint = "put an operator between two values (now()-7d), or a space before the next condition (a=now() AND x); text that holds both goes in quotes"
+	if c := l.input[l.pos]; l.afterCount() && (chars.IsIdentStart(c) || chars.IsDigit(c)) {
+		e.Hint = hintDurationForm + "; write 90m rather than 1h30m"
+	}
+	l.errors.add(e)
+}
+
+// gluedWidth is the span an error names for the term glued at s[i]: the
+// whole word or count when one starts there (NOT, not N; 30m, not 3),
+// otherwise one character.
+func gluedWidth(s string, i int) int {
+	if chars.IsIdentStart(s[i]) || chars.IsDigit(s[i]) {
+		return chars.IdentEnd(s, i) - i
+	}
+	_, width := utf8.DecodeRuneInString(s[i:])
+	return width
+}
+
+// afterCount reports whether the last token is a number or a duration, so a
+// word or count glued to it is most likely a unit: 7x, 1h30m. A date is not a count;
+// 2026-11-16[b] gets the general hint.
+func (l *lexer) afterCount() bool {
+	if len(l.tokens) == 0 {
+		return false
+	}
+	t := l.tokens[len(l.tokens)-1].Type
+	return t == token.Integer || t == token.Float || t == token.Duration
 }
 
 // lexArithPrimary lexes one primary of an arithmetic value, other than a

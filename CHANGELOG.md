@@ -14,6 +14,17 @@ semantic versioning.
   Brackets nested inside an IN list no longer leave the list's commas
   separating values after they close. Both only change which error a
   refused query gets.
+- A value glued to the next term is an error instead of two conditions.
+  Under the default grammar `a=now()x` read as `a=now() AND x`, and
+  `a=[b]c`, `a=2026-11-16[b]` and `a=(1+2)x` the same way: the lookahead
+  judged the whole run one value, and the reader stopped partway and left
+  the rest to become a condition. A term after a space inside a group,
+  `a=(1 2)`, is refused too, and so is a field reference glued to a value
+  that is text, `a=10[b]` or `a=abc[b]`. A glued AND or OR still joins two
+  conditions (`a=[b]AND c=1`). The error names the whole glued word
+  (`"NOT"` in `a=now()NOT x`), and only a count glued to a number or a
+  duration (`1h30m`) gets the duration hint. A test now holds the lookahead
+  and the reader to the same span.
 - A date with a time can be an operand of arithmetic.
   `createdAt>2026-11-16T10:00:00Z-1h` was text, and refused on a date field
   with a hint that offered the form already typed; it is that instant minus
@@ -55,6 +66,9 @@ semantic versioning.
 
 ### Breaking
 
+- Under the default grammar, a value glued to the next term (`a=now()x`,
+  `a=10[b]`) is refused; it used to be two conditions joined by AND. The strict
+  grammar already refused every such query.
 - With no schema, `2026-11` and `2026-11-5` evaluate as subtractions:
   `query.Eval("2026-11")` is 2015. They were text.
 - `contains(name, 2026-11)` searched for the text `2026-11`; it is refused

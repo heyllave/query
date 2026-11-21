@@ -225,6 +225,7 @@ two things. Each is decided the same way every time:
 | `state NOT IN (a, b)` | negated list | `state AND NOT in(...)` | `NOT` binds to `IN` only directly before `IN (` |
 | `labels.in=x`, `not=1` | a field named by a keyword | a connective | a keyword is a name when an operator follows it |
 | `a=1+b=2` | `a` equals the text `1+b=2` | two conditions | turn on `StrictValues` (below) |
+| `a=now()x`, `a=[b]c`, `a=10[b]` | an error: a value glued to the next term | `a=now() AND x` | a space before the next condition, an operator between two values, or quotes |
 | `labels[team]=x` | `labels AND [team]=x` | a keyed lookup | write `labels.team=x`; `ExplicitAnd` refuses this form |
 
 The last two rows are the ones that surprise people. Both come from being

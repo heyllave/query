@@ -68,6 +68,11 @@ func (l *lexer) lexUnquotedStringValue() {
 	}
 	raw := l.input[v.start:l.pos]
 	value := v.buf.String()
+	if raw != "" && l.pos < len(l.input) && l.input[l.pos] == '[' {
+		// a=10[b] would otherwise read as a=10 AND [b]: the same glued
+		// split lexArithOperator refuses, here after a value that is text.
+		l.refuseGluedValue()
+	}
 	if v.operatorAt >= 0 {
 		l.refuseInnerOperator(v.operatorAt, value)
 	}
