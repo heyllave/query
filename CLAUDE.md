@@ -41,7 +41,8 @@ query/
 │   ├── lex_arith.go    # arithmetic values and function-call arguments
 │   ├── lex_quoted.go   # quoted strings and [field] references
 │   ├── literals.go     # ParseDateLiteral(), ParseDuration(), IsDayLiteral()
-│   ├── lexer_golden_test.go  # pins the lexer's answers for ~5,700 inputs
+│   ├── lexer_golden_test.go  # pins the lexer's answers for ~5,800 inputs
+│   ├── testdata/lexer_golden/ # inputs.txt and the full answers, in 16 files
 │   ├── internal/
 │   │   ├── chars/      # one character: classes, spaces, identifiers, quotes
 │   │   ├── literal/    # one whole literal: dates, durations, numbers, patterns
@@ -76,8 +77,11 @@ Functions in `parser/lex*.go` and `parser/internal/` stay at 40 lines or less
 (`funlen` in `.golangci.yml` enforces it). A rule that does not need lexer
 state goes in `internal/chars`, `internal/literal` or `internal/shape`, pure
 on a string and an index, with a table test. A change to what the lexer
-produces shows up in `TestLexer_Golden`; regenerate it with
-`go test ./parser -run Golden -update` only when the change is meant.
+produces shows up in `TestLexer_Golden`, which prints the lines that
+changed; regenerate it with `go test ./parser -run Golden -update` only when
+the change is meant, and the diff of `testdata/lexer_golden/` shows the
+change for review. Add an input by appending it to `inputs.txt`, or add
+generated ones with `-grow N`.
 
 ### Import Order
 
