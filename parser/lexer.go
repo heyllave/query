@@ -174,13 +174,18 @@ func (l *lexer) emitArith(ch byte) {
 	l.pos++
 }
 
+// syntaxError records a syntax error over input[off:off+length]. An error
+// that carries a hint is built with newError and added by its caller.
+func (l *lexer) syntaxError(code Code, off, length int, format string, args ...any) {
+	l.errors.add(newError(code, ErrSyntax, token.Position{Offset: off, Length: length}, format, args...))
+}
+
 // unexpectedRune reports the whole rune at l.pos, not its first byte, so the
 // message shows what was typed and the span covers it, and moves past it.
 // format takes the rune as its one argument.
 func (l *lexer) unexpectedRune(format string) {
 	_, width := utf8.DecodeRuneInString(l.input[l.pos:])
-	l.errors.add(newError(CodeUnexpectedChar, ErrSyntax, token.Position{Offset: l.pos, Length: width},
-		format, l.input[l.pos:l.pos+width]))
+	l.syntaxError(CodeUnexpectedChar, l.pos, width, format, l.input[l.pos:l.pos+width])
 	l.pos += width
 }
 

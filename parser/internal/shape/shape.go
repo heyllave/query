@@ -195,8 +195,12 @@ func OperandsAround(s string, i int) bool {
 
 // EndsPrimary reports whether s[i] is the last character of a value
 // primary: a digit, ')' closing a call or group, ']' closing a field
-// reference, or a duration unit right after a digit (7d, 30m).
+// reference, or a duration unit right after a digit (7d, 30m). An index
+// outside s ends none.
 func EndsPrimary(s string, i int) bool {
+	if i < 0 || i >= len(s) {
+		return false
+	}
 	c := s[i]
 	if chars.IsDigit(c) || c == ')' || c == ']' {
 		return true
@@ -205,8 +209,12 @@ func EndsPrimary(s string, i int) bool {
 }
 
 // BeginsPrimary reports whether s[i] starts a value primary: a digit, a
-// signed digit, '(', '[', a quote, or a function call.
+// signed digit, '(', '[', a quote, or a function call. An index outside s
+// begins none.
 func BeginsPrimary(s string, i int) bool {
+	if i < 0 || i >= len(s) {
+		return false
+	}
 	c := s[i]
 	switch {
 	case chars.IsDigit(c) || c == '(' || c == '[' || c == '"':

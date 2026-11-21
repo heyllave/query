@@ -76,20 +76,23 @@ func (l *lexer) giveBackShortDate(start, digitsStart int) {
 func (l *lexer) emitLiteral(start int) {
 	value := l.input[start:l.pos]
 	pos := token.Position{Offset: start, Length: l.pos - start}
-	l.tokens = append(l.tokens, l.classifyValue(value, value, false, pos))
+	l.tokens = append(l.tokens, l.classifyLiteral(value, pos))
 }
 
-// classifyValue gives an unquoted literal its token type: a pattern, a date,
-// or by literalType. A pattern that is not prefix, suffix or contains, and a
-// date that cannot exist, are reported here.
-func (l *lexer) classifyValue(raw, value string, hasWildcard bool, pos token.Position) token.Token {
-	if hasWildcard {
-		if !literal.IsValidWildcard(value) {
-			l.errors.add(newError(CodeInvalidWildcard, ErrInvalidWildcard, pos,
-				"invalid wildcard pattern %q: only prefix (foo*), suffix (*foo), and contains (*foo*) patterns are allowed", raw))
-		}
-		return token.Token{Type: token.Wildcard, Value: value, Pos: pos}
+// classifyPattern is the token of an unquoted value with an unescaped star,
+// value in pattern form and raw as written. A pattern that is not prefix,
+// suffix or contains is reported here.
+func (l *lexer) classifyPattern(raw, value string, pos token.Position) token.Token {
+	if !literal.IsValidWildcard(value) {
+		l.errors.add(newError(CodeInvalidWildcard, ErrInvalidWildcard, pos,
+			"invalid wildcard pattern %q: only prefix (foo*), suffix (*foo), and contains (*foo*) patterns are allowed", raw))
 	}
+	return token.Token{Type: token.Wildcard, Value: value, Pos: pos}
+}
+
+// classifyLiteral gives an unquoted literal that is not a pattern its token
+// type: a date, or by literalType. A date that cannot exist is reported here.
+func (l *lexer) classifyLiteral(value string, pos token.Position) token.Token {
 	if literal.IsDate(value) || literal.IsDatetime(value) {
 		if _, err := literal.ParseDate(value); err != nil {
 			l.errors.add(newError(CodeInvalidDate, ErrInvalidDate, pos, "invalid date %q", value))
@@ -102,7 +105,7 @@ func (l *lexer) classifyValue(raw, value string, hasWildcard bool, pos token.Pos
 // literalType is the type of a literal that is not a pattern or a date.
 func literalType(value string) token.Type {
 	switch {
-	case value == "true" || value == "false":
+	case literal.IsBoolean(value):
 		return token.Boolean
 	case literal.IsDuration(value):
 		return token.Duration

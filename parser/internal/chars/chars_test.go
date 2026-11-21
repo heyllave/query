@@ -35,6 +35,14 @@ func TestSpaceWidth(t *testing.T) {
 	}
 }
 
+func TestSpaceWidth_OutsideTheString(t *testing.T) {
+	for _, i := range []int{-1, 1, 5} {
+		if got := SpaceWidth(" ", i); got != 0 {
+			t.Errorf("SpaceWidth(%q, %d) = %d, want 0", " ", i, got)
+		}
+	}
+}
+
 func TestIdentEnd(t *testing.T) {
 	for s, want := range map[string]int{"abc=1": 3, "a-b/c.d": 5, "café x": 5, "日本": 6, "a b": 1, "=": 0} {
 		if got := IdentEnd(s, 0); got != want {

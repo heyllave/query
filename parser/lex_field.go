@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/heyllave/query/parser/internal/chars"
+	"github.com/heyllave/query/parser/internal/literal"
 	"github.com/heyllave/query/parser/internal/shape"
 	"github.com/heyllave/query/token"
 )
@@ -139,7 +140,7 @@ var keywords = map[string]token.Type{
 // lexIdentOrKeyword lexes a word as a keyword, a boolean or a name, and
 // returns its type. The original casing is kept in Token.Value so String()
 // reproduces the input. true and false are booleans in any position, as
-// classifyValue reads them after an operator. Whether an IN opens a list is
+// classifyLiteral reads them after an operator. Whether an IN opens a list is
 // the caller's to say: only in field position does it.
 func (l *lexer) lexIdentOrKeyword() token.Type {
 	start := l.pos
@@ -148,7 +149,7 @@ func (l *lexer) lexIdentOrKeyword() token.Type {
 	typ, keyword := keywords[strings.ToUpper(word)]
 	switch {
 	case keyword:
-	case word == "true" || word == "false":
+	case literal.IsBoolean(word):
 		typ = token.Boolean
 	default:
 		typ = token.Ident
