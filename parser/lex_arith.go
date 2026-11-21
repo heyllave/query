@@ -152,8 +152,7 @@ func (l *lexer) lexArithPrimary() bool {
 	case ch == '[':
 		l.lexFieldRef()
 	case ch == ')':
-		l.errors.add(newError(CodeExpectedValue, ErrSyntax, token.Position{Offset: l.pos, Length: 1},
-			"expected value, got ')'"))
+		l.syntaxError(CodeExpectedValue, l.pos, 1, "expected value, got ')'")
 		return false
 	case chars.IsDigit(ch), chars.IsSign(ch) && chars.IsDigit(l.peek(1)):
 		// A number, or a signed one: -50, +3.14.
@@ -161,8 +160,7 @@ func (l *lexer) lexArithPrimary() bool {
 	case chars.IsIdentStart(ch):
 		l.lexArithWord()
 	default:
-		l.errors.add(newError(CodeUnexpectedChar, ErrSyntax, token.Position{Offset: l.pos, Length: 1},
-			"unexpected character %q in value expression", string(ch)))
+		l.syntaxError(CodeUnexpectedChar, l.pos, 1, "unexpected character %q in value expression", string(ch))
 		l.pos++
 		return false
 	}

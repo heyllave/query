@@ -68,10 +68,13 @@ func isASCIISpace(c byte) bool {
 }
 
 // SpaceWidth returns the byte width of the whitespace character at s[i], or
-// 0 when there is none. Unicode spaces count: a no-break space pasted
-// between two words separates them like an ordinary one instead of gluing
-// them into a single term.
+// 0 when there is none, past the end included. Unicode spaces count: a
+// no-break space pasted between two words separates them like an ordinary
+// one instead of gluing them into a single term.
 func SpaceWidth(s string, i int) int {
+	if i < 0 || i >= len(s) {
+		return 0
+	}
 	c := s[i]
 	if c < utf8.RuneSelf {
 		if isASCIISpace(c) {

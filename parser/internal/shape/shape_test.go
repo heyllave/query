@@ -71,6 +71,9 @@ func TestPrimaryEdges(t *testing.T) {
 		{"-x", 0, false, false},
 		{"now()", 0, false, true},
 		{"now", 0, false, false},
+		{"7", -1, false, false},
+		{"7", 1, false, false},
+		{"", 0, false, false},
 	} {
 		if got := EndsPrimary(tc.s, tc.i); got != tc.ends {
 			t.Errorf("EndsPrimary(%q, %d) = %v, want %v", tc.s, tc.i, got, tc.ends)

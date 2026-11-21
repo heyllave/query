@@ -137,6 +137,12 @@ func ParseDate(s string) (time.Time, error) {
 	return time.Time{}, firstErr
 }
 
+// IsBoolean reports whether s is true or false, which are booleans only in
+// lower case.
+func IsBoolean(s string) bool {
+	return s == "true" || s == "false"
+}
+
 // IsDuration reports whether s is digits followed by one unit.
 func IsDuration(s string) bool {
 	return len(s) >= 2 && chars.IsDurationUnit(s[len(s)-1]) && chars.AllDigits(s[:len(s)-1])

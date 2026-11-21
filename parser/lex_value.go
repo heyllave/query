@@ -41,8 +41,7 @@ func (l *lexer) lexValue() {
 // with one of these characters is written in quotes.
 func (l *lexer) refuseSecondOperator(ch byte) {
 	if ch == '=' || ch == '<' || ch == '>' {
-		l.errors.add(newError(CodeUnexpectedChar, ErrSyntax, token.Position{Offset: l.pos, Length: 1},
-			"unexpected %q where a value belongs", string(ch)))
+		l.syntaxError(CodeUnexpectedChar, l.pos, 1, "unexpected %q where a value belongs", string(ch))
 	}
 }
 
@@ -82,7 +81,13 @@ func (l *lexer) lexUnquotedStringValue() {
 	if value == "" {
 		return
 	}
-	tok := l.classifyValue(raw, value, v.hasWildcard, token.Position{Offset: v.start, Length: l.pos - v.start})
+	pos := token.Position{Offset: v.start, Length: l.pos - v.start}
+	var tok token.Token
+	if v.hasWildcard {
+		tok = l.classifyPattern(raw, value, pos)
+	} else {
+		tok = l.classifyLiteral(value, pos)
+	}
 	if raw != value {
 		tok.Raw = raw
 	}
@@ -138,8 +143,8 @@ func isBareEscape(c byte) bool {
 // printed back: the value may not be quoted if it is a pattern, and left
 // bare the quote starts a string for whatever reads the query next.
 func (l *lexer) refuseInnerQuote() {
-	l.errors.add(newError(CodeUnexpectedChar, ErrSyntax, token.Position{Offset: l.pos, Length: 1},
-		`unexpected '"' inside an unquoted value; quote the whole value and write the quote as \"`))
+	l.syntaxError(CodeUnexpectedChar, l.pos, 1,
+		`unexpected '"' inside an unquoted value; quote the whole value and write the quote as \"`)
 }
 
 // refuseInnerOperator reports a comparison character inside a bare value,

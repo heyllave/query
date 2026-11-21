@@ -22,7 +22,7 @@ func (l *lexer) lexQuotedString() {
 	value, closed := l.readQuotedString()
 	pos := token.Position{Offset: start, Length: l.pos - start}
 	if !closed {
-		l.errors.add(newError(CodeUnclosedString, ErrSyntax, pos, "unterminated string literal"))
+		l.syntaxError(CodeUnclosedString, pos.Offset, pos.Length, "unterminated string literal")
 		return
 	}
 	l.tokens = append(l.tokens, token.Token{Type: token.String, Value: value, Pos: pos, Quoted: true})
@@ -69,5 +69,5 @@ func (l *lexer) readFieldRefName() (name string, quoted, closed bool) {
 
 // fieldRefError reports a field reference from start to l.pos.
 func (l *lexer) fieldRefError(start int, code Code, message string) {
-	l.errors.add(newError(code, ErrSyntax, token.Position{Offset: start, Length: l.pos - start}, "%s", message))
+	l.syntaxError(code, start, l.pos-start, "%s", message)
 }

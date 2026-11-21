@@ -37,7 +37,7 @@ query/
 │   ├── lex_mode.go     # what comes next (mode) and what each open '(' means; every change of mode
 │   ├── lex_field.go    # field position: names, keywords, operators, parens, lists
 │   ├── lex_value.go    # after an operator: quoted, bracketed and bare values
-│   ├── lex_number.go   # number, date and duration runs; classifyValue
+│   ├── lex_number.go   # number, date and duration runs; classifyLiteral, classifyPattern
 │   ├── lex_arith.go    # arithmetic values and function-call arguments
 │   ├── lex_quoted.go   # quoted strings and [field] references
 │   ├── literals.go     # ParseDateLiteral(), ParseDuration(), IsDayLiteral()
