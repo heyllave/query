@@ -31,6 +31,14 @@ go get github.com/heyllave/query
 | `query/eval` | Compile-and-match engine (`Compile`/`Match`), value evaluation (`CompileValue`/`Eval`), functions, struct binding |
 | `query/complete` | Completion for a query being typed: what belongs at the cursor, and what the schema can suggest there |
 
+**Lightweight core.** A host that only parses and validates — turning a query
+into SQL, a filter, or JSON, and rejecting bad input — imports `token`, `ast`,
+`parser`, `validate` and, optionally, `complete`. These never import the
+evaluator, the CLI, or the WASM/C bridges, so none of that surface is compiled
+into such a build. Importing the top-level `query` package or `query/eval`
+brings in the evaluator and its functions. The boundary is enforced by a test
+(`boundary_test.go`), and the whole module is zero-dependency.
+
 ## Quick Start
 
 ```go

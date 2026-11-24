@@ -24,6 +24,16 @@ type treeFormatter struct{}
 func (f *treeFormatter) Format(w io.Writer, expr ast.Expression, opts Options) error {
 	v := &treeVisitor{positions: opts.Positions}
 	root := ast.Visit[*treeNode](v, expr)
+	if root == nil {
+		if expr != nil {
+			return errUnformattable(expr)
+		}
+		// A nil expression has no tree. Mirror the JSON formatter, which
+		// encodes nil as "null" rather than dereferencing a nil root and
+		// panicking in the caller's goroutine.
+		_, err := io.WriteString(w, "null\n")
+		return err
+	}
 	var buf strings.Builder
 	// Root node: print label without connector, then render children
 	buf.WriteString(root.Label)

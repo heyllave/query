@@ -59,6 +59,17 @@ func WithStrict() Option {
 	}
 }
 
+// WithParseConfig sets the whole grammar — the length limit and the strict
+// options together — from a [parser.Config] a caller already holds. It is the
+// counterpart of [github.com/heyllave/query/eval.WithParseConfig], so a host
+// that threads one config through both parsing and evaluation does not restate
+// it as separate options.
+func WithParseConfig(cfg parser.Config) Option {
+	return func(o *options) {
+		o.parse = cfg
+	}
+}
+
 func defaultOptions() options {
 	return options{parse: parser.Config{MaxLength: DefaultMaxLength}}
 }

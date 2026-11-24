@@ -27,6 +27,7 @@ import (
 	"time"
 
 	"github.com/heyllave/query/ast"
+	"github.com/heyllave/query/output"
 	"github.com/heyllave/query/token"
 	"github.com/heyllave/query/validate"
 )
@@ -155,7 +156,7 @@ func (v *Visitor) compare(left string, e *ast.QualifierExpr) string {
 		if e.Operator == token.Neq {
 			op = "NOT LIKE"
 		}
-		return fmt.Sprintf(`%s %s %s ESCAPE '\'`, left, op, v.bind(ast.WildcardToLike(e.Value.Str)))
+		return fmt.Sprintf(`%s %s %s ESCAPE '\'`, left, op, v.bind(output.WildcardToLike(e.Value.Str)))
 	}
 	if e.Value.Type == ast.ValueDate && e.Value.DayOnly {
 		day := e.Value.Date
@@ -171,7 +172,7 @@ func (v *Visitor) compare(left string, e *ast.QualifierExpr) string {
 			return fmt.Sprintf("%s >= %s", left, v.bindTime(next))
 		}
 	}
-	return fmt.Sprintf("%s %s %s", left, ast.SQLOperator(e.Operator, false), v.renderValue(&e.Value))
+	return fmt.Sprintf("%s %s %s", left, output.SQLOperator(e.Operator, false), v.renderValue(&e.Value))
 }
 
 func (v *Visitor) bindTime(t time.Time) string {

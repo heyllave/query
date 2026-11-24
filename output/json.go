@@ -40,6 +40,9 @@ type jsonFormatter struct{}
 func (f *jsonFormatter) Format(w io.Writer, expr ast.Expression, opts Options) error {
 	v := &jsonVisitor{positions: opts.Positions}
 	node := ast.Visit[*jsonNode](v, expr)
+	if expr != nil && node == nil {
+		return errUnformattable(expr)
+	}
 	enc := json.NewEncoder(w)
 	enc.SetIndent("", "  ")
 	return enc.Encode(node)

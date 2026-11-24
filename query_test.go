@@ -102,6 +102,11 @@ func TestParse_StrictOptions(t *testing.T) {
 		{"strict refuses both, values", "a=1+b=2", []query.Option{query.WithStrict()}, true},
 		{"strict accepts a plain query", `a=1 AND name="x=y"`, []query.Option{query.WithStrict()}, false},
 		{"strict keeps the length limit", "a=1", []query.Option{query.WithStrict(), query.WithMaxLength(2)}, true},
+		// WithParseConfig carries a whole parser.Config, equivalent to the
+		// individual options, so a host can thread one config through parse.
+		{"parse config strict refuses", "a=1 b=2", []query.Option{query.WithParseConfig(parser.Config{}.Strict())}, true},
+		{"parse config plain accepts", "a=1 AND b=2", []query.Option{query.WithParseConfig(parser.Config{})}, false},
+		{"parse config explicit-and", "a=1 b=2", []query.Option{query.WithParseConfig(parser.Config{ExplicitAnd: true})}, true},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {

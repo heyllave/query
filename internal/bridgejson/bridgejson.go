@@ -21,7 +21,12 @@ import (
 	"github.com/heyllave/query/validate"
 )
 
-// AST is the JSON-serializable representation of an AST node.
+// AST is the JSON-serializable representation of an AST node. This is THE wire
+// contract the cross-language clients (npm, C/FFI, WASM) depend on: lowercase
+// node kinds, camelCase fields, and derived field lists so a client needs no
+// parser of its own. Change it only together with those clients and the
+// conformance corpus. The human-facing debug JSON in the output package is a
+// separate, unversioned view — do not conflate the two.
 type AST struct {
 	Type     string   `json:"type"`
 	Op       string   `json:"op,omitempty"`

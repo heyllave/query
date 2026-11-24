@@ -6,8 +6,68 @@ semantic versioning.
 
 ## Unreleased
 
+### Breaking
+
+- SQL-generation helpers moved out of the backend-agnostic `ast` package:
+  `ast.SQLOperator` and `ast.WildcardToLike` are now `output.SQLOperator` and
+  `output.WildcardToLike`, with the same signatures and behaviour. `ast` holds
+  the tree; each backend owns its own rendering, so a second backend never has to
+  grow an `ast.MongoOperator` beside the SQL one. Callers update the import and
+  qualifier; nothing else changes.
+
+### Changed
+
+- The `WithAllowedFields` and `WithCustomValidator` docs now state their exact
+  scope: they govern the record's own field names (top-level, nested, through
+  functions and value references), but NOT the element fields named inside a list
+  selector's condition (`orders@(amount>5)`), which come from
+  `FieldConfig.Elements`. Restrict element fields by scoping `Elements` (e.g. a
+  per-request validator); operator and function restrictions do cascade into
+  selectors. No behaviour change — the contract was ambiguous and is now pinned by
+  tests, so a security-sensitive host does not mistake `WithAllowedFields` for a
+  way to hide an element field. (The alternative, propagating these restrictions
+  into the element scope as-is, would have rejected every legitimate element
+  field, since they cannot be named in `WithAllowedFields`.)
+- Operator metadata lives in one table in the `token` package. `IsOperator`,
+  `IsArithmetic`, `IsNegatedOperator`, `NegateOperator` and `OperatorSymbol` now
+  read a single per-token table instead of five parallel switches, so a new
+  operator is one row (plus its constant and name) rather than edits in five
+  functions. Behaviour is unchanged and pinned by a table-consistency test.
+
 ### Fixed
 
+- The JSON and tree formatters no longer mis-handle a value-expression root. A
+  value tree from `parser.ParseValue` or `eval.ValueProgram.AST()` (both public)
+  is not a predicate AST: `output.AsJSON` used to encode it as a bare `null`, and
+  `output.AsTree` dereferenced a nil root and panicked. Both now return a clear
+  error. The predicate `ast.Visitor` covers the boolean domain by design; its
+  scope and the value-domain exclusion are now documented and tested.
+- `output.AsTree(nil)` no longer panics on a nil expression. It dereferenced a
+  nil root and crashed the caller's goroutine; it now emits `null`, matching
+  `output.AsJSON(nil)`, which already did.
+- `sum()` over a list of integers no longer wraps when the total overflows an
+  int64: it promotes to float64, the same way integer `+` already does in a
+  value expression, so `sum(xs)>1000000` cannot read false on a total that
+  overflowed negative.
+- A computed value that is not a finite number resolves to no value instead of
+  leaking `NaN` or `±Inf`. Arithmetic (`[price]*[price]` overflowing to `+Inf`,
+  `inf-inf`) and `abs`/`ceil`/`floor` on a non-finite input now follow the same
+  contract `round`, `sqrt` and `pow` already did; a predicate over such an
+  operand is false, and `Eval` returns `ErrNoValue` rather than a value that
+  cannot be compared or marshalled.
+- Struct fields promoted through an embedded struct are reachable. A
+  `query:"..."` tag on a field of an embedded (anonymous) struct is registered
+  by `FieldsFromStruct` and resolved by `MatchStruct`, with a shallower field
+  shadowing a deeper one of the same name. A nil embedded pointer makes its
+  promoted fields missing rather than panicking.
+- A `[]byte` record value is read as text, not a list of bytes: `len()` counts
+  its characters, and equality, `contains` and wildcards treat it as the string
+  it spells, so `name="café"` matches `[]byte("café")` and `len(name)` is 4.
+- `Program.Match`/`MatchFunc` and `ValueProgram.Eval`/`EvalFunc` contain a panic
+  from a hostile record value as no-match / no-value instead of letting it reach
+  the caller's goroutine. The builtins and reflection paths are written and
+  fuzzed not to panic; this is the backstop that keeps a future regression in
+  one of them from becoming a denial of service.
 - An `IN` inside a call's arguments no longer makes the next group an IN
   list: in `a=f(x in) (b=1)`, `b=1` was read as one piece of text, and the
   error pointed at its `=`. The query is still refused, now at the `in`.
@@ -88,6 +148,21 @@ semantic versioning.
 
 ### Added
 
+- `query.WithParseConfig` carries a whole `parser.Config` (length limit and
+  strict options together) into `Parse`/`ParseAndValidate`, the counterpart of
+  the existing `eval.WithParseConfig`, so a host threads one grammar config
+  through parsing and evaluation instead of restating it as separate options.
+- A dispatch-guard test pins the AST node contract: every `Expression` type is
+  listed once, and the guard fails if `Visit`, `Walk` or `String` stops handling
+  one — turning the silent default arms on those switches into a test failure
+  when a node is added. The "adding a node type" checklist is in `ast/doc.go`.
+- A test pins the import boundary of the lightweight core. `token`, `ast`,
+  `parser`, `validate` and `complete` are held to a graph that never reaches
+  the evaluator, the command line, the WASM or C bridges, or any third-party
+  package, and `go.mod` is held to zero `require` directives. A host that
+  embeds only the parser and validator never compiles the evaluator or its
+  functions, and that promise now fails the build if a future import breaks
+  it, rather than being a property that happened to hold.
 - Completion for a query that is still being typed. `query.Complete(text,
   cursor, fields)` (package `complete`) reports what the grammar expects at
   the cursor and lists what the schema can suggest there: field names, the

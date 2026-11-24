@@ -104,35 +104,6 @@ func TestUnquotedSafe(t *testing.T) {
 	}
 }
 
-func TestSQLOperator_And_WildcardToLike(t *testing.T) {
-	if got := SQLOperator(token.Neq, true); got != "NOT LIKE" {
-		t.Errorf("SQLOperator(Neq, wildcard) = %q, want NOT LIKE", got)
-	}
-	if got := SQLOperator(token.Eq, true); got != "LIKE" {
-		t.Errorf("SQLOperator(Eq, wildcard) = %q, want LIKE", got)
-	}
-	for _, op := range []token.Type{token.Eq, token.Neq, token.Gt, token.Gte, token.Lt, token.Lte, token.Range} {
-		if SQLOperator(op, false) == "" {
-			t.Errorf("SQLOperator(%v) is empty", op)
-		}
-	}
-	tests := map[string]string{
-		"John*":    "John%",
-		"*yota":    "%yota",
-		"*mid*":    "%mid%",
-		"50%*":     `50\%%`,
-		"a_b*":     `a\_b%`,
-		`a\*b*`:    "a*b%",
-		`back\\s*`: `back\\s%`,
-		`c\\*`:     `c\\%`,
-	}
-	for in, want := range tests {
-		if got := WildcardToLike(in); got != want {
-			t.Errorf("WildcardToLike(%q) = %q, want %q", in, got, want)
-		}
-	}
-}
-
 func TestDepth_ChainsAndNesting(t *testing.T) {
 	leaf := func(n string) Expression { return &PresenceExpr{Field: FieldPath{n}} }
 	and := func(l, r Expression) Expression { return &BinaryExpr{Op: token.And, Left: l, Right: r} }

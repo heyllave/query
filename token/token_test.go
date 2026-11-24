@@ -117,3 +117,52 @@ func TestOperatorSymbol(t *testing.T) {
 		}
 	}
 }
+
+// TestOperatorInfo_TableConsistency guards the single operator table: the three
+// operator families are pinned to their exact members, every symbol agrees with
+// the type's printed name, and each negated comparison points at a well-formed
+// positive form. A malformed or forgotten row for a new operator fails here.
+func TestOperatorInfo_TableConsistency(t *testing.T) {
+	comparison := map[Type]bool{Eq: true, Neq: true, Gt: true, Gte: true, Lt: true, Lte: true, Ngt: true, Ngte: true, Nlt: true, Nlte: true, Colon: true}
+	arithmetic := map[Type]bool{Plus: true, Minus: true, Mul: true, Div: true, Mod: true}
+	negated := map[Type]Type{Ngt: Gt, Ngte: Gte, Nlt: Lt, Nlte: Lte}
+
+	for ty := Type(0); int(ty) < len(operatorInfo); ty++ {
+		info := operatorInfo[ty]
+
+		if ty.IsOperator() != comparison[ty] {
+			t.Errorf("%v: IsOperator()=%v, table comparison=%v, want member set=%v", ty, ty.IsOperator(), info.comparison, comparison[ty])
+		}
+		if ty.IsArithmetic() != arithmetic[ty] {
+			t.Errorf("%v: IsArithmetic()=%v, want %v", ty, ty.IsArithmetic(), arithmetic[ty])
+		}
+		if ty.IsNegatedOperator() != (negated[ty] != Illegal) {
+			t.Errorf("%v: IsNegatedOperator()=%v, want %v", ty, ty.IsNegatedOperator(), negated[ty] != Illegal)
+		}
+		// A symbol in the table must match the type's printed name.
+		if info.symbol != "" && info.symbol != ty.String() {
+			t.Errorf("%v: table symbol %q != typeNames %q", ty, info.symbol, ty.String())
+		}
+		// A negated comparison points at a positive comparison form.
+		if base := info.negatedBase; base != Illegal {
+			if want := negated[ty]; base != want {
+				t.Errorf("%v: negatedBase=%v, want %v", ty, base, want)
+			}
+			if !base.IsOperator() || base.IsNegatedOperator() {
+				t.Errorf("%v: negatedBase %v must be a positive comparison operator", ty, base)
+			}
+			if got := NegateOperator(ty); got != base {
+				t.Errorf("NegateOperator(%v)=%v, want %v", ty, got, base)
+			}
+			if "!"+base.String() != info.symbol {
+				t.Errorf("%v: symbol %q is not \"!\"+%q", ty, info.symbol, base.String())
+			}
+		}
+	}
+	// NegateOperator leaves a non-negated operator unchanged.
+	for _, op := range []Type{Eq, Gt, Lte, Plus, Ident} {
+		if got := NegateOperator(op); got != op {
+			t.Errorf("NegateOperator(%v)=%v, want unchanged", op, got)
+		}
+	}
+}

@@ -68,6 +68,16 @@ query/
 2. **Sub-package structure** — token, ast, parser, validate are separate packages.
 3. **WASM-compatible** — no OS-specific code in the library.
 4. **Consumers own code generation** — use ast.Visitor[T] to transform AST.
+5. **Lightweight core vs. heavier surface** — `token`, `ast`, `parser`,
+   `validate` and `complete` are the core a host embeds to parse and validate.
+   They must never import `eval`, `cmd`, `clients`, `wasm`, `output`,
+   `internal/bridgejson` or `conformance`, so a consumer that imports only the
+   parser never compiles the evaluator, its ~40 functions, the CLI, or a
+   bridge. `eval` and the bridges depend on the core, never the reverse.
+   `boundary_test.go` enforces this and the zero-dependency rule; a new import
+   that crosses the line fails `go test ./...`. The WASM target
+   (`//go:build wasm`) and the C shared library (`//go:build cshared`, cgo)
+   stay out of `go build ./...` by build tag.
 
 ## Code Conventions
 

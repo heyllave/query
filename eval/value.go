@@ -95,10 +95,17 @@ func (p *ValueProgram) Eval(data map[string]any) (any, error) {
 // EvalFunc computes the value using a custom field accessor. The accessor
 // returns the value for a field and whether it exists. It returns [ErrNoValue]
 // if the expression cannot resolve.
-func (p *ValueProgram) EvalFunc(get func(field string) (any, bool)) (any, error) {
+func (p *ValueProgram) EvalFunc(get func(field string) (any, bool)) (result any, err error) {
 	if p.resolve == nil {
 		return nil, ErrNoValue
 	}
+	// A panic from a hostile record value is contained as no value, the same
+	// backstop [Program.MatchFunc] keeps for predicates.
+	defer func() {
+		if recover() != nil {
+			result, err = nil, ErrNoValue
+		}
+	}()
 	v := p.resolve(get)
 	if v == nil {
 		return nil, ErrNoValue
