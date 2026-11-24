@@ -765,8 +765,9 @@ func fnCount(args ...any) (any, error) {
 
 // fnSum returns the numeric total of a list's elements. A non-list argument is
 // treated as a single-element collection (sum(7)=7). The result stays int64
-// only when every element is integer-kinded — accumulated in int64 so it is
-// exact beyond 2^53 — else float64. An empty or nil list sums to 0 (the
+// while every element is integer-kinded and the running total does not overflow;
+// a non-integer element or an overflow promotes it to float64, the same way
+// integer `+` does in a value expression. An empty or nil list sums to 0 (the
 // additive identity).
 func fnSum(args ...any) (any, error) {
 	if len(args) != 1 {
@@ -777,8 +778,14 @@ func fnSum(args ...any) (any, error) {
 	var intTotal int64
 	var floatTotal float64
 	for _, e := range elems {
-		if isIntKind(e) {
-			intTotal += toInt64(e)
+		if allInt && isIntKind(e) {
+			if r, ok := addInt64(intTotal, toInt64(e)); ok {
+				intTotal = r
+			} else {
+				// int64 would wrap; carry on as float so the total stays true
+				// rather than silently flipping sign.
+				allInt = false
+			}
 		} else {
 			allInt = false
 		}

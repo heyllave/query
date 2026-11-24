@@ -25,7 +25,7 @@ type Program struct {
 // first and then as a path through nested maps (data["labels"]["dev"]), so
 // both a flattened record and one decoded from nested JSON match.
 func (p *Program) Match(data map[string]any) bool {
-	return p.matcher(MapAccessor(data))
+	return p.MatchFunc(MapAccessor(data))
 }
 
 // MapAccessor returns a field accessor over a map that resolves dotted paths
@@ -125,7 +125,16 @@ func mapGetter(v any) func(string) (any, bool) {
 //	prog.MatchFunc(func(field string) (any, bool) {
 //	    return myRecord.Get(field)
 //	})
-func (p *Program) MatchFunc(get func(field string) (any, bool)) bool {
+func (p *Program) MatchFunc(get func(field string) (any, bool)) (match bool) {
+	// The record is untrusted. Every builtin and reflection path is written not
+	// to panic on a hostile value, and fuzzing holds them to it; this recover is
+	// the backstop that keeps a future regression in one of them from taking
+	// down the caller's goroutine. A panicking match counts as no match.
+	defer func() {
+		if recover() != nil {
+			match = false
+		}
+	}()
 	return p.matcher(get)
 }
 

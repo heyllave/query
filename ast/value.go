@@ -99,7 +99,7 @@ type Value struct {
 // DecodePattern turns a wildcard value's Str (its pattern form, where `\\`
 // is a backslash and `\*` a literal star) into plain text with the wildcard
 // stars kept as `*`. It is for consumers that match patterns themselves;
-// WildcardToLike does the same for SQL.
+// [github.com/heyllave/query/output.WildcardToLike] does the same for SQL.
 func DecodePattern(s string) string {
 	var b strings.Builder
 	for i := 0; i < len(s); i++ {

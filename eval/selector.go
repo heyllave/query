@@ -108,6 +108,11 @@ func toSlice(v any) ([]any, bool) {
 	if s, ok := v.([]any); ok {
 		return s, true
 	}
+	if _, ok := v.([]byte); ok {
+		// A byte slice is text, not a list of numbers: len() counts its
+		// characters and contains() tests a substring, the same as a string.
+		return nil, false
+	}
 	rv := reflect.ValueOf(v)
 	if rv.Kind() != reflect.Slice && rv.Kind() != reflect.Array {
 		return nil, false

@@ -330,6 +330,14 @@ func valueFromAny(v any) *ast.Value {
 			if isInt {
 				return &ast.Value{Type: ast.ValueInteger, Raw: fmt.Sprint(i), Int: i}
 			}
+			if math.IsNaN(f) || math.IsInf(f, 0) {
+				// A computed result that is not a finite number has no place in a
+				// comparison and cannot be marshalled; resolve to no value, the
+				// same contract division by zero and sqrt of a negative follow.
+				// Every arithmetic and function result funnels through here, so
+				// this is the one guard that keeps NaN and ±Inf out of a result.
+				return nil
+			}
 			return &ast.Value{Type: ast.ValueFloat, Raw: fmt.Sprint(f), Float: f}
 		}
 		// Typed slices ([]string, []int, …) are preserved as lists so value
@@ -536,6 +544,9 @@ func stringifyActual(v any) string {
 		return x.Format(time.RFC3339)
 	case time.Duration:
 		return x.String()
+	case []byte:
+		// A byte slice is text: "café", not "[99 97 102 195 169]".
+		return string(x)
 	default:
 		return sprint(v)
 	}

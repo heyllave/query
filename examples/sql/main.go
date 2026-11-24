@@ -41,6 +41,7 @@ import (
 
 	"github.com/heyllave/query"
 	"github.com/heyllave/query/ast"
+	"github.com/heyllave/query/output"
 	"github.com/heyllave/query/token"
 	"github.com/heyllave/query/validate"
 )
@@ -169,12 +170,12 @@ func (v *sqlVisitor) VisitQualifier(e *ast.QualifierExpr) string {
 	// WildcardToLike escapes the data's own % and _ with a backslash, which
 	// is only an escape character in every database once the clause says so.
 	if e.IsWildcard() {
-		v.params = append(v.params, ast.WildcardToLike(e.Value.Str))
-		return fmt.Sprintf(`%s %s $%d ESCAPE '\'`, field, ast.SQLOperator(e.Operator, true), len(v.params))
+		v.params = append(v.params, output.WildcardToLike(e.Value.Str))
+		return fmt.Sprintf(`%s %s $%d ESCAPE '\'`, field, output.SQLOperator(e.Operator, true), len(v.params))
 	}
 
 	// Standard comparison: field op <value>
-	op := ast.SQLOperator(e.Operator, false)
+	op := output.SQLOperator(e.Operator, false)
 	return fmt.Sprintf("%s %s %s", field, op, v.renderValue(&e.Value))
 }
 

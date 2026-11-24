@@ -1,10 +1,21 @@
 package output
 
 import (
+	"fmt"
 	"io"
 
 	"github.com/heyllave/query/ast"
 )
+
+// errUnformattable reports that a formatter was handed an expression it does not
+// cover. [ast.Visit] returns a nil node for such a root — today only the
+// value-domain [ast.ValueExpr], which the predicate formatters do not render.
+// Without this guard the JSON formatter would encode a bare "null" and the tree
+// formatter would dereference the nil root and panic. A formatter calls this
+// when Visit yields nil for a non-nil expression.
+func errUnformattable(expr ast.Expression) error {
+	return fmt.Errorf("output: cannot format %T; the formatters cover predicate expressions, not the value domain — evaluate value expressions with the eval package", expr)
+}
 
 // Formatter converts an AST expression into formatted output.
 //
@@ -36,6 +47,13 @@ func buildOpts(opts []Option) Options {
 }
 
 // Predefined formatters.
+//
+// This JSON is for humans — debugging and tooling (CamelCase node kinds,
+// snake_case fields, positions). It is not the client wire format: the
+// cross-language clients speak the separate, versioned contract in
+// internal/bridgejson (lowercase kinds, camelCase fields, derived field lists).
+// Keep the two apart on purpose; changing this view does not change the client
+// contract and vice versa.
 var (
 	// JSONOutput formats the AST as indented JSON.
 	JSONOutput Formatter = &jsonFormatter{}

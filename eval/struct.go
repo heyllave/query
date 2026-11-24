@@ -45,55 +45,92 @@ func FieldsFromStruct(v any) []validate.FieldConfig {
 	}
 
 	var configs []validate.FieldConfig
-	for i := range t.NumField() {
-		field := t.Field(i)
-		tag := field.Tag.Get("query")
-		if tag == "" || tag == "-" || !field.IsExported() {
-			// An unexported field cannot be read through reflection, so a
-			// tag on one is ignored rather than panicking at match time.
-			continue
-		}
-
-		name, opts := parseTag(tag)
+	walkTaggedFields(t, func(name string, _ []int, field reflect.StructField) {
+		_, opts := parseTag(field.Tag.Get("query"))
 		fvt, ops := goTypeToFieldConfig(field.Type)
-
 		if len(opts) > 0 {
 			ops = parseOps(opts)
 		}
-
 		configs = append(configs, validate.FieldConfig{
 			Name:       name,
 			Type:       fvt,
 			AllowedOps: ops,
 		})
-	}
+	})
 	return configs
+}
+
+// walkTaggedFields visits every readable, `query`-tagged field of a struct type,
+// including fields promoted through embedded (anonymous) structs. It walks
+// breadth-first so a shallower field shadows a deeper one of the same name, as
+// Go's own field promotion does, and reports each field's index path for
+// [reflect.Value.FieldByIndex]. An unexported field cannot be read through
+// reflection, so a tag on one is ignored rather than left to panic at match
+// time.
+func walkTaggedFields(t reflect.Type, visit func(name string, path []int, f reflect.StructField)) {
+	if t.Kind() == reflect.Pointer {
+		t = t.Elem()
+	}
+	if t.Kind() != reflect.Struct {
+		return
+	}
+	type frame struct {
+		t      reflect.Type
+		prefix []int
+	}
+	seen := map[string]bool{}
+	queue := []frame{{t: t}}
+	for len(queue) > 0 {
+		fr := queue[0]
+		queue = queue[1:]
+		for i := range fr.t.NumField() {
+			f := fr.t.Field(i)
+			path := append(append([]int(nil), fr.prefix...), i)
+			if f.Anonymous && f.Tag.Get("query") == "" {
+				et := f.Type
+				if et.Kind() == reflect.Pointer {
+					et = et.Elem()
+				}
+				// An embedded struct with no tag of its own promotes its fields;
+				// time.Time is a struct but is read as a whole, never descended.
+				if et.Kind() == reflect.Struct && et != timeType {
+					queue = append(queue, frame{t: et, prefix: path})
+					continue
+				}
+			}
+			tag := f.Tag.Get("query")
+			if tag == "" || tag == "-" || !f.IsExported() {
+				continue
+			}
+			name, _ := parseTag(tag)
+			if seen[name] {
+				continue
+			}
+			seen[name] = true
+			visit(name, path, f)
+		}
+	}
 }
 
 // tagIndexCache memoizes the query-tag → field-index map per struct type. The
 // map depends only on the type, so it is computed once and reused across every
 // value of that type — the per-record hot path then does a map lookup and a
 // reflect field read, with no tag parsing.
-var tagIndexCache sync.Map // map[reflect.Type]map[string]int
+var tagIndexCache sync.Map // map[reflect.Type]map[string][]int
 
-// tagIndex returns the query-tag → field-index map for struct type t, building
-// and caching it on first use.
-func tagIndex(t reflect.Type) map[string]int {
+// tagIndex returns the query-tag → field-index-path map for struct type t,
+// building and caching it on first use. A path has more than one element when
+// the field is promoted through an embedded struct.
+func tagIndex(t reflect.Type) map[string][]int {
 	if cached, ok := tagIndexCache.Load(t); ok {
-		return cached.(map[string]int)
+		return cached.(map[string][]int)
 	}
-	m := make(map[string]int, t.NumField())
-	for i := range t.NumField() {
-		f := t.Field(i)
-		tag := f.Tag.Get("query")
-		if tag == "" || tag == "-" || !f.IsExported() {
-			continue
-		}
-		name, _ := parseTag(tag)
-		m[name] = i
-	}
+	m := make(map[string][]int)
+	walkTaggedFields(t, func(name string, path []int, _ reflect.StructField) {
+		m[name] = path
+	})
 	actual, _ := tagIndexCache.LoadOrStore(t, m)
-	return actual.(map[string]int)
+	return actual.(map[string][]int)
 }
 
 // StructAccessor returns a field accessor function for a struct value,
@@ -116,11 +153,17 @@ func StructAccessor(v any) func(string) (any, bool) {
 	tagMap := tagIndex(rv.Type())
 
 	return func(field string) (any, bool) {
-		idx, ok := tagMap[field]
+		path, ok := tagMap[field]
 		if !ok {
 			return nil, false
 		}
-		return fieldValue(rv.Field(idx))
+		// FieldByIndexErr returns an error instead of panicking when the path
+		// crosses a nil embedded pointer; that field is simply missing.
+		fv, err := rv.FieldByIndexErr(path)
+		if err != nil {
+			return nil, false
+		}
+		return fieldValue(fv)
 	}
 }
 

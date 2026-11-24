@@ -107,11 +107,22 @@ type Option func(*Validator)
 // WithCustomValidator installs an [AstValidator] hook that extends validation
 // with consumer-defined rules.
 //
-// When set, [AstValidator.GetFieldConfig] is consulted first for every field
-// reference and overrides the static config: a result of (_, false) means the
-// field is unknown, even if it is declared statically. This enables tenant-
-// scoped field access control. Consumers that want to fall back to the static
-// config should do so explicitly inside their implementation.
+// When set, [AstValidator.GetFieldConfig] is consulted for every top-level and
+// nested field reference and overrides the static config: a result of (_, false)
+// means the field is unknown, even if it is declared statically. This enables
+// tenant-scoped field access control. Consumers that want to fall back to the
+// static config should do so explicitly inside their implementation.
+//
+// Scope: the hook governs the record's own fields — including those reached
+// through functions ([lower(secret)]), value-position references ([n>[secret]])
+// and function arguments. It does NOT govern the fields named inside a list
+// selector's condition (`orders@(amount>5)`): those are an element's fields, a
+// separate namespace resolved from the list's [FieldConfig.Elements], not from
+// the record schema the hook describes. To scope which element fields an
+// untrusted query may reach, scope the Elements config (e.g. build a per-request
+// validator), not this hook. Operator and function restrictions
+// ([WithAllowedOps], [WithAllowedFunctions]) do apply inside selectors, since
+// those are not namespaced to a schema.
 //
 // [AstValidator.ValidateCustomRules] is invoked once on the root expression
 // after all built-in checks have run. Errors returned are appended to the
@@ -121,10 +132,18 @@ func WithCustomValidator(cv AstValidator) Option {
 	return func(v *Validator) { v.custom = cv }
 }
 
-// WithAllowedFields restricts queries to the named fields. The restriction is
-// enforced after field resolution, so it also applies to fields a custom
-// [AstValidator] resolves, and to fields referenced inside function arguments
-// and value-position field references.
+// WithAllowedFields restricts queries to the named top-level fields. The
+// restriction is enforced after field resolution, so it also applies to fields a
+// custom [AstValidator] resolves, to fields referenced inside function arguments,
+// and to value-position field references. A nested path (labels.dev) is allowed
+// when its top-level segment (labels) is named.
+//
+// It governs field NAMES in the record schema. It does not reach the element
+// fields named inside a list selector's condition (`orders@(amount>5)`): those
+// live in the list's [FieldConfig.Elements] and cannot be named here, so a list
+// whose top-level name is allowed admits any of its declared element fields.
+// Restrict element fields by scoping the Elements config, not this option.
+// (Operator and function restrictions do apply inside selectors.)
 func WithAllowedFields(fields ...string) Option {
 	return func(v *Validator) {
 		v.allowedFields = make(map[string]bool, len(fields))
@@ -889,6 +908,14 @@ func (v *Validator) validateSelector(s *ast.SelectorExpr) {
 // name of a fork, not of the record that has the forks.
 func (v *Validator) validateElements(list FieldConfig, inner ast.Expression) {
 	scope := New(list.Elements)
+	// Operator and function restrictions are global policies — not tied to a
+	// schema namespace — so they cascade into the element condition. The field
+	// restrictions (allowedFields, custom) are deliberately NOT copied: they name
+	// the record's own fields, while these are an element's fields, a separate
+	// namespace resolved from list.Elements. allowedFields cannot spell an element
+	// field, and the custom hook describes the record schema, not elements; to
+	// scope which element fields are reachable, scope list.Elements. See the
+	// WithAllowedFields / WithCustomValidator docs.
 	scope.allowedOps = v.allowedOps
 	scope.allowedFuncs = v.allowedFuncs
 	scope.missingTest = v.missingTest

@@ -97,14 +97,54 @@ var typeNames = [...]string{
 	FieldRef: "FIELDREF",
 }
 
+// opInfo is the per-token operator metadata. Keeping it in one table means a
+// new operator is a single row here (plus its const and its [typeNames] entry),
+// not a new case in each of the predicates below. A token with no row is the
+// zero opInfo — not an operator — and since Illegal is 0, negatedBase == Illegal
+// reads as "not a negated operator".
+type opInfo struct {
+	symbol      string // source spelling ("!>=")
+	comparison  bool   // a comparison operator (drives IsOperator)
+	arithmetic  bool   // an arithmetic operator (drives IsArithmetic)
+	negatedBase Type   // for a negated comparison (!>): its positive form (>); Illegal otherwise
+}
+
+// operatorInfo is indexed by [Type]; opMeta bounds-checks the lookup. Range is a
+// comparison token in the grammar but IsOperator excludes it (a range is written
+// with ':', not as a binary operator), so it carries a symbol without the
+// comparison flag.
+var operatorInfo = [...]opInfo{
+	Eq:    {symbol: "=", comparison: true},
+	Neq:   {symbol: "!=", comparison: true},
+	Gt:    {symbol: ">", comparison: true},
+	Gte:   {symbol: ">=", comparison: true},
+	Lt:    {symbol: "<", comparison: true},
+	Lte:   {symbol: "<=", comparison: true},
+	Ngt:   {symbol: "!>", comparison: true, negatedBase: Gt},
+	Ngte:  {symbol: "!>=", comparison: true, negatedBase: Gte},
+	Nlt:   {symbol: "!<", comparison: true, negatedBase: Lt},
+	Nlte:  {symbol: "!<=", comparison: true, negatedBase: Lte},
+	Colon: {symbol: ":", comparison: true},
+	Range: {symbol: ".."},
+	Plus:  {symbol: "+", arithmetic: true},
+	Minus: {symbol: "-", arithmetic: true},
+	Mul:   {symbol: "*", arithmetic: true},
+	Div:   {symbol: "/", arithmetic: true},
+	Mod:   {symbol: "%", arithmetic: true},
+}
+
+// opMeta returns the operator metadata for t, or the zero opInfo for a token
+// that is not in the table. The bounds check keeps it safe for every Type.
+func opMeta(t Type) opInfo {
+	if int(t) >= 0 && int(t) < len(operatorInfo) {
+		return operatorInfo[t]
+	}
+	return opInfo{}
+}
+
 // IsArithmetic reports whether the token type is an arithmetic operator.
 func (t Type) IsArithmetic() bool {
-	switch t { //nolint:exhaustive // only arithmetic tokens return true
-	case Plus, Minus, Mul, Div, Mod:
-		return true
-	default:
-		return false
-	}
+	return opMeta(t).arithmetic
 }
 
 // String returns the human-readable name of the token type.
@@ -117,41 +157,23 @@ func (t Type) String() string {
 
 // IsOperator reports whether the token type is a comparison operator.
 func (t Type) IsOperator() bool {
-	switch t { //nolint:exhaustive // only operator tokens return true
-	case Eq, Neq, Gt, Gte, Lt, Lte, Ngt, Ngte, Nlt, Nlte, Colon:
-		return true
-	default:
-		return false
-	}
+	return opMeta(t).comparison
 }
 
 // IsNegatedOperator reports whether the token type is a negated comparison
 // operator (!>, !>=, !<, !<=).
 func (t Type) IsNegatedOperator() bool {
-	switch t { //nolint:exhaustive // only operator tokens return true
-	case Ngt, Ngte, Nlt, Nlte:
-		return true
-	default:
-		return false
-	}
+	return opMeta(t).negatedBase != Illegal
 }
 
 // NegateOperator returns the positive form of a negated comparison operator
 // (!> → >, !>= → >=, !< → <, !<= → <=). For non-negated operators it returns
 // the input unchanged.
 func NegateOperator(t Type) Type {
-	switch t { //nolint:exhaustive // only negated comparison operators
-	case Ngt:
-		return Gt
-	case Ngte:
-		return Gte
-	case Nlt:
-		return Lt
-	case Nlte:
-		return Lte
-	default:
-		return t
+	if base := opMeta(t).negatedBase; base != Illegal {
+		return base
 	}
+	return t
 }
 
 // IsKeyword reports whether the token type is a reserved word that the parser
@@ -203,44 +225,12 @@ func (t Token) String() string {
 	return t.Type.String()
 }
 
-// OperatorSymbol returns the string representation of a comparison operator.
+// OperatorSymbol returns the string representation of a comparison or
+// arithmetic operator. For a token that has no symbol in the table it returns
+// "=", preserving the original fallback.
 func OperatorSymbol(op Type) string {
-	switch op { //nolint:exhaustive // only comparison operators are relevant
-	case Eq:
-		return "="
-	case Neq:
-		return "!="
-	case Gt:
-		return ">"
-	case Gte:
-		return ">="
-	case Lt:
-		return "<"
-	case Lte:
-		return "<="
-	case Ngt:
-		return "!>"
-	case Ngte:
-		return "!>="
-	case Nlt:
-		return "!<"
-	case Nlte:
-		return "!<="
-	case Plus:
-		return "+"
-	case Minus:
-		return "-"
-	case Mul:
-		return "*"
-	case Div:
-		return "/"
-	case Mod:
-		return "%"
-	case Range:
-		return ".."
-	case Colon:
-		return ":"
-	default:
-		return "="
+	if s := opMeta(op).symbol; s != "" {
+		return s
 	}
+	return "="
 }

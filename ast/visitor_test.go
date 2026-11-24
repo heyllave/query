@@ -2,8 +2,6 @@ package ast
 
 import (
 	"testing"
-
-	"github.com/heyllave/query/token"
 )
 
 // countVisitor counts nodes of each type.
@@ -45,51 +43,6 @@ func TestVisit(t *testing.T) {
 			}
 			if tt.wantZero && result != 0 {
 				t.Errorf("expected zero value, got %d", result)
-			}
-		})
-	}
-}
-
-func TestSQLOperator(t *testing.T) {
-	tests := []struct {
-		name     string
-		op       token.Type
-		wildcard bool
-		want     string
-	}{
-		{"eq", token.Eq, false, "="},
-		{"neq", token.Neq, false, "!="},
-		{"gt", token.Gt, false, ">"},
-		{"gte", token.Gte, false, ">="},
-		{"lt", token.Lt, false, "<"},
-		{"lte", token.Lte, false, "<="},
-		{"wildcard", token.Eq, true, "LIKE"},
-		{"default", token.Range, false, "="},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			if got := SQLOperator(tt.op, tt.wildcard); got != tt.want {
-				t.Errorf("got %q, want %q", got, tt.want)
-			}
-		})
-	}
-}
-
-func TestWildcardToLike(t *testing.T) {
-	tests := []struct {
-		name, pattern, want string
-	}{
-		{"prefix", "John*", "John%"},
-		{"suffix", "*yota", "%yota"},
-		{"contains", "*test*", "%test%"},
-		{"escape percent", "100%", `100\%`},
-		{"escape underscore", "under_score", `under\_score`},
-		{"no wildcard", "plain", "plain"},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			if got := WildcardToLike(tt.pattern); got != tt.want {
-				t.Errorf("got %q, want %q", got, tt.want)
 			}
 		})
 	}

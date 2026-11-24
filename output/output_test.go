@@ -296,3 +296,47 @@ func (f *countFormatter) Format(w io.Writer, expr ast.Expression, _ Options) err
 	_, err := fmt.Fprintf(w, "%d", count)
 	return err
 }
+
+// TestFormatters_ValueExprIsAnErrorNotSilentNullOrPanic pins the fix for a
+// value-domain root reaching the predicate formatters. Before, AsJSON emitted a
+// bare "null" with no error and AsTree dereferenced a nil root and panicked.
+// Both must now report a clear error. A value expression comes from
+// parser.ParseValue or eval.ValueProgram.AST(), both public.
+func TestFormatters_ValueExprIsAnErrorNotSilentNullOrPanic(t *testing.T) {
+	valueExpr, err := parser.ParseValue("now()-7d", 0)
+	if err != nil {
+		t.Fatalf("parse value: %v", err)
+	}
+	if _, err := AsJSON(valueExpr); err == nil {
+		t.Error("AsJSON(valueExpr) returned no error; a value root must not encode as null")
+	}
+	if _, err := AsTree(valueExpr); err == nil {
+		t.Error("AsTree(valueExpr) returned no error; a value root must not panic or print blank")
+	}
+	// A normal predicate still formats without error.
+	if _, err := AsJSON(parse(t, "state=draft")); err != nil {
+		t.Errorf("AsJSON(predicate) errored: %v", err)
+	}
+}
+
+// TestFormatters_NilExprDoesNotPanic pins that a nil expression is handled
+// gracefully by both formatters instead of crashing the caller's goroutine.
+// AsTree previously dereferenced a nil root and panicked; it must now behave
+// like AsJSON, which already encodes nil as "null".
+func TestFormatters_NilExprDoesNotPanic(t *testing.T) {
+	jsonOut, err := AsJSON(nil)
+	if err != nil {
+		t.Fatalf("AsJSON(nil) errored: %v", err)
+	}
+	if got := strings.TrimSpace(string(jsonOut)); got != "null" {
+		t.Errorf("AsJSON(nil) = %q, want null", got)
+	}
+
+	treeOut, err := AsTree(nil)
+	if err != nil {
+		t.Fatalf("AsTree(nil) errored: %v", err)
+	}
+	if got := strings.TrimSpace(string(treeOut)); got != "null" {
+		t.Errorf("AsTree(nil) = %q, want null", got)
+	}
+}
